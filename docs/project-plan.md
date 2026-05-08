@@ -2,17 +2,19 @@
 
 **Client:** Ci'erro Kennedy
 **Prepared by:** JD, The Codefoundry
-**Date:** 5 de mayo de 2026 
+**Date:** 5 de mayo de 2026
+**Last revised:** 2026-05-08 (post-discovery grilling — see `CONTEXT.md` and `docs/adr/`)
 
 ---
 
 ## Project Overview
 
-- A marketplace mobile app connecting parents with vetted caregivers, tutors, nannies, and providers (speech, ABA, therapy, and professional service specialists)
+- A two-sided marketplace mobile app connecting parents with vetted Providers — Babysitters, Tutors, Nannies, and Specialists (speech, ABA, occupational therapy, and other licensed clinical services)
 - Inclusive offering for families with neurodivergent and neurotypical children
-- Phase 1 services: babysitting, tutoring, nanny, and providers
-- Mobile app for parents and caregivers (iOS and Android) plus admin dashboard for the Our Haven team
-- Built on Flutter so a public web app can be added later from the same codebase
+- Phase 1 categories: **Babysitter, Tutor, Nanny, Specialist**
+- **Mobile app for Parents** (iOS and Android), **web portal for Providers**, plus admin dashboard for the Our Haven team
+- Built on Flutter so a public web app for Parents can be added later from the same codebase
+- **Launch jurisdiction: United Kingdom** (pending final client confirmation in Phase 0). Currency GBP; subject to UK GDPR, Data Protection Act 2018, PSD2/FCA Strong Customer Authentication, and UK-specific Provider classification law
 
 ---
 
@@ -27,9 +29,12 @@
 **Activities:**
 
 - Lock final feature list
-- Confirm Checkr (or alternative) as background check vendor and per-check cost
-- Research and confirm embedded video provider (Zoom, Google Meet, or alternative)
-- Confirm Stripe account type required (standard or Connect)
+- **Confirm UK as launch jurisdiction** (working assumption; if it changes, vendor and compliance work re-scopes)
+- **Confirm UK DBS verification vendor** (working assumption: uCheck) — Enhanced DBS + Children's Barred List
+- Confirm embedded video provider (working assumption: Daily.co — EU-region, GDPR-clean)
+- **Confirm Stripe Connect Express** as the account type (commission-skim marketplace model)
+- **Confirm DPO-as-a-service provider** (DPO Centre, GRCI Law, or alternative)
+- Confirm soft launch city
 - Brand assets handoff from Ci'erro's marketing person
 - Draft 2-3 distinct design directions
 
@@ -43,54 +48,74 @@
 **Activities:**
 
 - Build full Figma prototype based on chosen design direction
-- Map every screen for caregiver web portal, parent mobile app, and admin dashboard
+- Map every screen for Provider web portal, Parent mobile app, and admin dashboard
 - Finalize project plan with hard dates
 - Deliver final fixed-price quote based on what is actually being built
 
 ---
 
-### Phase 2 — Caregiver Web Portal & Backend Foundation (Weeks 3–6)
+### Phase 2 — Provider Web Portal & Backend Foundation (Weeks 3–7)
 
-- **Demo:** Working caregiver sign-up flow on staging
-- **Deliverable:** Zoom call walkthrough where Ci'erro creates a test caregiver account, uploads documents, completes a real Checkr background check, and reviews the admin dashboard
+> Timeline expanded from 4 weeks to 5 weeks to absorb differentiated Specialist verification, VAT/Stripe Tax setup, and Provider-side notification plumbing.
 
-**Activities:**
-
-- Caregiver sign-up flow
-- Caregiver verification: email verification, phone verification, ID upload, background check via Checkr
-- Profile builder (babysitter, tutor, nanny, provider categories)
-- Document upload for certifications
-- Checkr API integration for background checks
-- Admin dashboard v1 (caregiver review queue with approve/reject, plus basic metrics: sign-ups, active subscriptions, cancellations, bookings)
-- Stripe subscription page on web
-- Authentication
-
----
-
-### Phase 3 — Parent Mobile App, Search & Booking (Weeks 7–9)
-
-- **Demo:** End-to-end parent journey on TestFlight
-- **Deliverable:** TestFlight (iOS) and Google Play Internal Testing (Android) builds installed on Ci'erro's phone (if no developer accounts yet, will send an APK) plus Loom video walkthrough showing parent sign-up → search → preview → subscribe → message → book → pay
+- **Demo:** Working Provider sign-up flow on staging
+- **Deliverable:** Zoom call walkthrough where Ci'erro creates a test Provider account, uploads documents, completes a real DBS check, and reviews the admin dashboard
 
 **Activities:**
 
-- Flutter parent app build
-- Family account with multiple child profiles (one parent account holds all children — each child has their own profile with age, special needs flags, and notes)
-- Parent verification: email verification and phone verification at sign-up; verified payment method required before booking (card name must match account name)
-- Location-based search with filters
-- Preview gating (1-2 caregivers visible without subscription)
-- Standard encrypted messaging (in transit and at rest) with number/word detection — Our Haven team can access message content for fraud detection and safety
-- Booking flow
-- In-app payment via Stripe web redirect
-- Two-way ratings
-- Caregivers cannot import reviews from other platforms — all caregivers start fresh
-- App feedback collection from parents after first booking (incentive structure to be defined)
-- Video call scheduling for parent-caregiver interviews (embedded third-party video — provider TBD)
-- Promotions system: discount codes, referral system, and targeted promotions (final scope to be confirmed during discovery)
+- Provider sign-up flow with **category-aware document set** (Babysitter / Tutor / Nanny / Specialist)
+- Provider Verification: email verification, phone verification, government ID upload, **Enhanced DBS + Children's Barred List check** via the chosen UK DBS vendor (per-check cost ~£40–55 + small platform markup, paid by the Provider at sign-up)
+- **Specialist additional verification:** professional registration number + issuing UK regulator (HCPC / GMC / NMC / UK-SBA), license document upload, liability insurance certificate — verified manually by admin against public registers (no third-party verification vendor in v1)
+- **Nanny Ofsted Voluntary Childcare Register:** optional certificate upload → admin verification → "Ofsted-registered" badge on profile
+- Profile builder, including Rate setting (hourly + optional per-child surcharge for Babysitter/Nanny; per-session for Specialist), Availability calendar, certifications upload
+- Stripe Connect Express onboarding for Providers
+- **Stripe Tax integration** for Subscription and Commission VAT computation
+- **VAT registration** plumbing (voluntary registration prior to launch)
+- Admin dashboard v1: Provider review queue (DBS results, license verification for Specialists, Ofsted certificate verification, approve/reject), basic metrics (sign-ups, active Subscriptions, cancellations, Bookings)
+- Trust & Safety admin role with audit-logged thread access (flagged-thread queue + on-demand investigation access)
+- Authentication (Firebase Auth, EU region): email/password + Sign in with Google for Provider web portal; admin TOTP MFA mandatory; Provider step-up MFA on payout-sensitive actions
+- Provider-side notification plumbing: web push + email (SendGrid) + SMS (Twilio) for Booking-request, cancellation, and session-reminder events
 
 ---
 
-### Phase 4 — Testing, App Store Submission & Soft Launch (Weeks 10–11)
+### Phase 3 — Parent Mobile App, Search & Booking (Weeks 8–11)
+
+> Timeline expanded from 3 weeks to 4 weeks to absorb the notification matrix, Article 9 consent flow, embedded video, and the full Booking lifecycle (request-to-accept + Availability + Session confirmation + dispute path).
+
+- **Demo:** End-to-end Parent journey on TestFlight
+- **Deliverable:** TestFlight (iOS) and Google Play Internal Testing (Android) builds installed on Ci'erro's phone (if no developer accounts yet, will send an APK) plus Loom video walkthrough showing Parent sign-up → search → preview → subscribe → message → book → pay
+
+**Activities:**
+
+- Flutter Parent app build
+- Parent account with multiple Child profiles (one Parent account holds all Children — each Child has their own profile with age, special-needs flags, and notes)
+- **Article 9 explicit consent flow** at sign-up for processing special-needs flags / notes (special category data under UK GDPR)
+- Authentication (Firebase Auth, EU region): Sign in with Apple + Sign in with Google + email/password; phone verified once at sign-up; device-trust SMS OTP only on new-device or suspicious sign-in
+- Parent verification at sign-up (email + phone) and **payment method capture with cardholder-name soft-signal fraud check** (mismatch flags the account for additional review on early Bookings; does not hard-block)
+- Location-based search with v1 filters: Category, postcode + radius (default 5 miles), date/time intersected with Provider Availability, hourly Rate ceiling, minimum star Rating, Ofsted-registered toggle (Nanny only), per-category specialty
+- Hybrid ranking: `0.5 × distance + 0.3 × rating + 0.2 × recency-active`
+- Preview gating (1–2 Providers visible without Subscription)
+- **Parent Subscription** billed only on web (Stripe-hosted page) — not via iOS/Android in-app purchase. Discount codes via Stripe Promotion Codes apply to Subscription only
+- Standard encrypted messaging (in transit and at rest) with regex-based **disintermediation detection** (phone numbers, email addresses, social handles, payment app names, address-like patterns) → matched substrings **redacted** in delivered message; unredacted original queued for Trust & Safety review. Disclosed in Privacy Policy
+- Booking lifecycle: **Availability calendar with block-on-request semantics**, **request-to-accept** flow (24h Provider response window, auto-decline on expiry), **single-child constraint for Tutor/Specialist** (multi-child supported for Babysitter/Nanny with optional per-child surcharge)
+- Payments: **authorize at booking, capture at session end** for hourly Bookings; capture at booking time for per-session Specialist Bookings. Stripe Connect `application_fee_amount` skims platform Commission from the Provider's Rate. SCA (3DS) per PSD2/FCA on every payment
+- **Session confirmation flow:** Provider proposes final hours; Parent has 24h to dispute, otherwise auto-confirms and Payout releases
+- **Cancellation policy** (single platform-wide rule for v1): free ≥24h before start, 50% inside 24h, 100% inside 2h or after start. Free Provider-initiated cancellation but tracked
+- **No-show flows** (Provider no-show → Parent full refund + admin flag; Parent no-show → Provider receives 50% of estimated total if uncontested)
+- **Dispute** flow with 7-day post-completion window (in-app, not email-the-team)
+- **Two-way Ratings** (1–5 stars + optional text) with 14-day window post-completion, **mutual blind reveal** (Airbnb-style), asymmetric display (Provider Ratings public with text; Parent Ratings visible only to Providers, aggregate-only, no text)
+- All Providers start fresh — no review imports from other platforms
+- App-feedback collection from Parents after first Booking (incentive structure to be confirmed by Ci'erro)
+- **Embedded video** (Daily.co) for Parent ↔ Provider interview calls
+- Notifications matrix:
+  - Parent: push + email for Booking accepted/declined/expired, new message, session start reminder, awaiting-confirmation notice; push + email + SMS for cancellations inside the 24h window
+  - Provider: SMS + email + web push for new Booking request (mandatory; no v1 opt-out); SMS for session start reminder; email for Payout received, DBS status, Verification approved
+  - Marketing/promotional messages require a separate explicit opt-in distinct from transactional
+- **Promotions:** discount codes only (Stripe Promotion Codes wrapper, applies to Subscription). Referral system and targeted/cohort promotions are deferred to post-launch and quoted separately
+
+---
+
+### Phase 4 — Testing, App Store Submission & Soft Launch (Weeks 12–13)
 
 - **Demo:** Apps live in App Store and Play Store
 - **Deliverable:** App deployed and live in the Apple App Store and Google Play Store, plus a Zoom call kickoff with Ci'erro to walk through the live production environment, admin dashboard access, and known issues log
@@ -99,36 +124,38 @@
 
 - QA testing across iOS and Android
 - Bug fixes
-- App Store submission (1-7 day review window)
+- App Store submission (1–7 day review window)
 - Play Store submission
 - Marketing assets for store listings
-- Soft launch marketing focused on one geographic area — the app is available everywhere from day one, but marketing and outreach concentrate on a single market to seed early caregiver and parent supply
+- **DPIA (Data Protection Impact Assessment)** authored by external DPO, reviewed by Ci'erro's lawyers, signed off before launch
+- **Vendor data-flow inventory** appendix to Privacy Policy
+- Soft launch marketing focused on the chosen UK city — the app is available throughout the UK from day one, but marketing and outreach concentrate on a single market to seed early Provider and Parent supply
 
 ---
 
 ### Phase 5 — Launch Support (60 days post-launch)
 
 - **Demo:** Weekly bug fix reports
-- **Deliverable:** Bi-Weekly Loom updates summarizing fixes shipped, plus a monthly Zoom call to review metrics from the admin dashboard and prioritize the next round of fixes
+- **Deliverable:** Bi-weekly Loom updates summarizing fixes shipped, plus a monthly Zoom call to review metrics from the admin dashboard and prioritize the next round of fixes
 
 **Activities:**
 
 - Monitor real-world usage
 - Fix bugs
 - Address App Store review issues if rejected
-- Monitor caregiver onboarding speed
+- Monitor Provider onboarding speed
 - Support Ci'erro through her marketing push
 
 ---
 
-### Phase 6 — Public Web App Build-Out (Weeks 12–14)
+### Phase 6 — Public Web App Build-Out (Weeks 14–16)
 
 - **Demo:** Public-facing web app live at Our Haven's domain
-- **Deliverable:** Web app deployed to production at the live domain, plus a Zoom call walkthrough showing parents and caregivers signing up, logging in, and using the app from a browser
+- **Deliverable:** Web app deployed to production at the live domain, plus a Zoom call walkthrough showing Parents and Providers signing up, logging in, and using the app from a browser
 
 **Activities:**
 
-- Spin up web build from existing Flutter codebase
+- Spin up web build from existing Flutter codebase (Parent web experience; Provider web portal already exists from Phase 2)
 - Adapt layouts for desktop and tablet screens
 - Connect to existing backend, authentication, and Stripe flows
 - QA across major browsers (Chrome, Safari, Firefox, Edge)
@@ -151,9 +178,13 @@
 - Third-party service costs paid directly by Ci'erro:
     - Apple Developer account (~$99/year)
     - Google Play Developer account (~$25 one-time)
-    - $Checkr per-check fees (passed through to caregivers with platform markup)
-    - Stripe transaction fees (standard rates)
-    - Hosting and infrastructure costs (estimated separately at end of discovery)
+    - DBS per-check fees (~£40–55, passed through to Providers with platform markup)
+    - Stripe transaction fees (standard rates) + Stripe Tax (~0.5% per transaction) + Stripe Connect Express
+    - Daily.co per-participant-minute fees (~$0.004/min/participant)
+    - Twilio SMS fees (~£0.04/SMS UK)
+    - SendGrid email (volume-based)
+    - DPO-as-a-service retainer (~£300/month)
+    - Hosting and infrastructure costs (estimated separately at end of discovery; UK/EU region required)
 
 ---
 
@@ -162,11 +193,18 @@
 - Scope locked at end of Phase 1
 - Any new features after Phase 1 require a written change order with separate quote
 - Items explicitly out of scope for v1:
-    - AI-generated parent profiles from caregiver reviews
-    - Custom matching/recommendation algorithm
-    - Custom in-app video call feature (embedded third-party video calls are in v1; a fully integrated custom video solution is a future add-on, quoted separately)
+    - AI-generated parent profiles from Provider reviews
+    - Custom matching/recommendation algorithm (v1 uses the hybrid scoring formula above)
+    - Custom in-app video call feature (Daily.co embedded video is in v1; a fully integrated custom video solution is a future add-on, quoted separately)
     - Deep user analytics and behavioural tracking (basic metrics in v1; user flow analytics deferred until key metrics are defined)
-    
+    - Provider mobile app (Provider portal is web-only in v1 — see ADR-0002)
+    - Live-in / salaried Nanny contract abstraction (Nannies in v1 are modeled as long-engagement hourly Bookings)
+    - Per-Provider cancellation policies (single platform-wide policy in v1)
+    - Referral system and targeted/cohort promotions
+    - Editorial / featured search slots and admin-driven Provider boosting
+    - Provider gender as a search filter (UK protected characteristic — deferred pending product/legal review)
+    - Automated Specialist license verification via third-party vendor (manual admin verification in v1)
+    - In-app notification inbox
 
 ---
 
@@ -176,17 +214,23 @@ These items must be delivered on time or the timeline shifts:
 
 - Brand assets (fonts, colors, logo files) by end of Phase 0
 - Apple Developer and Google Play accounts registered and verified by end of Week 2
-- Stripe account set up by end of Week 2 (account type — standard or Connect — to be confirmed by JD)
-- Privacy Policy drafted by Ci'erro's lawyers before Phase 4 launch (must include disclosure that the team can access message content)
+- Stripe account set up by end of Week 2 (Stripe Connect Express)
+- **VAT registration** (voluntary, before launch) — accountant action
+- **DPO engagement** confirmed by end of Phase 1
+- **Soft launch city decision** by end of Phase 0
+- **App-feedback-after-first-booking incentive structure** decision by end of Phase 1
+- **UK launch confirmation** (or alternative jurisdiction call) by end of Phase 0
+- Privacy Policy drafted by Ci'erro's lawyers before Phase 4 launch (must include disclosure that the Trust & Safety team can access message content, plus the vendor data-flow inventory and Article 9 consent text)
 - Lawyer sign-off on Terms of Service before Phase 4 launch
-- Caregiver classification language drafted by Ci'erro's lawyers before launch
-- Background check vendor decision confirmed by JD during Phase 0
+- **UK Provider classification language** drafted by Ci'erro's lawyers before launch (worker / self-employed / employee posture)
+- DBS verification vendor decision confirmed by JD during Phase 0
 
 ---
 
 ## Timeline Summary
 
-- **Total project length:** 14 weeks from contract signing to web app live (11 weeks to mobile app stores, plus 3 weeks for web app build-out)
+> **Total project length: 16 weeks** from contract signing to web app live (13 weeks to mobile app stores, plus 3 weeks for web app build-out). This is **2 weeks longer** than the original 14-week estimate; the expansion absorbs the discovery output (UK-specific verification, full Booking lifecycle, GDPR/DPIA work, notification matrix).
+
 - **Plus:** 60 days of launch support after mobile go-live
 - **Plus:** Optional ongoing maintenance after launch support ends
 
@@ -194,8 +238,8 @@ These items must be delivered on time or the timeline shifts:
 
 - Phase 0 demo (end of Week 1)
 - Phase 1 demo and final quote (end of Week 2)
-- Phase 2 demo (end of Week 6)
-- Phase 3 demo on TestFlight (end of Week 9)
-- App Store submission (Week 10)
-- Mobile apps live in stores (end of Week 11)
-- Web app live (end of Week 14)
+- Phase 2 demo (end of Week 7)
+- Phase 3 demo on TestFlight (end of Week 11)
+- App Store submission (Week 12)
+- Mobile apps live in stores (end of Week 13)
+- Web app live (end of Week 16)
