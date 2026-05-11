@@ -261,7 +261,17 @@ The codebase is greenfield Flutter (only `lib/main.dart` exists today). There is
 
 ## Further Notes
 
-- **Items still requiring Ci'erro / Phase 0 input:** Miami / Florida launch confirmation; soft-launch neighborhood emphasis within Miami-Dade (or tri-county Dade/Broward/Palm Beach); Subscription price (USD); Commission percentage (target 15–20%); final background-check vendor pick (working assumption Checkr); final US privacy counsel pick; app-feedback-after-first-booking incentive structure; Florida Department of Revenue sales-tax registration call (counsel-confirmed).
+- **Items still requiring Ci'erro / Phase 0 input** (questions to ask the client):
+  1. Do you confirm Miami / Florida as the v1 launch jurisdiction, with adjacent US states as a Phase 2 add via per-state compliance adapters?
+  2. For the soft launch, should we concentrate supply and demand on Miami-Dade only, or open the launch radius to tri-county (Miami-Dade / Broward / Palm Beach) from day one?
+  3. If Miami-Dade only, are there specific neighborhoods (e.g. Brickell, Coral Gables, Coconut Grove, Doral, Aventura) you want us to seed first?
+  4. What monthly Parent Subscription price (USD) do you want to launch with, and do you want an annual option at launch or post-launch?
+  5. What Commission percentage should we skim per Booking via Stripe Connect (our working range is 15–20%)?
+  6. Do you approve Checkr as the v1 background-check vendor for Florida Level 2 screening, or do you want us to evaluate alternatives (e.g. Sterling, GoodHire) before contracting?
+  7. Which US privacy counsel firm do you want to engage for the PIA, Privacy Policy, ToS, and 1099 Provider classification language — and by when can we get them retained so the pre-launch deliverables aren't blocked?
+  8. What incentive (if any) do you want to offer Parents for leaving feedback after their first completed Booking — account credit, discount on next Subscription cycle, or no incentive in v1?
+  9. Has counsel confirmed our Florida Department of Revenue sales-tax registration position (i.e. whether marketplace Commission and/or Provider services are taxable under FL law), and if not, when can we get that call scheduled?
+  10. Do you want a launch promo discount code wired up for the Subscription at go-live, and if so what value (e.g. first month free, 50% off month one)?
 - **Mandatory pre-launch deliverables:** PIA (Privacy Impact Assessment, FDBR data-protection-assessment-aligned) authored by US privacy counsel and reviewed by Ci'erro's lawyers; Privacy Policy with vendor data-flow inventory appendix and sensitive-information consent text (COPPA-aware + HIPAA-adjacent); Terms of Service signed off by lawyers; US Provider classification language (1099 independent contractor, IRS common-law test + Florida factors) drafted by lawyers; FL Department of Revenue position confirmed; Stripe Connect Express US account active and Stripe Tax wired up; Apple Developer + Google Play Developer accounts active; US data residency configured on every vendor.
 - **Timeline (per the rewritten project plan):** 16 weeks contract-to-web-app-live (13 weeks to mobile stores + 3 weeks for web), plus 60-day launch-support window.
 - **Notification-channel costs to model post-launch:** Twilio SMS to US numbers at ~$0.0075/SMS plus carrier fees is the heaviest variable cost (Provider Booking-request SMS is mandatory in v1); budget ~$100/month in v1 with a re-evaluation gate above that. US SMS is materially cheaper than the UK baseline the original plan assumed.
