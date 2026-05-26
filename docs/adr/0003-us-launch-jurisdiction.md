@@ -1,6 +1,6 @@
 # Miami/Florida as launch jurisdiction; multi-state pluggability where it pays for itself
 
-**Status:** accepted (2026-05-11, supersedes the UK framing accepted 2026-05-08), *pending final client confirmation in Phase 0*
+**Status:** **superseded by ADR-0009 (2026-05-26) — v1 now launches as a US-national marketplace from day one with per-state compliance adapters as core deliverables; the Florida soft-launch concentration is dropped.** Previously: accepted (2026-05-11, supersedes the UK framing accepted 2026-05-08). Background-check sub-decision partially superseded 2026-05-19 by ADR-0007.
 
 > Historical note: this ADR previously named the United Kingdom as the launch jurisdiction (DBS / HCPC / Ofsted VCR / UK GDPR / GBP / PSD2-FCA SCA / UK VAT). On 2026-05-11 the launch jurisdiction pivoted to **Miami, Florida**, with Florida statewide compliance built in and design hooks for near-term US expansion. UK references in this ADR have been rewritten in place rather than superseded with a new ADR.
 
@@ -14,7 +14,7 @@ The launch jurisdiction is not a cosmetic detail — it dictates the background-
 
 **v1 launches with Miami, Florida as the soft-launch market and Florida statewide compliance configured.** Currency is **USD**. The technical and compliance design is shaped for Florida regulation, with **state-pluggable compliance modules** where the marginal cost of pluggability is low, so that adding a second state in Phase 2 is a configuration exercise rather than a re-platforming exercise.
 
-- **Background check:** **Florida Level 2 Background Screening** (FBI + FDLE fingerprint-based check, against the FL Care Provider Background Screening Clearinghouse maintained by AHCA and DCF under Fla. Stat. §§ 402.305 / 402.3055 / 435.04), plus National Sex Offender Registry check. Run via **Checkr** (working assumption confirmed 2026-05-11), which offers Level 2 fingerprint workflows, childcare-specific packages, and a mature US-marketplace API. Final vendor reconfirmed in Phase 0. The background-check integration module is built behind a vendor-agnostic interface so a second state's regime can be swapped in without touching the Verification workflow's state machine.
+- **Background check (rewritten 2026-05-19 — see ADR-0007):** **Checkr's standard package** (county criminal 7-year + national criminal database + national sex offender registry + SSN trace). ~$30 per check, charged at **$35** to the Provider. This is **marketplace-grade**, not statutory Florida Level 2. Statutory FL Level 2 (FBI + FDLE fingerprint, AHCA/DCF clearinghouse, Fla. Stat. §§ 402.305 / 402.3055 / 435.04) was the original v1 choice but does not actually apply to independent in-home Providers and is incompatible with the client's stated $35 cost target. The background-check integration module is built behind a vendor-agnostic interface so a different vendor — or a future voluntary upgrade to statutory Level 2 — is a configuration change rather than a rebuild.
 - **Specialist license verification:** manual admin verification against Florida public registers via the **FL Department of Health (DOH) MQA license verification portal** and the **FL Department of Business and Professional Regulation (DBPR)** where applicable:
   - **Speech-Language Pathologists** → FL Board of Speech-Language Pathology and Audiology (DOH).
   - **Occupational Therapists** → FL Board of Occupational Therapy Practice (DOH).
@@ -34,7 +34,7 @@ If the launch base changes (e.g., to a different state, or to multi-state simult
 
 ## Why
 
-- **Florida has a well-defined childcare background-check regime** (Level 2 via FDLE / AHCA Clearinghouse) and a major commercial vendor (Checkr) with native marketplace integration. No realistic alternative for child-facing supply in this state.
+- **Florida has a well-defined childcare background-check regime** (statutory Level 2 via FDLE / AHCA Clearinghouse) and a major commercial vendor (Checkr) with native marketplace integration. v1 uses Checkr's *standard* package rather than the statutory regime — see ADR-0007 for that sub-decision — but the vendor choice and the multi-state pluggability rationale are unchanged.
 - **Florida has clean public license registers** (DOH MQA portal, DBPR portal) for manual Specialist verification — eliminates the need for a paid verification-vendor integration in v1, exactly as the UK alternative would have.
 - **US payment compliance is structurally simpler than the UK/EU.** No PSD2-mandated SCA on every transaction. 3DS becomes a fraud tool, not a compliance tool. Stripe Connect Express's US entity handles 1099-K reporting automatically. Stripe Tax handles state-by-state sales tax where it applies.
 - **Florida is comparatively contractor-friendly.** The 1099 independent-contractor structure for Providers carries less misclassification risk in FL than it would in (say) California. This makes Florida a sensible first-state for a marketplace whose supply economics depend on contractor status.
@@ -51,7 +51,7 @@ If the launch base changes (e.g., to a different state, or to multi-state simult
 
 ## Consequences
 
-- **Every Florida-specific design choice in `CONTEXT.md`** (FL Level 2 screening, DOH/DBPR boards, FDBR + COPPA + HIPAA framing, USD, FL sales tax model) is conditional on this ADR. A change in launch state is **not** a small change, but is **smaller** than a change of country thanks to the state-pluggable module design.
+- **Every Florida-specific design choice in `CONTEXT.md`** (DOH/DBPR Specialist boards, FDBR + COPPA + HIPAA framing, USD, FL sales tax model) is conditional on this ADR. The background-screening posture is **no longer Florida-specific** (it's vendor-grade Checkr, applicable in any US state — see ADR-0007). A change in launch state is **not** a small change, but is **smaller** than a change of country thanks to the state-pluggable module design.
 - Phase 0 carries a critical confirmation: Ci'erro must formally confirm Miami, Florida as the soft-launch market and Florida as the compliance jurisdiction. If she names a different state, the per-state adapter set re-points; the federal compliance design (HIPAA, COPPA, 1099-K, FDBR-style PIA) is reused with minor adjustments.
 - Future readers looking at the codebase and seeing Florida-specific vendor integrations should land on this ADR first to understand why the project does not appear locale-agnostic, and to find the per-state adapter contract.
 - Provider sign-up is geofenced to **Florida** at launch (not just Miami) — sign-up from an out-of-state address is rejected with a clear "we're not yet operating in [state]" message.

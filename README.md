@@ -17,7 +17,7 @@ The Provider portal and admin dashboard are **not** in this repo — they are we
 | Auth | Firebase Auth (US region) |
 | Database | PostgreSQL (Cloud SQL) — system of record; Firestore — real-time messaging fan-out |
 | Payments | Stripe Connect Express (US entity) — commission marketplace + Parent Subscription |
-| Background screening | Checkr — Florida Level 2 (FBI + FDLE fingerprint, NSOR) |
+| Background screening | Checkr — standard package (county criminal + national sex offender + SSN trace); see ADR-0007 |
 | Video | Daily.co (US rooms) |
 | Notifications | FCM (push), SendGrid (email), Twilio (SMS) |
 | Hosting | GCP Cloud Run — `us-east1` (default), `us-east4` (fallback); Firestore `nam5` |
@@ -68,9 +68,13 @@ flutter test
 Key ADRs:
 
 - **ADR-0001** — Marketplace billing: Stripe Connect Express + web-only Parent Subscription
-- **ADR-0002** — Provider portal is web-only in v1 (no Provider Flutter binary)
-- **ADR-0003** — Launch jurisdiction: Miami/Florida; state-pluggable compliance adapters for Phase 2 US expansion
+- **ADR-0002** — Provider portal is web-only in v1 (no Provider Flutter binary) — **superseded by ADR-0005**
+- **ADR-0003** — Launch jurisdiction: Miami/Florida; state-pluggable compliance adapters for Phase 2 US expansion (bg-check sub-decision **partially superseded by ADR-0007**)
 - **ADR-0004** — Backend stack (Node.js/TS) and cross-platform API (OpenAPI-first REST + codegen)
+- **ADR-0005** — Provider mobile companion supersedes the web-only v1 (one Flutter binary, role-aware shells)
+- **ADR-0006** — Job-posting marketplace + negotiable pricing via structured Offers (slot-pick path **superseded 2026-05-19** — Direct-Message + lazy Job materialisation replaces it)
+- **ADR-0007** — Background screening: Checkr standard package, not statutory Florida Level 2
+- **ADR-0008** — Embedded video calls via Daily.co — ad-hoc, in-chat, either party
 
 ## Compliance context
 

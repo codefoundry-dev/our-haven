@@ -1,6 +1,6 @@
 # Provider portal is web-only in v1; Provider mobile app deferred
 
-**Status:** accepted (2026-05-08)
+**Status:** superseded by [ADR-0005](./0005-provider-mobile-companion-supersedes-web-only.md) on 2026-05-18. Originally accepted 2026-05-08. The web portal remains the Provider system of record, but a mobile companion now also ships in v1; see ADR-0005 for the revised web/mobile split.
 
 ## Context
 
