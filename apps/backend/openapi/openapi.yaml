@@ -1,0 +1,217 @@
+openapi: 3.1.0
+info:
+  title: Our Haven API
+  version: 0.0.0
+  description: Our Haven v1 API — Parent + Provider mobile, Provider web portal,
+    admin dashboard. Source of truth per ADR-0004. US-region only.
+  license:
+    name: Proprietary
+components:
+  securitySchemes:
+    firebaseIdToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Firebase Auth ID token. Verified by firebase-admin on every request.
+  schemas: {}
+paths:
+  /v1/healthz:
+    get:
+      summary: Liveness probe
+      tags:
+        - health
+      description: Returns 200 as long as the process is up.
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum:
+                      - ok
+                  service:
+                    type: string
+                  version:
+                    type: string
+                required:
+                  - status
+                  - service
+                  - version
+                additionalProperties: false
+  /v1/readyz:
+    get:
+      summary: Readiness probe
+      tags:
+        - health
+      description: Checks Postgres + Firestore reachability. Returns 503 with
+        status=degraded if any dependency is unreachable.
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum:
+                      - ready
+                      - degraded
+                  checks:
+                    type: object
+                    properties:
+                      postgres:
+                        type: string
+                        enum:
+                          - ok
+                          - fail
+                      firestore:
+                        type: string
+                        enum:
+                          - ok
+                          - fail
+                    required:
+                      - postgres
+                      - firestore
+                    additionalProperties: false
+                required:
+                  - status
+                  - checks
+                additionalProperties: false
+        "503":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum:
+                      - ready
+                      - degraded
+                  checks:
+                    type: object
+                    properties:
+                      postgres:
+                        type: string
+                        enum:
+                          - ok
+                          - fail
+                      firestore:
+                        type: string
+                        enum:
+                          - ok
+                          - fail
+                    required:
+                      - postgres
+                      - firestore
+                    additionalProperties: false
+                required:
+                  - status
+                  - checks
+                additionalProperties: false
+  /v1/uploads/signed-url:
+    post:
+      summary: Create a v4 signed PUT URL for client-side GCS upload
+      tags:
+        - uploads
+      description: Returns a short-lived (5 min default) v4 signed URL the client uses
+        to PUT a file directly to GCS. Content-type and max size are enforced
+        via x-goog-content-length-range on the signed request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                kind:
+                  type: string
+                  enum:
+                    - id-doc
+                    - license-doc
+                    - insurance-doc
+                    - state-childcare-registration
+                    - avatar
+                contentType:
+                  type: string
+                  enum:
+                    - image/jpeg
+                    - image/png
+                    - application/pdf
+                contentLengthBytes:
+                  type: integer
+                  exclusiveMinimum: 0
+                  maximum: 20971520
+              required:
+                - kind
+                - contentType
+                - contentLengthBytes
+      security:
+        - firebaseIdToken: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  uploadUrl:
+                    type: string
+                    format: uri
+                  objectPath:
+                    type: string
+                  expiresAt:
+                    type: string
+                    format: date-time
+                    pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z))$
+                required:
+                  - uploadUrl
+                  - objectPath
+                  - expiresAt
+                additionalProperties: false
+        "400":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  field:
+                    type: string
+                required:
+                  - error
+                additionalProperties: false
+        "401":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  field:
+                    type: string
+                required:
+                  - error
+                additionalProperties: false
+servers:
+  - url: https://api.ourhaven.example
+    description: Production (us-east1)
+  - url: http://localhost:8080
+    description: Local development
+tags:
+  - name: health
+    description: Liveness and readiness probes
+  - name: uploads
+    description: Signed-URL helper for client-side GCS uploads

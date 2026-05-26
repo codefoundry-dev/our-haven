@@ -1,0 +1,21 @@
+{
+  "name": "@our-haven/domain",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pure-TS deep modules for Our Haven (Booking lifecycle, Pricing, Cancellation, Disintermediation, Search ranking, Rating reveal, Verification workflow, Retention planner). No DB/SDK imports — collaborators injected at the handler layer per ADR-0004.",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5"
+  }
+}

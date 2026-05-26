@@ -1,56 +1,71 @@
-# Our Haven — Parent Mobile App
+# Our Haven
 
-A React Native (Expo) application for the Parent-facing side of **Our Haven**, a two-sided marketplace connecting families in Miami/Florida with vetted childcare and child-development professionals — Babysitters, Tutors, Nannies, and Specialists (SLP, OT, ABA, and similar licensed clinical roles).
+Two-sided marketplace connecting US families with vetted childcare and child-development professionals — Caregivers (Babysitter / Tutor / Nanny) and Specialists (SLP, OT, ABA, psychology, and similar). **US-national launch from day one** per ADR-0009 (supersedes ADR-0003's Florida soft-launch).
 
-## What this repo is
+## Repo layout
 
-This is the **React Native + Expo codebase** for the Parent mobile app (iOS + Android). It ships search, messaging, booking, payments, and video interviews. A public Parent web build is added in Phase 6 from the same codebase via React Native Web.
+This repo is a **monorepo** holding every v1 surface:
 
-The Provider portal and admin dashboard are **not** in this repo — they are web-only surfaces backed by the same Node.js/TypeScript backend.
-
-## Architecture overview
+```
+our-haven/
+├── apps/
+│   ├── mobile/         React Native + Expo SDK 56 — Parent + Provider mobile app (Phase 3)
+│   ├── backend/        Node + TS + Fastify + OpenAPI + Postgres + Firestore (Phase 2)
+│   ├── provider-web/   Provider web portal — KYC, license uploads, payout mgmt (Phase 2, not yet scaffolded)
+│   └── admin/          Admin dashboard — verification queue, T&S, metrics (Phase 2, not yet scaffolded)
+├── packages/
+│   ├── openapi-types/  TS types generated from apps/backend/openapi/openapi.yaml — shared by all apps
+│   ├── domain/         Pure-TS deep modules (Booking lifecycle, Pricing, Cancellation, Disintermediation, Search ranking, Rating reveal, Verification workflow, Retention planner) — no SDK imports (ADR-0004)
+│   └── shared/         Cross-app shared utilities (US states enum, vocabulary constants)
+└── docs/               PRD, ADRs, jira breakdown, planning artefacts
+```
 
 | Layer | Technology |
 |---|---|
-| Mobile (Parent) | React Native + Expo (TypeScript), this repo |
-| Backend API | Node.js + TypeScript, OpenAPI-first REST |
-| Auth | Firebase Auth (US region) |
-| Database | PostgreSQL (Cloud SQL) — system of record; Firestore — real-time messaging fan-out |
+| Mobile (Parent + Provider) | React Native + Expo SDK 56 (TypeScript) — `apps/mobile` |
+| Provider web portal | TypeScript (TBD framework) — `apps/provider-web` |
+| Admin dashboard | TypeScript (TBD framework) — `apps/admin`, TOTP MFA on every sign-in |
+| Backend API | Node + TypeScript + Fastify, OpenAPI-first REST, ADR-0004 — `apps/backend` |
+| Auth | Firebase Auth (US identity pool) |
+| Database | PostgreSQL (Cloud SQL) — system of record; Firestore (`nam5`) — messaging fan-out only |
 | Payments | Stripe Connect Express (US entity) — commission marketplace + Parent Subscription |
-| Background screening | Checkr — standard package (county criminal + national sex offender + SSN trace); see ADR-0007 |
-| Video | Daily.co (US rooms) |
+| Tax | Stripe Tax — per-state nexus + taxability decisions on Subscription + Commission |
+| Background screening | Checkr — standard package; ADR-0007 |
+| Video | Daily.co (US rooms) — embedded, ad-hoc, either party; ADR-0008 |
 | Notifications | FCM (push), SendGrid (email), Twilio (SMS) |
-| Hosting | GCP Cloud Run — `us-east1` (default), `us-east4` (fallback); Firestore `nam5` |
-
-The app communicates with the backend over HTTPS REST using a generated TypeScript client (OpenAPI codegen). Live messaging events arrive via Firestore document listeners, not polled REST.
+| Hosting | GCP Cloud Run + Cloud SQL + Cloud Storage + Cloud Tasks + Cloud Scheduler — `us-east1` default, `us-east4` fallback |
 
 ## Getting started
 
-### Prerequisites
-
-- [Node.js](https://nodejs.org) (LTS) and npm
-- [Expo CLI](https://docs.expo.dev/get-started/installation/) — invoked via `npx expo`
-- Xcode (iOS) or Android Studio (Android) for native simulators; or the Expo Go app on a physical device
-- A Firebase project configured for the US region with the `google-services.json` / `GoogleService-Info.plist` files placed in the standard locations
-
-### Install dependencies
-
-```
+```bash
+# Once, from the repo root
 npm install
 ```
 
-### Run
+### Mobile (Expo SDK 56 — see https://docs.expo.dev/versions/v56.0.0/ before changing Expo config)
 
-```
-npm start
+```bash
+npm run mobile           # expo start
+npm run mobile:ios
+npm run mobile:android
+npm run mobile:web
 ```
 
-For a specific platform:
+### Backend
 
+```bash
+cp apps/backend/.env.example apps/backend/.env
+docker compose -f apps/backend/docker-compose.yml up -d   # local Postgres + Firestore emulator
+npm run backend                                            # http://localhost:8080  (Swagger UI at /docs)
+npm run backend:test
 ```
-npm run ios       # iOS simulator
-npm run android   # Android emulator
-npm run web       # Web (React Native Web)
+
+See `apps/backend/README.md` for full details.
+
+### Domain modules (pure-TS, no SDKs)
+
+```bash
+npm run domain:test
 ```
 
 ## Project documentation
@@ -58,21 +73,23 @@ npm run web       # Web (React Native Web)
 | Document | Purpose |
 |---|---|
 | [`CONTEXT.md`](CONTEXT.md) | Domain glossary — canonical terms used in code, schemas, and admin UI |
-| [`docs/prd/0001-our-haven-v1.md`](docs/prd/0001-our-haven-v1.md) | Full v1 PRD — problem, user stories, modules, compliance, out-of-scope |
-| [`docs/project-plan.md`](docs/project-plan.md) | Phase-by-phase delivery plan and timeline |
+| [`docs/prd/0001-our-haven-v1.md`](docs/prd/0001-our-haven-v1.md) | Full v1 PRD |
+| [`docs/jira-breakdown-draft.md`](docs/jira-breakdown-draft.md) | 5 phase epics + 60 stories with blockers + labels |
 | [`docs/adr/`](docs/adr/) | Architectural Decision Records |
+| [`DESIGN.md`](DESIGN.md) | Design system / visual direction |
 
 Key ADRs:
 
 - **ADR-0001** — Marketplace billing: Stripe Connect Express + web-only Parent Subscription
-- **ADR-0002** — Provider portal is web-only in v1 (no Provider mobile binary) — **superseded by ADR-0005**
-- **ADR-0003** — Launch jurisdiction: Miami/Florida; state-pluggable compliance adapters for Phase 2 US expansion (bg-check sub-decision **partially superseded by ADR-0007**)
-- **ADR-0004** — Backend stack (Node.js/TS) and cross-platform API (OpenAPI-first REST + codegen)
+- **ADR-0002** — Provider portal is web-only in v1 — **superseded by ADR-0005**
+- **ADR-0003** — Launch jurisdiction: Miami/Florida — **superseded by ADR-0009**
+- **ADR-0004** — Backend stack (Node + TS) and cross-platform API (OpenAPI-first REST + codegen)
 - **ADR-0005** — Provider mobile companion supersedes the web-only v1 (one mobile binary, role-aware shells)
-- **ADR-0006** — Job-posting marketplace + negotiable pricing via structured Offers (slot-pick path **superseded 2026-05-19** — Direct-Message + lazy Job materialisation replaces it)
+- **ADR-0006** — Job-posting marketplace + negotiable pricing via structured Offers
 - **ADR-0007** — Background screening: Checkr standard package, not statutory Florida Level 2
 - **ADR-0008** — Embedded video calls via Daily.co — ad-hoc, in-chat, either party
+- **ADR-0009** — US-national launch (supersedes ADR-0003)
 
 ## Compliance context
 
-Our Haven launches in **Florida** under a US sectoral compliance patchwork: FDBR, COPPA posture for children's data, HIPAA-adjacent prudence for special-needs notes, FIPA breach notification, and Florida sales-tax rules. Every vendor is pinned to a US region. See ADR-0003 and `CONTEXT.md` for details.
+Federal floor — COPPA, HIPAA-adjacent, FCRA, IRS (W-10 / 2441 / 1099-K), Title VII, CAN-SPAM, TCPA — plus a per-state-privacy-patchwork adapter layer (CCPA/CPRA, VCDPA, CPA, CTDPA, UCPA, FDBR, OCPA, TDPSA, and others phasing in). All personal data processed in US regions. PIA + Privacy Policy + ToS authored by US privacy counsel before launch (Phase 4). See `CONTEXT.md` § Privacy counsel / PIA / Data residency / Retention policy.

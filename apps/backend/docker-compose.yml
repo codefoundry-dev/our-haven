@@ -1,0 +1,40 @@
+# Local-only dev dependencies for the Our Haven backend.
+# Postgres mirrors Cloud SQL; Firestore emulator mirrors the nam5 Firestore
+# we use in prod (ADR-0004 §5).
+#
+# Start:    docker compose -f apps/backend/docker-compose.yml up -d
+# Stop:     docker compose -f apps/backend/docker-compose.yml down
+# Reset:    docker compose -f apps/backend/docker-compose.yml down -v
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: our-haven-postgres
+    environment:
+      POSTGRES_USER: our_haven
+      POSTGRES_PASSWORD: our_haven
+      POSTGRES_DB: our_haven_dev
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U our_haven -d our_haven_dev']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  firestore-emulator:
+    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:slim
+    container_name: our-haven-firestore-emulator
+    command: >
+      gcloud emulators firestore start
+      --host-port=0.0.0.0:8085
+      --quiet
+    ports:
+      - '8085:8085'
+    environment:
+      CLOUDSDK_CORE_PROJECT: our-haven-local
+
+volumes:
+  postgres-data:

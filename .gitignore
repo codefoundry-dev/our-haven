@@ -3,11 +3,32 @@
 # dependencies
 node_modules/
 
-# Expo
+# Expo (apps/mobile)
 .expo/
-dist/
-web-build/
+apps/mobile/dist/
+apps/mobile/web-build/
+apps/mobile/expo-env.d.ts
 expo-env.d.ts
+
+# TypeScript build artifacts
+**/dist/
+**/build/
+*.tsbuildinfo
+
+# Backend env / secrets
+apps/*/.env
+apps/*/.env.*
+!apps/*/.env.example
+apps/backend/credentials/
+apps/backend/.gcp/
+**/*-credentials.json
+**/service-account*.json
+
+# Generated OpenAPI artifacts are committed (machine-generated source).
+# CI runs `npm run openapi:generate` and fails on diff (see openapi:check).
+
+# Local Docker volumes
+**/.docker-data/
 
 # Native
 .kotlin/
@@ -25,19 +46,23 @@ expo-env.d.ts
 npm-debug.*
 yarn-debug.*
 yarn-error.*
+pnpm-debug.*
 
-# macOS
+# OS
 .DS_Store
-*.pem
+Thumbs.db
 
-# local env files
-.env*.local
+# Editor
+.idea/
+*.swp
+*.swo
 
-# typescript
-*.tsbuildinfo
-
-example
-
-# generated native folders
+# Generated native folders (Expo continuous prebuild)
 /ios
 /android
+apps/mobile/ios
+apps/mobile/android
+
+# Misc
+*.pem
+example
