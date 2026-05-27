@@ -24,6 +24,7 @@ export const uploadRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
     '/uploads/signed-url',
     {
+      preHandler: app.requireAuth(),
       schema: {
         tags: ['uploads'],
         summary: 'Create a v4 signed PUT URL for client-side GCS upload',
@@ -39,9 +40,7 @@ export const uploadRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (req, reply) => {
-      // TODO(2.2): replace placeholder ownerId with verified Firebase Auth subject
-      // once @fastify/auth + firebase-admin token verification middleware lands.
-      const ownerId = 'anonymous';
+      const ownerId = req.principal!.uid;
 
       try {
         const result = await app.deps.storage.createSignedUploadUrl({

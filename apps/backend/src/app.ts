@@ -16,6 +16,8 @@ import type { Db } from '@/db/kysely.js';
 import type { FirebaseHandles } from '@/gcp/firebase.js';
 import type { StorageHandles } from '@/gcp/storage.js';
 import type { TasksHandles } from '@/gcp/tasks.js';
+import { authPlugin } from '@/plugins/auth.js';
+import { authRoutes } from '@/routes/auth.js';
 import { healthRoutes } from '@/routes/health.js';
 import { uploadRoutes } from '@/routes/uploads.js';
 
@@ -71,6 +73,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       tags: [
         { name: 'health', description: 'Liveness and readiness probes' },
         { name: 'uploads', description: 'Signed-URL helper for client-side GCS uploads' },
+        { name: 'auth', description: 'Role claims, email-OTP fallback, step-up MFA grants' },
       ],
       components: {
         securitySchemes: {
@@ -91,7 +94,10 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     uiConfig: { docExpansion: 'list' },
   });
 
+  await app.register(authPlugin);
+
   await app.register(healthRoutes, { prefix: '/v1' });
+  await app.register(authRoutes, { prefix: '/v1' });
   await app.register(uploadRoutes, { prefix: '/v1' });
 
   return app;

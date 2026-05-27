@@ -116,6 +116,305 @@ paths:
                   - status
                   - checks
                 additionalProperties: false
+  /v1/auth/role-claim:
+    post:
+      summary: Set the permanent role + kind on the authenticated Firebase user
+      tags:
+        - auth
+      description: Idempotent. Rejects with 409 if the user already has a role claim
+        that differs from the request. Once set, role is permanent per
+        CONTEXT.md § Authentication.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role:
+                  type: string
+                  enum:
+                    - parent
+                    - provider
+                kind:
+                  type: string
+                  enum:
+                    - caregiver
+                    - specialist
+                caregiverCategory:
+                  type: string
+                  minLength: 1
+                  maxLength: 64
+                specialty:
+                  type: string
+                  minLength: 1
+                  maxLength: 64
+              required:
+                - role
+      security:
+        - firebaseIdToken: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  role:
+                    type: string
+                    enum:
+                      - parent
+                      - provider
+                  kind:
+                    anyOf:
+                      - type: string
+                        enum:
+                          - caregiver
+                          - specialist
+                      - type: "null"
+                required:
+                  - role
+                  - kind
+                additionalProperties: false
+        "400":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  reason:
+                    type: string
+                required:
+                  - error
+                additionalProperties: false
+        "401":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  reason:
+                    type: string
+                required:
+                  - error
+                additionalProperties: false
+        "409":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  reason:
+                    type: string
+                required:
+                  - error
+                additionalProperties: false
+  /v1/auth/email-otp/issue:
+    post:
+      summary: Issue an email-OTP for the authenticated user
+      tags:
+        - auth
+      description: Email-OTP fallback path per CONTEXT.md § MFA posture — used for
+        pre-paywall Parents without a phone on file. The notifier is a dev stub
+        today; SendGrid wiring lands in OH-115 (Notifications dispatcher).
+      security:
+        - firebaseIdToken: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  expiresAt:
+                    type: string
+                    format: date-time
+                    pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z))$
+                required:
+                  - id
+                  - expiresAt
+                additionalProperties: false
+        "400":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  reason:
+                    type: string
+                required:
+                  - error
+                additionalProperties: false
+        "401":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  reason:
+                    type: string
+                required:
+                  - error
+                additionalProperties: false
+  /v1/auth/email-otp/verify:
+    post:
+      summary: Verify an email-OTP and open a step-up window
+      tags:
+        - auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code:
+                  type: string
+                  pattern: ^\d{6}$
+              required:
+                - code
+      security:
+        - firebaseIdToken: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  secondFactor:
+                    type: string
+                    enum:
+                      - totp
+                      - phone
+                  grantedAt:
+                    type: string
+                    format: date-time
+                    pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z))$
+                  expiresAt:
+                    type: string
+                    format: date-time
+                    pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z))$
+                required:
+                  - secondFactor
+                  - grantedAt
+                  - expiresAt
+                additionalProperties: false
+        "400":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  reason:
+                    type: string
+                required:
+                  - error
+                additionalProperties: false
+        "401":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  reason:
+                    type: string
+                required:
+                  - error
+                additionalProperties: false
+  /v1/auth/step-up/refresh:
+    post:
+      summary: Record a fresh MFA challenge from a Firebase MFA-extended ID token
+      tags:
+        - auth
+      description: Called by clients after completing Firebase TOTP or phone MFA.
+        Reads sign_in_second_factor from the verified token and opens a step-up
+        window. Rejects when the ID token was not minted from an MFA-extended
+        sign-in.
+      security:
+        - firebaseIdToken: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  secondFactor:
+                    type: string
+                    enum:
+                      - totp
+                      - phone
+                  grantedAt:
+                    type: string
+                    format: date-time
+                    pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z))$
+                  expiresAt:
+                    type: string
+                    format: date-time
+                    pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z))$
+                required:
+                  - secondFactor
+                  - grantedAt
+                  - expiresAt
+                additionalProperties: false
+        "400":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  reason:
+                    type: string
+                required:
+                  - error
+                additionalProperties: false
+        "401":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  reason:
+                    type: string
+                required:
+                  - error
+                additionalProperties: false
   /v1/uploads/signed-url:
     post:
       summary: Create a v4 signed PUT URL for client-side GCS upload
@@ -215,3 +514,5 @@ tags:
     description: Liveness and readiness probes
   - name: uploads
     description: Signed-URL helper for client-side GCS uploads
+  - name: auth
+    description: Role claims, email-OTP fallback, step-up MFA grants
