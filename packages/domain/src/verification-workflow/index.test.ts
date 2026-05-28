@@ -22,6 +22,7 @@ const EMPTY_FACTS: VerificationFacts = {
   screeningInitiatedAt: null,
   screeningPassedAt: null,
   licenseVerifiedAt: null,
+  connectAccountReadyAt: null,
   rejectedAt: null,
 };
 
@@ -40,6 +41,7 @@ const factsArb: fc.Arbitrary<VerificationFacts> = fc.record({
   screeningInitiatedAt: dateOrNull,
   screeningPassedAt: dateOrNull,
   licenseVerifiedAt: dateOrNull,
+  connectAccountReadyAt: dateOrNull,
   rejectedAt: dateOrNull,
 });
 
@@ -92,7 +94,25 @@ describe('computeVerificationState — happy-path step-by-step', () => {
     });
   }
 
-  it('caregiver activates after screening passes', () => {
+  it('caregiver activates after screening passes + Stripe Connect ready', () => {
+    const state = computeVerificationState({
+      kind: 'caregiver',
+      state: 'TX',
+      supportedStates: ALL_STATES_SET,
+      facts: {
+        ...EMPTY_FACTS,
+        emailConfirmedAt: ANY_DATE,
+        phoneConfirmedAt: ANY_DATE,
+        idDocUploadedAt: ANY_DATE,
+        screeningInitiatedAt: ANY_DATE,
+        screeningPassedAt: ANY_DATE,
+        connectAccountReadyAt: ANY_DATE,
+      },
+    });
+    expect(state).toBe('activated');
+  });
+
+  it('caregiver stalls at connect-pending if Stripe Connect is not yet ready (OH-110 gate)', () => {
     const state = computeVerificationState({
       kind: 'caregiver',
       state: 'TX',
@@ -106,7 +126,7 @@ describe('computeVerificationState — happy-path step-by-step', () => {
         screeningPassedAt: ANY_DATE,
       },
     });
-    expect(state).toBe('activated');
+    expect(state).toBe('connect-pending');
   });
 
   it('specialist in supported state reaches license-pending after screening', () => {
@@ -126,7 +146,26 @@ describe('computeVerificationState — happy-path step-by-step', () => {
     expect(state).toBe('license-pending');
   });
 
-  it('specialist activates after license is verified', () => {
+  it('specialist activates after license is verified + Stripe Connect ready', () => {
+    const state = computeVerificationState({
+      kind: 'specialist',
+      state: 'FL',
+      supportedStates: FL_NY_ONLY,
+      facts: {
+        ...EMPTY_FACTS,
+        emailConfirmedAt: ANY_DATE,
+        phoneConfirmedAt: ANY_DATE,
+        idDocUploadedAt: ANY_DATE,
+        screeningInitiatedAt: ANY_DATE,
+        screeningPassedAt: ANY_DATE,
+        licenseVerifiedAt: ANY_DATE,
+        connectAccountReadyAt: ANY_DATE,
+      },
+    });
+    expect(state).toBe('activated');
+  });
+
+  it('specialist with verified license but no Stripe Connect ready stalls at connect-pending', () => {
     const state = computeVerificationState({
       kind: 'specialist',
       state: 'FL',
@@ -141,7 +180,7 @@ describe('computeVerificationState — happy-path step-by-step', () => {
         licenseVerifiedAt: ANY_DATE,
       },
     });
-    expect(state).toBe('activated');
+    expect(state).toBe('connect-pending');
   });
 
   it('specialist in unsupported state routes to holding after screening', () => {
@@ -173,6 +212,7 @@ describe('computeVerificationState — happy-path step-by-step', () => {
         screeningInitiatedAt: ANY_DATE,
         screeningPassedAt: ANY_DATE,
         licenseVerifiedAt: ANY_DATE,
+        connectAccountReadyAt: ANY_DATE,
         rejectedAt: ANY_DATE,
       },
     });
@@ -267,9 +307,10 @@ describe('computeVerificationState — property-based', () => {
       'screening-passed': 5,
       'license-pending': 6,
       'license-verified': 7,
-      activated: 8,
+      'connect-pending': 8, // Stripe Connect Express gate (OH-110) — sits just below activated
+      activated: 9,
       'holding-state-not-supported': 6, // a "stuck at license-board" sibling of license-pending
-      rejected: 9, // terminal, sits at the top — adding any fact when rejected stays rejected
+      rejected: 10, // terminal, sits at the top — adding any fact when rejected stays rejected
     };
 
     const factOrder: Array<keyof VerificationFacts> = [
@@ -279,6 +320,7 @@ describe('computeVerificationState — property-based', () => {
       'screeningInitiatedAt',
       'screeningPassedAt',
       'licenseVerifiedAt',
+      'connectAccountReadyAt',
     ];
 
     fc.assert(
