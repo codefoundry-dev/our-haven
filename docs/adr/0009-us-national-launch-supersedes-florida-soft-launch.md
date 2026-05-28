@@ -10,7 +10,7 @@ The vendor and platform choices that ADR-0003 made are mostly orthogonal to sing
 
 - **Checkr standard-package screening** (ADR-0007) is multi-state out of the box. Vendor unchanged.
 - **Stripe Connect Express, US entity** + **Stripe Tax** is the right marketplace billing rail regardless of whether v1 lights up one state or fifty.
-- **GCP US-region hosting** + **Firebase Auth US identity pool** + **Daily.co US rooms** are US-wide, not Florida-pinned.
+- **US-region hosting** + **Supabase Auth US-project** + **Daily.co US rooms** are US-wide, not Florida-pinned. *(Originally Firebase Auth + GCP Cloud Run; superseded by ADR-0010, 2026-05-27.)*
 - **Federal compliance floor** (COPPA, HIPAA-adjacent prudence for Specialist notes, FCRA disposal rules, IRS 20-factor classification, Title VII, CAN-SPAM, TCPA, IRS Form W-10 / Form 2441) is reusable across all 50 states.
 
 What ADR-0003 made Florida-eccentric — and what this ADR un-eccentrifies:
@@ -32,7 +32,7 @@ What ADR-0003 made Florida-eccentric — and what this ADR un-eccentrifies:
 - **Provider classification:** federal IRS common-law / 20-factor test as the baseline; the Provider Terms carry a **per-state classification addendum pattern**. States with materially different classification regimes (AB5 / ABC test states) are flagged for the Provider at sign-up and the Provider's Terms acceptance is state-scoped.
 - **Sales tax:** Stripe Tax handles per-state nexus and per-state taxability on Subscription and Commission. Bookings are **not** taxed by Our Haven (Providers are responsible for any sales-tax exposure on their own services). State sales-tax registrations are pursued **as nexus is established**, not preemptively at launch.
 - **Geographic scope at launch:** **the United States.** Provider sign-up accepts any US state address; the Provider's state drives per-state adapter routing. Out-of-US sign-ups are rejected with a "we're not yet available outside the US" message.
-- **Data residency:** US regions (GCP `us-east1` default, `us-east4` fallback; Firestore `nam5` US multi-region; Firebase Auth US identity pool; Daily.co US rooms; Cloud Storage US bucket; Cloud Tasks / Cloud Scheduler US). **Unchanged from ADR-0003.**
+- **Data residency:** US regions — Supabase US-region project (Auth + Postgres + Realtime + Storage), Fly.io `iad` (Ashburn, VA) for the Fastify backend, Vercel US-region for the Next.js web surfaces, Daily.co US rooms. *(Originally GCP `us-east1` / `us-east4` + Firestore `nam5` + Firebase Auth US identity pool per ADR-0004; the platform was re-architected to Supabase + Fly.io + Vercel by ADR-0010, 2026-05-27. The US-only invariant is preserved.)*
 - **Payments:** Stripe Connect Express US entity. **Unchanged from ADR-0003.** 3DS opportunistic, not mandatory (no PSD2/SCA equivalent in the US). Form 1099-K issuance via Stripe Connect.
 
 International expansion (UK, EU, Canada, etc.) remains out of scope for v1 and is a full re-platforming if pursued later, not a Phase 2 add.

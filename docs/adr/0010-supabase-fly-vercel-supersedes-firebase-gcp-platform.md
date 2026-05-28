@@ -1,0 +1,78 @@
+# Supabase + Fly.io + Vercel platform; supersedes the Firebase + GCP hosting decisions of ADR-0004
+
+**Status:** accepted (2026-05-27) — **supersedes ADR-0004 §§ 4, 5, 6, 7** (Firestore for messaging real-time, GCP Cloud Run + Cloud SQL + Cloud Storage + Cloud Tasks + Cloud Scheduler hosting, Firebase Auth identity). **ADR-0004 §§ 1, 2, 3, 8 carry forward unchanged** — Node + TypeScript + Fastify, OpenAPI-first REST + JSON, PostgreSQL as system of record, and the webhook-verification posture for Stripe + Checkr + Daily.co.
+
+## Context
+
+ADR-0004 (2026-05-08) landed the v1 backend on Firebase Auth + Firestore + Cloud Run + Cloud SQL + Cloud Storage + Cloud Tasks, all in GCP `us-east1`. The rationale was sound for that moment: one Firebase/GCP project, one billing surface, one IAM surface, Firebase Auth working uniformly across Flutter mobile and TS web, Firestore listeners doing the live-chat fan-out without a self-managed WebSocket layer, and the rest of the GCP toolkit picking up storage, queues, and scheduling.
+
+Two things have changed since:
+
+1. **The two-data-store consequence in ADR-0004 § Consequences has been re-examined.** ADR-0004 explicitly called out the write-fanout pattern — every Message written to Postgres canonically *and* mirrored to Firestore for live delivery — as a load-bearing consequence. Mature alternatives now exist that eliminate the dual write entirely: **Supabase Realtime listens directly to Postgres row changes** and broadcasts to subscribed clients. The same database that holds the canonical message *is* the live event source. The disintermediation redaction pattern (redact-before-write) stays; the second write disappears.
+2. **The PIA / data-flow inventory cost of a single tightly-integrated BaaS surface is lower than a split GCP service catalog.** ADR-0004 argued that co-locating Firebase + Cloud Run + Cloud SQL + Cloud Storage + Cloud Tasks in one GCP project simplifies privacy counsel's data-flow inventory. Supabase improves on that further by collapsing Auth + Postgres + Realtime + Storage + scheduled jobs into a single vendor surface in `us-east-1`. Privacy counsel reviews one vendor DPA (Supabase), one storage location (Supabase US project), and one identity pool — not five GCP service-level postures.
+
+The scaffolded backend in `apps/backend/` and `apps/provider-web/` is shallow enough that switching now is materially cheaper than switching later. Mobile (`apps/mobile/`) has no Firebase code yet — the Expo SDK 56 template — so a future refactor cost is *avoided* rather than incurred.
+
+## Decision
+
+The v1 platform stack:
+
+1. **Identity:** **Supabase Auth (US project)** replaces Firebase Auth. Sign in with Apple + Sign in with Google + email/password + TOTP MFA + SMS OTP — all first-class. Custom role/kind claims live in the JWT's `app_metadata`; client→backend auth uses the Supabase access token as a Bearer JWT.
+2. **System of record:** **PostgreSQL on Supabase (US project, `us-east-1`)** — unchanged in shape from ADR-0004 § 3 (Postgres is canonical for Bookings, Sessions, Payments, Ratings, Verifications, retention/audit logs). The Kysely + `pg` connection layer is unchanged; the connection string changes.
+3. **Real-time messaging:** **Supabase Realtime** replaces Firestore. Postgres row-level subscriptions deliver Message inserts to subscribed clients (Parent mobile, Provider mobile, Provider web portal, admin). The write-fanout pattern from ADR-0004 § Consequences is eliminated: one write to Postgres, one stream out via Realtime.
+4. **File storage:** **Supabase Storage** replaces Google Cloud Storage. Signed PUT URLs for ID docs, license docs, insurance docs, state-childcare-registration docs, and avatars. Per-bucket policies enforce ownership scoping.
+5. **Background jobs:** **`pgmq` + `pg_cron` on Supabase Postgres** replaces Cloud Tasks + Cloud Scheduler. `pgmq` handles delayed jobs (Booking 24h expiry, Session 24h auto-confirm, Dispute window expiry, retention/erasure scheduled runs); `pg_cron` handles periodic jobs. Both are first-class Supabase Postgres extensions.
+6. **Backend hosting:** **Fly.io (US region `iad` — Ashburn, Virginia)** replaces GCP Cloud Run. The Fastify container runs as a long-lived process with Postgres connection pooling and stays warm for mobile latency. Multi-region is available later if needed.
+7. **Provider web portal hosting:** **Vercel** for the Next.js 16 App Router build. The admin dashboard (Phase 2, not yet scaffolded) will also ship to Vercel as a sibling Next.js app.
+8. **Webhook posture (Stripe, Checkr, Daily.co):** **unchanged.** Webhooks terminate on the Fastify backend on Fly.io, with signature verification → internal events for the deep modules. The vendor-agnostic background-check webhook interface from ADR-0004 § 8 carries over.
+
+Data residency remains US-only. Supabase project is provisioned in **`us-east-1`** (the closest Supabase region to ADR-0009's documented `us-east1` / `us-east4` GCP posture); Fly.io runs in **`iad`** (Ashburn, VA). Daily.co stays on US rooms per ADR-0008. Stripe Connect Express US entity, Stripe Tax, Checkr, Twilio, SendGrid — all unchanged per ADR-0009.
+
+## Why
+
+- **The Postgres + Supabase Realtime model eliminates the write-fanout pattern** that ADR-0004 accepted as a consequence. Messages live in one place and stream out from there. There is no Firestore-to-Postgres consistency to reason about, no fan-out retry queue, no double accounting in the PIA data-flow inventory.
+- **Supabase Auth is a near-feature-parity replacement for Firebase Auth** for the providers Our Haven needs: Sign in with Apple (mandatory under App Store rules whenever any third-party social login is offered), Sign in with Google, email/password, TOTP MFA (for admin), and SMS OTP (for device-trust and step-up). Custom claims in `app_metadata` carry `role`, `kind`, `state`, `caregiver_category` | `specialty` exactly as Firebase custom claims did.
+- **`pgmq` + `pg_cron` are credible replacements for Cloud Tasks + Cloud Scheduler at v1 scale.** Both are Postgres-native; both are exposed first-class in Supabase. The "in-process `setTimeout` is forbidden" rule from ADR-0004 § Consequences becomes "delayed work goes through `pgmq`," which is the same architectural posture in different plumbing.
+- **Cost-at-v1 is materially lower.** A reasonable v1 Supabase Pro plan + Fly.io shared-CPU machine + Vercel hobby/pro is **$25–80/month** vs. Cloud SQL HA Postgres + Cloud Run + Firestore + Cloud Storage + Cloud Tasks at **$250–400/month**. The savings buys at least one priority-state license-board adapter or one month of Checkr credits.
+- **Fastify carries over unchanged.** The deep-module pattern from ADR-0004 § Consequences (pure-TS modules in `packages/domain/`, collaborators injected at the handler layer, fast tests with no SDKs) is preserved. The only host-shaped change is the SDK clients passed in at boot (Supabase Admin client instead of `firebase-admin`; `pgmq` SQL helpers instead of Cloud Tasks gRPC).
+- **Mobile has no Firebase code yet.** Switching now means `apps/mobile/` simply never installs `@react-native-firebase/*` and instead ships against `@supabase/supabase-js` + `@supabase/auth-helpers-react-native` from the first commit. The mobile cost of this ADR is therefore zero refactor and zero forked tests.
+- **The provider web portal is barely scaffolded.** `apps/provider-web/lib/firebase.ts` is ~50 lines; `app/signup/page.tsx` imports it directly. Swapping to `@supabase/supabase-js` + `@supabase/ssr` is hours, not days. The admin dashboard (not yet scaffolded) starts on Supabase from line 1.
+
+## Considered alternatives
+
+- **Stay with Firebase + GCP per ADR-0004.** The cheapest in immediate refactor terms — but bakes in the write-fanout pattern, the dual data-flow PIA entry, and the higher monthly cost in perpetuity. Rejected because the scaffolding is shallow enough that the switch costs less now than living with the consequences later.
+- **Supabase Edge Functions instead of a Fastify backend.** Considered and rejected. The deep modules (Booking lifecycle, Pricing, Cancellation, Disintermediation, Search ranking, Rating reveal, Verification workflow, Retention planner) want a long-lived TS host that imports them and orchestrates writes. Splitting them across Deno-based Edge Functions is a real downgrade in expressiveness and testability, and step-up MFA enforcement at the route layer is cleaner in one Fastify plugin than duplicated across many Edge Functions. Fastify stays.
+- **AWS App Runner + RDS + AWS Cognito + Pusher.** Workable, more expensive than Supabase + Fly.io, splits identity (Cognito) from data (RDS) from realtime (Pusher) — exactly the multi-vendor PIA inventory problem Supabase collapses. Rejected.
+- **Cloud Run for Fastify + Supabase for everything else.** A reasonable mixed posture: keep one GCP service, move auth+db+realtime+storage to Supabase. Rejected because the GCP project remains in the data-flow inventory for one service, and Fly.io is materially simpler to deploy to with a smaller cognitive surface.
+- **Next.js API routes on Vercel + Supabase, no separate Fastify.** Considered. Killed by the mobile cold-start tax (serverless functions are a poor fit for the always-on Provider mobile API surface), the Fastify backend's webhook fan-in centrality, and the OpenAPI-first contract pattern from ADR-0004 §2 that Vercel route handlers don't fit as cleanly. Vercel hosts the *web* surfaces (provider-web + admin), not the backend.
+
+## Consequences
+
+- **Code changes (scope is the Phase 2 backend scaffold and the Provider web portal):**
+  - `apps/backend/src/gcp/firebase.ts` → **replaced** by `apps/backend/src/supabase/admin.ts` (Supabase service-role client).
+  - `apps/backend/src/plugins/auth.ts` → **rewritten** to verify Supabase access tokens via the project's JWT secret (HS256) and read custom claims from `app_metadata`.
+  - `apps/backend/src/auth/principal.ts` → **updated** to construct `Principal` from a Supabase JWT payload instead of `DecodedIdToken`.
+  - `apps/backend/src/gcp/storage.ts` → **replaced** by `apps/backend/src/supabase/storage.ts` (Supabase Storage signed-upload URL helper).
+  - `apps/backend/src/gcp/tasks.ts` → **replaced** by `apps/backend/src/jobs/queue.ts` (`pgmq` enqueue helper).
+  - `apps/backend/src/config/env.ts`, `apps/backend/.env.example` → env schema swaps GCP/Firebase keys for `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`, `SUPABASE_JWT_SECRET`, `SUPABASE_STORAGE_BUCKET`.
+  - `apps/backend/src/app.ts` — OpenAPI security scheme `firebaseIdToken` → `supabaseAccessToken`.
+  - `apps/backend/src/routes/*.ts` — `setCustomUserClaims` calls become Supabase Admin `auth.admin.updateUserById({ app_metadata })`.
+  - `apps/backend/openapi/openapi.yaml` — regenerated; security scheme renamed.
+  - `apps/backend/package.json` — remove `firebase-admin`, `@google-cloud/storage`, `@google-cloud/tasks`, `@google-cloud/scheduler`; add `@supabase/supabase-js`.
+  - `apps/backend/docker-compose.yml` — drop the `firestore-emulator` service; Postgres container unchanged.
+  - `apps/backend/Dockerfile` and `apps/backend/fly.toml` — **new** (Fly.io deploy artifacts).
+  - `apps/backend/src/db/migrations/<next>_enable_pgmq.ts` — new migration enabling the `pgmq` extension and creating the booking-lifecycle + retention-planner queues.
+  - `apps/provider-web/lib/firebase.ts` → **replaced** by `apps/provider-web/lib/supabase.ts`.
+  - `apps/provider-web/app/signup/page.tsx` — imports updated.
+  - `apps/provider-web/lib/api.ts` — access token sourced from Supabase session.
+  - `apps/provider-web/.env.local.example`, `apps/provider-web/package.json` — env keys and deps swapped.
+- **Mobile (`apps/mobile/`) gets no Firebase code.** When Phase 3 scaffolding begins, mobile installs `@supabase/supabase-js` + `@supabase/auth-helpers-react-native` from line 1. ADR-0005 § Decision (Apple + Google + email/password) is unchanged; only the SDK behind it differs.
+- **The disintermediation detector still runs server-side before any Message write.** The redacted Message is the row that lands in Postgres; Supabase Realtime broadcasts the same row to subscribed clients. The unredacted original is queued for Trust & Safety review.
+- **Step-up MFA still uses the `auth_step_up_grants` Postgres table** (unchanged). The `/v1/auth/step-up/refresh` endpoint reads MFA assurance from the Supabase JWT's `aal` (Authenticator Assurance Level) claim instead of Firebase's `sign_in_second_factor` — the column shape on `auth_step_up_grants` stays the same.
+- **PIA + Privacy Policy vendor data-flow inventory rewrites:** Firestore is dropped; Cloud SQL is replaced by Supabase Postgres; Cloud Storage is replaced by Supabase Storage; Cloud Tasks is replaced by `pgmq`; Cloud Run is replaced by Fly.io; Firebase Auth is replaced by Supabase Auth. The vendor list shrinks by four entries (Firebase, Firestore, GCS, Cloud Tasks → Supabase) and gains two (Fly.io, Vercel). Privacy counsel re-reviews the new vendor DPAs (Supabase, Fly.io, Vercel) before launch.
+- **Data residency posture:** Supabase US-region (`us-east-1`) + Fly.io `iad` + Vercel US-region. The "all personal data in US regions" invariant from ADR-0009 § Data residency is preserved.
+- **CI/CD changes:** Fly.io deploy step (`fly deploy`) replaces the Cloud Run deploy. The OpenAPI drift check (`scripts/check-openapi-drift.ts`) is unchanged.
+- **Migration off Supabase, if pursued later, is non-trivial but bounded.** Postgres is portable (`pg_dump` + restore); auth users are exportable; storage objects are S3-compatible (Supabase Storage uses S3 under the hood); Realtime listeners are the only piece that would need re-platforming. The reversal is materially smaller than the ADR-0004 → ADR-0010 reversal would have been once mobile and admin shipped against Firebase.
+- **ADR-0004 carry-forward §§ are 1, 2, 3, and 8.** Node + TypeScript + Fastify, OpenAPI-first REST + JSON, PostgreSQL as system of record, and the webhook-verification posture (Stripe + Checkr + Daily.co with signed payloads) are unchanged. ADR-0004 §§ 4, 5, 6, 7 are superseded by this ADR.
+- **ADR-0009 § Data residency wording updates:** "Firebase Auth US identity pool" → "Supabase US-region project (Auth + Postgres + Realtime + Storage)"; "GCP `us-east1` default, `us-east4` fallback" → "Fly.io `iad` (Ashburn, VA) for the Fastify backend; Supabase `us-east-1` for Auth + Postgres + Realtime + Storage; Vercel US-region for the Next.js web surfaces."
+- **ADR-0005 § Notifications wording:** the "FCM" Provider mobile push reference becomes "Expo Push (FCM/APNs under the hood)" — Expo SDK 56 already includes Expo Push, so no new vendor is added.

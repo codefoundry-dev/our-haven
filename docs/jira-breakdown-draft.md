@@ -1,7 +1,7 @@
 # JIRA breakdown draft — Our Haven v1 (OH project)
 
 > **Status:** draft for review (2026-05-26). Not yet published to JIRA.
-> **Source:** PRD-0001 v1.3, project-plan.md v1.3, CONTEXT.md (current), ADR-0001 through ADR-0009.
+> **Source:** PRD-0001 v1.3, project-plan.md v1.3, CONTEXT.md (current), ADR-0001 through ADR-0010.
 > **Scope:** Full v1 — Phases 0 through 4 (Discovery → Mobile go-live + soft launch).
 > **Approach:** **One Epic per Phase** + tracer-bullet vertical-slice **Stories** under each Epic. Phases 5 (Launch Support), 6 (Web build-out), 7 (Maintenance) are deferred from this batch.
 > **HITL** = human-in-the-loop (needs architectural decision, design review, or stakeholder sign-off). **AFK** = independently implementable and mergeable.
@@ -50,12 +50,12 @@ Each Epic carries: labels `phase-0` / `phase-1` / `phase-2` / `phase-3` / `phase
 
 ## Phase 2 — Backend Foundation & Provider Web Portal (18 Stories)
 
-> All Phase 2 Stories assume Phase 1 scope lock (1.3) and ADR-0004 backend stack (Node.js + TypeScript + OpenAPI + Postgres + Firestore + Cloud Run + Firebase Auth, US-region).
+> All Phase 2 Stories assume Phase 1 scope lock (1.3), ADR-0004 backend shape (Node.js + TypeScript + Fastify + OpenAPI-first REST + Postgres as system of record), and ADR-0010 platform stack (Supabase US-region for Auth + Postgres + Realtime + Storage; Fly.io `iad` for the Fastify backend; Vercel for the Next.js web surfaces). Replaces the originally specified Firebase Auth + Firestore + Cloud Run + Cloud SQL + Cloud Storage + Cloud Tasks stack from ADR-0004 §§4–7.
 
 | # | Summary | Type | Blocked by | Labels |
 |---|---|---|---|---|
-| 2.1 | Backend skeleton — Node.js + TS + OpenAPI source-of-truth + Postgres (Cloud SQL) + Firestore (`nam5`) + Cloud Run + Cloud Storage + Cloud Tasks/Scheduler scaffold; US-region pinning; signed-URL upload helper | AFK | 1.3 | `phase-2` `backend` `infra` `needs-triage` |
-| 2.2 | Firebase Auth integration — US identity pool; email/password + Google + Apple; admin TOTP MFA mandatory; Provider step-up MFA scaffold for payout-sensitive endpoints | AFK | 2.1 | `phase-2` `backend` `auth` `needs-triage` |
+| 2.1 | Backend skeleton — Node.js + TS + Fastify + OpenAPI source-of-truth + Postgres (Supabase) + Supabase Realtime + Supabase Storage + `pgmq` + `pg_cron` scaffold; US-region pinning; signed-URL upload helper; Fly.io deploy config (`iad`) | AFK | 1.3 | `phase-2` `backend` `infra` `needs-triage` |
+| 2.2 | Supabase Auth integration — US-region project; email/password + Google + Apple; HS256 JWT verification with project secret; admin TOTP MFA mandatory; Provider step-up MFA scaffold (reads `aal=aal2` + `amr`) for payout-sensitive endpoints | AFK | 2.1 | `phase-2` `backend` `auth` `needs-triage` |
 | 2.3 | Provider web portal sign-up — 3-tab role-pick (Parent / Caregiver / Specialist); role permanence enforcement; account creation with `kind` + `caregiver_category` or `specialty` + resident `state` field | AFK | 2.2 | `phase-2` `provider-web` `needs-triage` |
 | 2.4 | Provider Verification — email + phone + ID upload; signed-URL storage; admin views uploads; **Verification state machine deep module** (state-agnostic, consumes results not vendor APIs) | AFK | 2.3 | `phase-2` `provider-web` `backend-deep-module` `needs-triage` |
 | 2.5 | Checkr standard-package integration — initiate screening, $35 Stripe charge to Provider, webhook ingestion, status pipe to admin; **vendor-agnostic background-check adapter** so a second vendor or statutory-clearance upload path can slot in by config | AFK | 2.4 | `phase-2` `backend` `vendor-checkr` `needs-triage` |
@@ -67,8 +67,8 @@ Each Epic carries: labels `phase-0` / `phase-1` / `phase-2` / `phase-3` / `phase
 | 2.11 | Backend deep modules — **Booking lifecycle state machine** + **Cancellation policy calculator** + **Pricing & Commission calculator** (Agreed Rate input); property-based tests via fast-check | AFK | 2.1 | `phase-2` `backend-deep-module` `needs-triage` |
 | 2.12 | Backend deep modules — **Job + Application + Offer state machines** + **Application-quota tracker** (per-Provider 30/mo + per-Job 15 cap); atomic Job-Application-Booking materialisation on Direct-Message Book-request acceptance | AFK | 2.11 | `phase-2` `backend-deep-module` `needs-triage` |
 | 2.13 | Backend deep modules — **Disintermediation detector** (regex categories; Messages + Offer scope_note) + **Search ranking scorer** (0.5 distance + 0.3 rating + 0.2 recency) + **Rating reveal logic** (blind mutual reveal + asymmetric display) | AFK | 2.1 | `phase-2` `backend-deep-module` `needs-triage` |
-| 2.14 | Backend deep module — **Retention/erasure planner** + Cloud Scheduler periodic jobs (30d soft-delete, 7y financial pseudonymization, 3y messages, 6mo bg-check raw); **state-privacy patchwork module** routing per-state deletion-right SLAs (CCPA 45d, FDBR response window, etc.) | AFK | 2.1, 0.5 | `phase-2` `backend-deep-module` `state-adapter` `compliance` `needs-triage` |
-| 2.15 | Notifications dispatcher — FCM (mobile push) + VAPID (web push) + SendGrid (email) + Twilio (SMS); channel matrix per event; SMS-mandatory for Booking-request and Job-awarded events | AFK | 2.1 | `phase-2` `backend` `notifications` `needs-triage` |
+| 2.14 | Backend deep module — **Retention/erasure planner** + `pg_cron` periodic jobs (30d soft-delete, 7y financial pseudonymization, 3y messages, 6mo bg-check raw); **state-privacy patchwork module** routing per-state deletion-right SLAs (CCPA 45d, FDBR response window, etc.) | AFK | 2.1, 0.5 | `phase-2` `backend-deep-module` `state-adapter` `compliance` `needs-triage` |
+| 2.15 | Notifications dispatcher — Expo Push (mobile push via FCM/APNs) + VAPID (web push) + SendGrid (email) + Twilio (SMS); channel matrix per event; SMS-mandatory for Booking-request and Job-awarded events | AFK | 2.1 | `phase-2` `backend` `notifications` `needs-triage` |
 | 2.16 | Admin dashboard — Provider review queue with Checkr results + per-state license adapter context + decisions captured with timestamp + audit log | AFK | 2.5, 2.6, 2.7 | `phase-2` `admin-web` `needs-triage` |
 | 2.17 | Admin dashboard — platform metrics (sign-ups, active Subscriptions, cancellations, Bookings, Jobs posted, Applications filed, Award rate, Provider quota-hit rate) | AFK | 2.16 | `phase-2` `admin-web` `metrics` `needs-triage` |
 | 2.18 | Admin dashboard — Trust & Safety role; flagged-thread queue surfacing Messages + Offer scope_notes; investigation-access on demand with free-text reason; audit log on every access | AFK | 2.13, 2.16 | `phase-2` `admin-web` `trust-and-safety` `needs-triage` |
@@ -85,13 +85,13 @@ Each Epic carries: labels `phase-0` / `phase-1` / `phase-2` / `phase-3` / `phase
 
 | # | Summary | Type | Blocked by | Labels |
 |---|---|---|---|---|
-| 3.1 | RN/Expo app skeleton + Firebase Auth client + 3-tab role-pick screen + ephemeral preview questionnaire (state-only, not persisted) | AFK | 2.2 | `phase-3` `mobile-rn` `shared-shell` `needs-triage` |
+| 3.1 | RN/Expo app skeleton + Supabase Auth client (`@supabase/supabase-js` + `@supabase/auth-helpers-react-native`) + 3-tab role-pick screen + ephemeral preview questionnaire (state-only, not persisted) | AFK | 2.2 | `phase-3` `mobile-rn` `shared-shell` `needs-triage` |
 | 3.2 | Parent sign-up — Sign in with Apple + Google + email/password; phone optional at sign-up; email verification | AFK | 3.1 | `phase-3` `mobile-rn` `parent` `needs-triage` |
 | 3.3 | Sensitive-info consent screen + Child profile CRUD (age + special-needs flags + notes); timestamped consent; full erasure on withdrawal | AFK | 3.2 | `phase-3` `mobile-rn` `parent` `compliance` `needs-triage` |
 | 3.4 | Search surface — 4 Category tiles + filter sheet (ZIP/radius/date/Rate ceiling/Rating/Tax-credit-friendly/per-category specialty + Specialist-only sub-filters); hybrid ranking; preview gating (1–2 per category) | AFK | 2.13, 3.2 | `phase-3` `mobile-rn` `parent` `search` `needs-triage` |
 | 3.5 | Provider profile view + Availability summary read-only + Ratings display (Provider-public, Parent-aggregate-only) + Message CTA | AFK | 3.4 | `phase-3` `mobile-rn` `parent` `needs-triage` |
 | 3.6 | Subscription paywall — fires on first attempt to Message / send Book-request / post Job; web-checkout integration + phone collection/verification + Stripe Subscription webhook + status sync back to mobile | AFK | 2.9, 3.5 | `phase-3` `mobile-rn` `parent` `subscription` `needs-triage` |
-| 3.7 | Messaging — thread anchoring (job_id or thread_id); Firestore live listeners; Disintermediation redaction at delivery; Job-context strip | AFK | 2.13, 3.6 | `phase-3` `mobile-rn` `messaging` `needs-triage` |
+| 3.7 | Messaging — thread anchoring (job_id or thread_id); Supabase Realtime row-level subscriptions on `messages`; Disintermediation redaction at delivery; Job-context strip | AFK | 2.13, 3.6 | `phase-3` `mobile-rn` `messaging` `needs-triage` |
 | 3.8 | Offer composer + Book-request flow (Parent-sent Offers carry `attached_child_ids`) + inline Offer bubble UI with Accept/Counter/Decline; per-child surcharge snapshotted at send | AFK | 3.7, 2.12 | `phase-3` `mobile-rn` `offers` `needs-triage` |
 | 3.9 | Direct-Message Book-request acceptance — atomic Job+Application+Booking materialisation; thread rebinds thread_id → job_id; Booking born in `accepted` state | AFK | 3.8 | `phase-3` `mobile-rn` `parent` `needs-triage` |
 | 3.10 | Post-a-Job composer (multi-step) + draft autosave + one-time consent warning with timestamped acknowledgement; Subscription gate fires on Publish if unsubscribed | AFK | 3.6, 2.12 | `phase-3` `mobile-rn` `parent` `jobs` `needs-triage` |
@@ -118,7 +118,7 @@ Each Epic carries: labels `phase-0` / `phase-1` / `phase-2` / `phase-3` / `phase
 
 | # | Summary | Type | Blocked by | Labels |
 |---|---|---|---|---|
-| 3.24 | Notification channel matrix — Parent + Provider; push (FCM) + email (SendGrid) + SMS (Twilio) routing per event; SMS-mandatory for Booking-request received & Job-awarded (Provider) and inside-24h cancellation (both); marketing opt-in separate from transactional | AFK | 2.15, 3.2, 3.16 | `phase-3` `mobile-rn` `notifications` `needs-triage` |
+| 3.24 | Notification channel matrix — Parent + Provider; push (Expo Push, which wraps FCM/APNs) + email (SendGrid) + SMS (Twilio) routing per event; SMS-mandatory for Booking-request received & Job-awarded (Provider) and inside-24h cancellation (both); marketing opt-in separate from transactional | AFK | 2.15, 3.2, 3.16 | `phase-3` `mobile-rn` `notifications` `needs-triage` |
 | 3.25 | No-show flows — Provider no-show (Parent full refund + admin flag, 2 flagged → manual review, 3 → suspension); Parent no-show (Provider reports within 2h + Parent 24h contest + 50% payout if uncontested) | AFK | 3.12, 2.16 | `phase-3` `mobile-rn` `bookings` `needs-triage` |
 
 **User stories covered:** PRD-0001 stories 1–39, 50–62, 78–115 (Parent + Provider mobile + cross-cutting).
@@ -134,7 +134,7 @@ Each Epic carries: labels `phase-0` / `phase-1` / `phase-2` / `phase-3` / `phase
 | 4.3 | Privacy Policy (with per-state appendices + vendor data-flow inventory + sensitive-info consent + Job-description disclosure paragraph) + Terms of Service (with per-state classification addendum pattern) lawyer sign-off | HITL | 4.2 | `phase-4` `legal` `compliance` `needs-triage` |
 | 4.4 | App Store submission + listing copy (consumer-marketplace shape, national posture) + Apple review remediation | HITL | 4.1, 4.3 | `phase-4` `release` `needs-triage` |
 | 4.5 | Play Store submission + listing copy + Google review remediation | HITL | 4.1, 4.3 | `phase-4` `release` `needs-triage` |
-| 4.6 | Production environment cut — promote from staging to prod + smoke checks + admin dashboard handoff to Ci'erro + known-issues log | AFK | 4.1 | `phase-4` `release` `infra` `needs-triage` |
+| 4.6 | Production environment cut — `fly deploy` Fastify backend to prod app (Fly.io `iad`) + Vercel production deploys for provider-web + admin + Supabase prod project promotion + smoke checks + admin dashboard handoff to Ci'erro + known-issues log | AFK | 4.1 | `phase-4` `release` `infra` `needs-triage` |
 | 4.7 | National launch marketing assets + PR plan (per Phase 0 marketing posture) + Phase 4 demo Zoom kickoff with Ci'erro | HITL | 4.4, 4.5, 4.6, 0.1 | `phase-4` `marketing` `client-decision` `needs-triage` |
 
 **User stories covered:** PRD-0001 cross-cutting compliance stories 73–77 (handled by 4.2 + 4.3 + 4.6) + § Mandatory pre-launch deliverables.

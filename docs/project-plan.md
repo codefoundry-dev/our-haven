@@ -79,7 +79,7 @@
 - **Stripe Tax integration** for Subscription and Commission sales-tax computation — active across all US states at launch with nexus-tracking on; sales-tax registrations pursued reactively as Stripe Tax surfaces nexus prompts (or pre-emptively in priority states per the Phase 0 confirmation). Bookings are not taxed by Our Haven; Providers are responsible for any sales-tax exposure on their own services.
 - Admin dashboard v1: Provider review queue (background-check results, license verification for Specialists, FCCH certificate verification, approve/reject), basic metrics (sign-ups, active Subscriptions, cancellations, Bookings, **Jobs posted, Applications filed, Award rate**)
 - Trust & Safety admin role with audit-logged thread access (flagged-thread queue + on-demand investigation access). Flagged-thread queue surfaces both Messages and Offers whose `scope_note` tripped disintermediation
-- Authentication (Firebase Auth, US region): email/password + Sign in with Google for Provider web portal; admin TOTP MFA mandatory; Provider step-up MFA on payout-sensitive actions
+- Authentication (Supabase Auth, US-region project, per ADR-0010 supersedes Firebase Auth from ADR-0004): email/password + Sign in with Google for Provider web portal; admin TOTP MFA mandatory; Provider step-up MFA on payout-sensitive actions
 - Provider-side notification plumbing: web push + email (SendGrid) + SMS (Twilio) for Booking-request, **Job-awarded**, cancellation, and session-reminder events
 - **(v1.1) Four new deep modules (per ADR-0006):**
   - **Job lifecycle state machine** (`draft → open → awarded | expired | cancelled → closed`; 14-day auto-expiry; awarded-side-effects)
@@ -107,7 +107,7 @@
 - **Role-pick at sign-up** — first screen after Welcome routes new users to a "Are you a Parent or a Provider?" pill-card chooser; account role is permanent per ADR-0005
 - Parent account with multiple Child profiles (one Parent account holds all Children — each Child has their own profile with age, special-needs flags, and notes)
 - **Sensitive-information explicit consent flow** at sign-up for processing special-needs flags / notes (COPPA-aware + HIPAA-adjacent + FDBR-aligned; timestamped, re-prompt on material privacy-policy changes, full erasure on consent withdrawal)
-- Authentication (Firebase Auth, US region): Sign in with Apple + Sign in with Google + email/password; phone verified once at sign-up; device-trust SMS OTP only on new-device or suspicious sign-in
+- Authentication (Supabase Auth, US-region project, per ADR-0010): Sign in with Apple + Sign in with Google + email/password; phone verified once at sign-up; device-trust SMS OTP only on new-device or suspicious sign-in
 - Parent verification at sign-up (email + phone) and **payment method capture with cardholder-name soft-signal fraud check** (mismatch flags the account for additional review on early Bookings; does not hard-block)
 - Location-based search with v1 filters: Category, ZIP code + radius (default 5 miles), date/time intersected with Provider Availability, hourly Rate ceiling (operates on **Published Rate**), minimum star Rating, Tax-credit-friendly toggle (Babysitter/Nanny only — Form W-10 self-attested), per-category specialty
 - Hybrid ranking: `0.5 × distance + 0.3 × rating + 0.2 × recency-active`
@@ -171,7 +171,7 @@
   - Upcoming view (date-grouped, beyond today)
   - **Availability editor (v1.2 — rewritten)**: 7-day × 3-band toggle grid (Morning / Afternoon / Evening) + free-text note input (≤200 chars) + a "Paused" switch at the top. No date pills, no time-slot grid. Published Rate chip at top with "Edit" link to Rate management. Saves directly to the Provider's profile (the same summary rendered on the Parent-side profile per DESIGN.md §5.4.2)
   - **Active session controls** — Mark in-progress (transitions Booking to `in-progress`), End session + Propose hours (transitions to `awaiting-confirmation`; Parent has 24h to dispute)
-- **Messages tab** — identical surface to Parent messaging (Inbox + Thread + Offer composer); shared Firestore live-listener infra
+- **Messages tab** — identical surface to Parent messaging (Inbox + Thread + Offer composer); shared **Supabase Realtime** row-level subscription infrastructure (per ADR-0010, supersedes the originally specified Firestore listener fan-out)
 - **Account tab:**
   - Profile (photo via mobile camera, bio, languages, specialties) — mobile-native
   - Published Rate + per-child surcharge — mobile-native
@@ -181,7 +181,7 @@
   - **Payouts** — read-only summary list on mobile; withdraw routes to web
   - Notifications preferences, Privacy & data (mirrors Parent Privacy), Help & support, Terms & policies, Sign out
 - **Mobile linkout-to-web pattern** — confirmation card before each linkout explaining *why* the action lives on web; opens `ASWebAuthenticationSession` (iOS) / Custom Tabs (Android) with a signed handoff token; backend poll updates the originating row's status badge on return
-- **Push notification setup (FCM)** for Provider mobile — including SMS deep-link target priority shift (mobile companion is primary deep-link destination for Booking-request and Job-awarded SMS; web portal is fallback)
+- **Push notification setup (Expo Push, which wraps FCM/APNs)** for Provider mobile — including SMS deep-link target priority shift (mobile companion is primary deep-link destination for Booking-request and Job-awarded SMS; web portal is fallback). Per ADR-0010, replacing the originally specified standalone FCM integration.
 - Provider notifications matrix (mobile-side):
   - Push + email + **SMS** for new Booking request (mandatory; no v1 opt-out) — deep-links into Schedule tab
   - Push + email + **SMS** for **Job-awarded** (mandatory) — deep-links into Schedule tab
@@ -264,7 +264,7 @@
     - Twilio SMS fees (~$0.0075/SMS to US numbers + carrier fees)
     - SendGrid email (volume-based)
     - US privacy counsel retainer or per-engagement fees (replaces the UK fractional-DPO retainer; Phase 0 firm-pick determines structure)
-    - Hosting and infrastructure costs (estimated separately at end of discovery; GCP US region — `us-east1` default, `us-east4` fallback)
+    - Hosting and infrastructure costs (estimated separately at end of discovery; **Supabase Pro plan** for Auth + Postgres + Realtime + Storage, US-region; **Fly.io shared-CPU machine** in `iad` for the Fastify backend; **Vercel Pro** for the Next.js web surfaces — per ADR-0010, replacing the originally estimated GCP `us-east1` / `us-east4` Cloud Run + Cloud SQL + Firestore stack)
 
 ---
 

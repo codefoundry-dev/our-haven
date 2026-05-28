@@ -112,7 +112,7 @@ A public Parent web app ships in Phase 6 from the same React Native codebase (vi
 
 ### Provider — messaging, ratings, support
 
-58. As a Provider, I want to message a Parent before, during, and after a Booking, from either the mobile companion or the web portal, so that I can coordinate logistics. *(v1.2 (2026-05-19): threads anchor either to a `job_id` (Posted-Job Applications and post-acceptance Direct-Message threads) or to a `thread_id` only (pre-acceptance Direct-Message threads). The same Firestore live-listener infrastructure underlies both surfaces.)*
+58. As a Provider, I want to message a Parent before, during, and after a Booking, from either the mobile companion or the web portal, so that I can coordinate logistics. *(v1.2 (2026-05-19): threads anchor either to a `job_id` (Posted-Job Applications and post-acceptance Direct-Message threads) or to a `thread_id` only (pre-acceptance Direct-Message threads). v1.3 (2026-05-27, ADR-0010): live delivery is now via **Supabase Realtime** subscriptions on the `messages` Postgres table — both surfaces share the same row-level-subscription infrastructure. Replaces the originally specified Firestore listener fan-out.)*
 59. As a Provider, I want to rate a Parent 1–5 stars with optional text after a completed Booking (visible only to other Providers, aggregate-only), so that I can warn peers about problem clients without exposing them publicly.
 60. As a Provider considering a Booking request, I want to see the Parent's aggregate Rating and count, so that I can avoid known-bad actors.
 61. As a Provider, I want to file a Dispute or report a Parent no-show through a clear in-app flow, so that I'm not left out of pocket.
@@ -200,26 +200,26 @@ A public Parent web app ships in Phase 6 from the same React Native codebase (vi
 
 ### Backend stack and cross-platform communication
 
-Per ADR-0004:
+Per ADR-0004 (Node + TS + Fastify + OpenAPI-first + Postgres-as-system-of-record, §§1–3 + §8 carried forward) and **ADR-0010** (platform stack — supersedes ADR-0004 §§4–7):
 
-- **Backend runtime: Node.js + TypeScript.** Best SDK fit for Stripe Connect, Stripe Tax, Twilio, SendGrid, Firebase Admin, Daily.co, Cloud Tasks, and Checkr (the v1 background-check vendor). Backend ↔ web frontend share types via OpenAPI codegen.
-- **API protocol: OpenAPI-first REST + JSON.** The OpenAPI spec is the source of truth; typed Dart clients are generated for the Parent Flutter mobile app, typed TypeScript clients are generated for the Provider web portal and admin dashboard. CI fails on spec drift.
-- **Database split:**
-  - **PostgreSQL** is the system of record for everything — Bookings, Sessions, Payments, Ratings, Verifications, message content (for retention/audit), audit logs, retention bookkeeping. Hosted on Cloud SQL.
-  - **Firestore** is a real-time fan-out for messaging events only. New Messages are written to Postgres canonically, then mirrored to Firestore so chat surfaces (Flutter and web) can use native live document listeners. Disintermediation redaction runs before both writes; Firestore stores only the redacted form delivered to the recipient.
-- **Hosting: GCP Cloud Run + Cloud SQL + Cloud Storage + Firestore + Firebase Auth, all in a US region (`us-east1` South Carolina, with `us-east4` Northern Virginia as documented fallback; Firestore on `nam5` US multi-region).** US data residency under ADR-0003 is enforced by region configuration on every service.
-- **Background jobs: Cloud Tasks** for delayed jobs (Booking 24h expiry, Session 24h auto-confirm, Dispute window expiry, retention/erasure scheduled runs) and **Cloud Scheduler** for periodic tasks. Time-delayed work MUST go through Cloud Tasks — in-process timers are forbidden because Cloud Run scales to zero.
-- **File storage: Google Cloud Storage US bucket** for ID uploads, license documents, FCCH certificates, and profile photos. Clients upload via signed URLs issued by the backend; downloads are also via short-lived signed URLs scoped to the requesting actor's permissions.
+- **Backend runtime: Node.js + TypeScript.** Best SDK fit for Stripe Connect, Stripe Tax, Twilio, SendGrid, Supabase, Daily.co, and Checkr (the v1 background-check vendor). Backend ↔ web frontend share types via OpenAPI codegen.
+- **API protocol: OpenAPI-first REST + JSON.** The OpenAPI spec is the source of truth; typed TypeScript clients are generated for the React Native mobile app, the Provider web portal, and the admin dashboard. CI fails on spec drift.
+- **Data plane (single store, ADR-0010):**
+  - **PostgreSQL on Supabase** is the system of record for everything — Bookings, Sessions, Payments, Ratings, Verifications, message content (for retention/audit), audit logs, retention bookkeeping.
+  - **Supabase Realtime** delivers live messaging by subscribing to row inserts on the `messages` table. New Messages are written to Postgres canonically (disintermediation-redacted) and the Realtime stream broadcasts the redacted row to subscribed clients — no separate write-fanout layer.
+- **Hosting (ADR-0010):** Backend (Fastify) runs on **Fly.io `iad`** (Ashburn, VA). **Supabase US-region project** hosts Auth + Postgres + Realtime + Storage. **Vercel US-region** hosts the Provider web portal and admin dashboard (both Next.js). US data residency under ADR-0009 is enforced by region configuration on every service.
+- **Background jobs: `pgmq`** for delayed jobs (Booking 24h expiry, Session 24h auto-confirm, Dispute window expiry, retention/erasure scheduled runs) and **`pg_cron`** for periodic tasks — both first-class Supabase Postgres extensions. Time-delayed work MUST go through `pgmq` — in-process timers are forbidden because Fly.io may restart instances during deploys or scale events.
+- **File storage: Supabase Storage** for ID uploads, license documents, state home-childcare registration certificates, and profile photos. Clients upload via signed URLs issued by the backend; downloads are also via short-lived signed URLs scoped to the requesting actor's permissions.
 
 ### Cross-platform communication shape
 
-- **Parent Flutter app** → backend over **HTTPS REST** using the generated Dart client. Auth via Firebase ID token in the `Authorization` header; the Firebase Admin SDK verifies on every request. **Live messaging** events delivered via Firestore listeners (Flutter `cloud_firestore` SDK), not polled over REST.
-- **Provider web portal** → backend over **HTTPS REST** using the generated TypeScript client. Auth via Firebase ID token (email/password or Google). Live messaging via Firestore web SDK. **Step-up MFA** required at the backend for payout-sensitive endpoints (changing bank details, initiating withdrawals).
-- **Admin dashboard** → backend over **HTTPS REST** using the same generated TypeScript client (different auth scope). **Mandatory TOTP MFA** enforced server-side on every request (not just at sign-in) for sensitive operations.
+- **Parent + Provider React Native app** → backend over **HTTPS REST** using the generated TypeScript client. Auth via **Supabase access token** in the `Authorization` header; the backend's auth plugin verifies the JWT locally with the project JWT secret on every request. **Live messaging** events delivered via Supabase Realtime row-level subscriptions (`@supabase/supabase-js`), not polled over REST.
+- **Provider web portal (Next.js on Vercel)** → backend over **HTTPS REST** using the generated TypeScript client. Auth via Supabase access token (email/password or Google). Live messaging via Supabase Realtime web SDK. **Step-up MFA** required at the backend for payout-sensitive endpoints (changing bank details, initiating withdrawals).
+- **Admin dashboard (Next.js on Vercel)** → backend over **HTTPS REST** using the same generated TypeScript client (different auth scope). **Mandatory TOTP MFA** enforced server-side on every request (not just at sign-in) for sensitive operations.
 - **Stripe webhooks** → dedicated backend endpoint with Stripe signature verification → translated into Booking lifecycle / Subscription / Payout events for the deep modules.
 - **Background-check webhooks (Checkr in v1)** → dedicated backend endpoint with vendor signature verification → translated into Verification workflow events. Endpoint is implemented behind a vendor-agnostic interface so a second-state vendor can be added in Phase 2.
 - **Daily.co webhooks** (optional, for call telemetry) → dedicated backend endpoint.
-- **Outbound notifications** flow out through the Notifications dispatcher: FCM (Parent mobile push), VAPID web push (Provider portal), SendGrid (email), Twilio (SMS).
+- **Outbound notifications** flow out through the Notifications dispatcher: Expo Push (mobile push via FCM/APNs), VAPID web push (Provider portal + admin), SendGrid (email), Twilio (SMS).
 
 ### Modules
 
@@ -246,15 +246,15 @@ The implementation is organized as **thirteen deep modules** (pure logic, simple
 
 **Integration modules** (thin wrappers over external SDKs; not tested in v1):
 
-- Auth (Firebase Auth + MFA orchestration; US region)
+- Auth (Supabase Auth + MFA orchestration; US-region project)
 - Background-check verification (Checkr **standard-package** wrapper + status polling, behind a vendor-agnostic interface; see ADR-0007)
 - Stripe Connect (Connect Express US onboarding + payment intent with `application_fee_amount`)
 - Stripe Subscription (web-hosted Parent Subscription + status webhook)
 - Stripe Tax (sales-tax computation hookup; nexus tracking across US states as expansion proceeds)
 - Daily.co video (room creation + token issuance; US rooms)
-- Notifications dispatcher (event → channel matrix → FCM / web push / SendGrid / Twilio)
+- Notifications dispatcher (event → channel matrix → Expo Push / web push / SendGrid / Twilio)
 - Disintermediation queue + Trust & Safety audit log (flagged-thread persistence + access logging)
-- Messaging (encrypted at rest + transport)
+- Messaging (Supabase Realtime row-level fan-out over the `messages` table; encrypted at rest + transport)
 - Admin dashboard surfaces (review queues, metrics, T&S thread viewer)
 
 **UI surfaces:** Parent Flutter app (iOS / Android), Provider web portal, admin dashboard.
@@ -273,7 +273,7 @@ The implementation is organized as **thirteen deep modules** (pure logic, simple
 - **Provider portal is web-primary, with a mobile companion** in v1 (ADR-0005, supersedes ADR-0002). The single Flutter binary serves both Parents and Providers in role-aware shells; the role is chosen at sign-up and is permanent per account. Heavy Provider onboarding (Stripe Connect KYC, license uploads) and Payout management remain web-only — the mobile companion links out to the web portal in an in-app browser for those tasks. Run-the-day tasks (accept/decline Bookings, manage Availability, apply to Jobs, message, complete Sessions) are mobile-native. SMS-on-Booking-request and SMS-on-Job-awarded are both mandatory in v1 because they're the most time-sensitive Provider events.
 - **Job is the canonical anchor object** (ADR-0006). Every Booking traces back to Job → Application → Offer; slot-pick auto-creates a hidden Job carrying the Provider's Published Rate as the auto-Offer. Pricing is negotiable via the Offer primitive (Accept / Counter / Decline pill buttons inline in the message thread). Per-Job cap is 15 Applications; per-Provider monthly cap is 30 Applications. Posting a Job requires an active Parent Subscription; applying to a Job requires the Provider's Verification to be `cleared`.
 - **US-national launch jurisdiction from day one** (ADR-0009, supersedes ADR-0003). Checkr standard-package screening (multi-state) / **per-state license-adapter slate** populated at launch for priority Specialist-supply states / federal compliance floor (COPPA + HIPAA-adjacent + FCRA + IRS + Title VII + CAN-SPAM + TCPA) + **state-privacy patchwork module** (CCPA/CPRA + VCDPA + CPA + CTDPA + UCPA + FDBR + OCPA + TDPSA + others routed per user state) / 3DS-optional payment posture / **Stripe Tax** for per-state nexus + taxability on Subscription and Commission / **per-state classification addenda** on Provider Terms for AB5/ABC-test states. Per-state compliance adapters are **core v1 deliverables, not Phase 2** — exercised at launch rather than abstract hooks.
-- **Firebase Auth (US region)** is the identity provider. Parent: Sign in with Apple + Google + email/password, device-trust SMS OTP. Provider: email/password + Google, web-side step-up MFA on payout actions. Admin: TOTP MFA mandatory.
+- **Supabase Auth (US-region project)** is the identity provider per ADR-0010 (supersedes Firebase Auth from ADR-0004). Parent: Sign in with Apple + Google + email/password, device-trust SMS OTP. Provider: email/password + Google, web-side step-up MFA on payout actions. Admin: TOTP MFA mandatory.
 - **Daily.co** is the embedded video provider (US rooms).
 - **All vendor configurations pin US data residency**; documented in the Privacy Policy vendor data-flow inventory appendix.
 
@@ -294,7 +294,7 @@ The implementation is organized as **thirteen deep modules** (pure logic, simple
 ### What makes a good test (in this codebase)
 
 - **Test external behavior, not implementation details.** A test for the Booking lifecycle should assert that "an `accepted` Booking with a Parent-cancellation event 1 hour before start produces a 100%-charge cancellation," not that any specific function was called along the way. Tests that assert on internals make refactoring expensive and don't catch real regressions.
-- **Tests are fast because deep modules are pure.** No database, no Stripe sandbox, no Firebase emulator in the deep-module test paths. Inputs in, outputs out, milliseconds per test.
+- **Tests are fast because deep modules are pure.** No database, no Stripe sandbox, no Supabase emulator in the deep-module test paths. Inputs in, outputs out, milliseconds per test.
 - **Integration modules are not unit-tested in v1.** They wrap external SDKs and are mostly glue; testing them directly tends to retest the SDK. End-to-end smoke tests at the API boundary cover what matters there post-launch.
 - **Property-based tests where they fit** — particularly Pricing and Cancellation calculators (numeric invariants like "Parent charge ≥ Provider Payout" or "cancellation refund + cancellation fee = original authorized amount"). The Booking state machine is also a natural fit for state-transition properties ("from any state, applying an `expire` event when the request is older than 24h reaches `expired` or no-op").
 

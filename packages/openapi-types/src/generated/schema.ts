@@ -57,7 +57,7 @@ export interface paths {
         };
         /**
          * Readiness probe
-         * @description Checks Postgres + Firestore reachability. Returns 503 with status=degraded if any dependency is unreachable.
+         * @description Checks Postgres reachability. Returns 503 with status=degraded if Postgres is unreachable. (Supabase Auth + Storage + Realtime share the same Postgres backend, so this single check covers the data plane per ADR-0010.)
          */
         get: {
             parameters: {
@@ -80,8 +80,6 @@ export interface paths {
                             checks: {
                                 /** @enum {string} */
                                 postgres: "ok" | "fail";
-                                /** @enum {string} */
-                                firestore: "ok" | "fail";
                             };
                         };
                     };
@@ -98,8 +96,6 @@ export interface paths {
                             checks: {
                                 /** @enum {string} */
                                 postgres: "ok" | "fail";
-                                /** @enum {string} */
-                                firestore: "ok" | "fail";
                             };
                         };
                     };
@@ -124,8 +120,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Set the permanent role + kind on the authenticated Firebase user
-         * @description Idempotent. Rejects with 409 if the user already has a role claim that differs from the request. Once set, role is permanent per CONTEXT.md § Authentication.
+         * Set the permanent role + kind on the authenticated Supabase user
+         * @description Idempotent. Rejects with 409 if the user already has a role claim that differs from the request. Once set, role is permanent per CONTEXT.md § Authentication. Claims are written to Supabase `app_metadata`; the client must refresh its session to receive an access token carrying the new claims.
          */
         post: {
             parameters: {
@@ -355,8 +351,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Record a fresh MFA challenge from a Firebase MFA-extended ID token
-         * @description Called by clients after completing Firebase TOTP or phone MFA. Reads sign_in_second_factor from the verified token and opens a step-up window. Rejects when the ID token was not minted from an MFA-extended sign-in.
+         * Record a fresh MFA challenge from a Supabase aal2 access token
+         * @description Called by clients after completing a Supabase MFA challenge (TOTP enrollment / phone factor). Reads the token's `aal` and `amr` claims and opens a step-up window. Rejects when the access token is not `aal2`.
          */
         post: {
             parameters: {
@@ -425,8 +421,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Create a v4 signed PUT URL for client-side GCS upload
-         * @description Returns a short-lived (5 min default) v4 signed URL the client uses to PUT a file directly to GCS. Content-type and max size are enforced via x-goog-content-length-range on the signed request.
+         * Create a short-lived signed PUT URL for client-side Supabase Storage upload
+         * @description Returns a short-lived (5 min default) Supabase Storage signed upload URL + token. The client uses `uploadToSignedUrl` (or a fetch PUT with the token) to send the file directly to Supabase Storage. Content-type and per-kind max size are validated on the request; bucket-level size caps in Supabase Storage backstop the limit.
          */
         post: {
             parameters: {
@@ -456,6 +452,7 @@ export interface paths {
                         "application/json": {
                             /** Format: uri */
                             uploadUrl: string;
+                            uploadToken: string;
                             objectPath: string;
                             /** Format: date-time */
                             expiresAt: string;
@@ -483,6 +480,2468 @@ export interface paths {
                         "application/json": {
                             error: string;
                             field?: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Provider sign-up — persist Provider row + set role/kind/state claims
+         * @description Creates a Provider row keyed by Supabase user id and writes custom claims to Supabase `app_metadata` (role=provider, kind, state, caregiver_category | specialty). Idempotent: re-posting identical attributes returns 200 with the existing row; mismatched kind / category / specialty / state returns 409 (role + kind + state are permanent per CONTEXT.md § Authentication / Account roles). A user already bound to role=parent or role=admin cannot sign up as provider — they must create a second account.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        kind: "caregiver";
+                        /** @enum {string} */
+                        caregiverCategory: "babysitter" | "tutor" | "nanny";
+                        /** @enum {string} */
+                        state: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                    } | {
+                        /** @enum {string} */
+                        kind: "specialist";
+                        /** @enum {string} */
+                        specialty: "slp" | "ot" | "aba" | "psychology" | "other";
+                        /** @enum {string} */
+                        state: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            id: string;
+                            uid: string;
+                            /** @enum {string} */
+                            kind: "caregiver" | "specialist";
+                            caregiverCategory: ("babysitter" | "tutor" | "nanny") | null;
+                            specialty: ("slp" | "ot" | "aba" | "psychology" | "other") | null;
+                            /** @enum {string} */
+                            state: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                            /** Format: date-time */
+                            createdAt: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            id: string;
+                            uid: string;
+                            /** @enum {string} */
+                            kind: "caregiver" | "specialist";
+                            caregiverCategory: ("babysitter" | "tutor" | "nanny") | null;
+                            specialty: ("slp" | "ot" | "aba" | "psychology" | "other") | null;
+                            /** @enum {string} */
+                            state: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                            /** Format: date-time */
+                            createdAt: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers/me/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the authenticated Provider's public-profile editor state
+         * @description Returns the Provider profile fields edited on the web portal — published rate, optional per-child surcharge (Babysitter/Nanny only), availability summary grid + note + paused flag, W-10 self-attestation toggle, bio, languages, specialty tags, photo. Creates an empty row on first read so the editor always has a target.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            providerId: string;
+                            /** @enum {string} */
+                            kind: "caregiver" | "specialist";
+                            caregiverCategory: ("babysitter" | "tutor" | "nanny") | null;
+                            specialty: ("slp" | "ot" | "aba" | "psychology" | "other") | null;
+                            displayName: string | null;
+                            headline: string | null;
+                            bio: string | null;
+                            languages: string[];
+                            specialtyTags: string[];
+                            photoObjectPath: string | null;
+                            publishedRateCents: number | null;
+                            perChildSurchargeCents: number | null;
+                            availabilityGrid: {
+                                mon?: {
+                                    morning?: boolean;
+                                    afternoon?: boolean;
+                                    evening?: boolean;
+                                };
+                                tue?: {
+                                    morning?: boolean;
+                                    afternoon?: boolean;
+                                    evening?: boolean;
+                                };
+                                wed?: {
+                                    morning?: boolean;
+                                    afternoon?: boolean;
+                                    evening?: boolean;
+                                };
+                                thu?: {
+                                    morning?: boolean;
+                                    afternoon?: boolean;
+                                    evening?: boolean;
+                                };
+                                fri?: {
+                                    morning?: boolean;
+                                    afternoon?: boolean;
+                                    evening?: boolean;
+                                };
+                                sat?: {
+                                    morning?: boolean;
+                                    afternoon?: boolean;
+                                    evening?: boolean;
+                                };
+                                sun?: {
+                                    morning?: boolean;
+                                    afternoon?: boolean;
+                                    evening?: boolean;
+                                };
+                            };
+                            availabilityNote: string | null;
+                            paused: boolean;
+                            w10TaxCreditFriendly: boolean;
+                            /** @enum {string} */
+                            rateUnit: "hour" | "session";
+                            multiChildSurchargeEligible: boolean;
+                            w10Eligible: boolean;
+                            stateRegisteredHomeChildcareBadge: {
+                                /** @enum {string} */
+                                state: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                                agencyName: string;
+                                programName: string;
+                                /** Format: date-time */
+                                verifiedAt: string;
+                            } | null;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update the authenticated Provider's public-profile editor state
+         * @description Partial update — any field omitted is left untouched. Per-child surcharge and W-10 toggle are rejected with 400 unless the Provider is a Babysitter or Nanny (kind=caregiver + caregiver_category in [babysitter,nanny]). Availability grid is normalised: only true cells are persisted.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        displayName?: string | null;
+                        headline?: string | null;
+                        bio?: string | null;
+                        languages?: string[];
+                        specialtyTags?: string[];
+                        photoObjectPath?: string | null;
+                        publishedRateCents?: number | null;
+                        perChildSurchargeCents?: number | null;
+                        availabilityGrid?: {
+                            mon?: {
+                                morning?: boolean;
+                                afternoon?: boolean;
+                                evening?: boolean;
+                            };
+                            tue?: {
+                                morning?: boolean;
+                                afternoon?: boolean;
+                                evening?: boolean;
+                            };
+                            wed?: {
+                                morning?: boolean;
+                                afternoon?: boolean;
+                                evening?: boolean;
+                            };
+                            thu?: {
+                                morning?: boolean;
+                                afternoon?: boolean;
+                                evening?: boolean;
+                            };
+                            fri?: {
+                                morning?: boolean;
+                                afternoon?: boolean;
+                                evening?: boolean;
+                            };
+                            sat?: {
+                                morning?: boolean;
+                                afternoon?: boolean;
+                                evening?: boolean;
+                            };
+                            sun?: {
+                                morning?: boolean;
+                                afternoon?: boolean;
+                                evening?: boolean;
+                            };
+                        };
+                        availabilityNote?: string | null;
+                        paused?: boolean;
+                        w10TaxCreditFriendly?: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            providerId: string;
+                            /** @enum {string} */
+                            kind: "caregiver" | "specialist";
+                            caregiverCategory: ("babysitter" | "tutor" | "nanny") | null;
+                            specialty: ("slp" | "ot" | "aba" | "psychology" | "other") | null;
+                            displayName: string | null;
+                            headline: string | null;
+                            bio: string | null;
+                            languages: string[];
+                            specialtyTags: string[];
+                            photoObjectPath: string | null;
+                            publishedRateCents: number | null;
+                            perChildSurchargeCents: number | null;
+                            availabilityGrid: {
+                                mon?: {
+                                    morning?: boolean;
+                                    afternoon?: boolean;
+                                    evening?: boolean;
+                                };
+                                tue?: {
+                                    morning?: boolean;
+                                    afternoon?: boolean;
+                                    evening?: boolean;
+                                };
+                                wed?: {
+                                    morning?: boolean;
+                                    afternoon?: boolean;
+                                    evening?: boolean;
+                                };
+                                thu?: {
+                                    morning?: boolean;
+                                    afternoon?: boolean;
+                                    evening?: boolean;
+                                };
+                                fri?: {
+                                    morning?: boolean;
+                                    afternoon?: boolean;
+                                    evening?: boolean;
+                                };
+                                sat?: {
+                                    morning?: boolean;
+                                    afternoon?: boolean;
+                                    evening?: boolean;
+                                };
+                                sun?: {
+                                    morning?: boolean;
+                                    afternoon?: boolean;
+                                    evening?: boolean;
+                                };
+                            };
+                            availabilityNote: string | null;
+                            paused: boolean;
+                            w10TaxCreditFriendly: boolean;
+                            /** @enum {string} */
+                            rateUnit: "hour" | "session";
+                            multiChildSurchargeEligible: boolean;
+                            w10Eligible: boolean;
+                            stateRegisteredHomeChildcareBadge: {
+                                /** @enum {string} */
+                                state: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                                agencyName: string;
+                                programName: string;
+                                /** Format: date-time */
+                                verifiedAt: string;
+                            } | null;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/v1/providers/me/verification": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the authenticated Provider's verification state + checklist facts
+         * @description Returns the current Verification state computed from per-step facts (email/phone/ID/screening/license) plus the raw timestamps that drive the design's 8-step checklist. Email + phone confirmations are mirrored from Supabase Auth on read so they reflect the latest session state.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            state: "unverified" | "email-verified" | "phone-verified" | "id-uploaded" | "screening-initiated" | "screening-passed" | "license-pending" | "license-verified" | "connect-pending" | "activated" | "rejected" | "holding-state-not-supported";
+                            /** @enum {string} */
+                            kind: "caregiver" | "specialist";
+                            /** @enum {string} */
+                            residentState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                            licenseBoardSupported: boolean;
+                            facts: {
+                                emailConfirmedAt: string | null;
+                                phoneConfirmedAt: string | null;
+                                idDocUploadedAt: string | null;
+                                idDocObjectPath: string | null;
+                                screeningInitiatedAt: string | null;
+                                screeningPassedAt: string | null;
+                                licenseVerifiedAt: string | null;
+                                connectAccountReadyAt: string | null;
+                                connectChargesEnabled: boolean;
+                                connectPayoutsEnabled: boolean;
+                                rejectedAt: string | null;
+                                rejectionReason: string | null;
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers/me/verification/phone-confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mirror Supabase phone confirmation into the verification facts
+         * @description Called by the Provider portal after the client completes Supabase phone OTP (supabase.auth.verifyOtp). Fetches the user from Supabase Admin, checks phone_confirmed_at, and records it on provider_verifications. Idempotent.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            state: "unverified" | "email-verified" | "phone-verified" | "id-uploaded" | "screening-initiated" | "screening-passed" | "license-pending" | "license-verified" | "connect-pending" | "activated" | "rejected" | "holding-state-not-supported";
+                            /** @enum {string} */
+                            kind: "caregiver" | "specialist";
+                            /** @enum {string} */
+                            residentState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                            licenseBoardSupported: boolean;
+                            facts: {
+                                emailConfirmedAt: string | null;
+                                phoneConfirmedAt: string | null;
+                                idDocUploadedAt: string | null;
+                                idDocObjectPath: string | null;
+                                screeningInitiatedAt: string | null;
+                                screeningPassedAt: string | null;
+                                licenseVerifiedAt: string | null;
+                                connectAccountReadyAt: string | null;
+                                connectChargesEnabled: boolean;
+                                connectPayoutsEnabled: boolean;
+                                rejectedAt: string | null;
+                                rejectionReason: string | null;
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers/me/verification/id-doc": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record a completed ID-document upload
+         * @description Called after the Provider portal uploads a government-issued ID through the signed-URL flow (POST /v1/uploads/signed-url with kind=id-doc → PUT to Supabase Storage). The body carries the returned objectPath; the server validates it is scoped to this user's id-doc namespace and records the upload timestamp.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        objectPath: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            state: "unverified" | "email-verified" | "phone-verified" | "id-uploaded" | "screening-initiated" | "screening-passed" | "license-pending" | "license-verified" | "connect-pending" | "activated" | "rejected" | "holding-state-not-supported";
+                            /** @enum {string} */
+                            kind: "caregiver" | "specialist";
+                            /** @enum {string} */
+                            residentState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                            licenseBoardSupported: boolean;
+                            facts: {
+                                emailConfirmedAt: string | null;
+                                phoneConfirmedAt: string | null;
+                                idDocUploadedAt: string | null;
+                                idDocObjectPath: string | null;
+                                screeningInitiatedAt: string | null;
+                                screeningPassedAt: string | null;
+                                licenseVerifiedAt: string | null;
+                                connectAccountReadyAt: string | null;
+                                connectChargesEnabled: boolean;
+                                connectPayoutsEnabled: boolean;
+                                rejectedAt: string | null;
+                                rejectionReason: string | null;
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers/me/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the authenticated Specialist's license + insurance credentials
+         * @description Returns the per-state license-board context (board name, register URL, hint) plus the current upload + decision state for the Specialist. Caregivers (kind=caregiver) get 409 — they never need a license.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            providerId: string;
+                            /** @enum {string} */
+                            kind: "caregiver" | "specialist";
+                            /** @enum {string} */
+                            residentState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                            specialty: ("slp" | "ot" | "aba" | "psychology" | "other") | null;
+                            licenseBoardSupported: boolean;
+                            defaultBoard: {
+                                /** @enum {string} */
+                                state: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                                /** @enum {string} */
+                                specialty: "slp" | "ot" | "aba" | "psychology" | "other";
+                                boardName: string;
+                                /** Format: uri */
+                                registerUrl: string;
+                                /** @enum {string} */
+                                mode: "api" | "portal-only";
+                                hint?: string;
+                            } | null;
+                            altBoardsInState: {
+                                /** @enum {string} */
+                                state: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                                /** @enum {string} */
+                                specialty: "slp" | "ot" | "aba" | "psychology" | "other";
+                                boardName: string;
+                                /** Format: uri */
+                                registerUrl: string;
+                                /** @enum {string} */
+                                mode: "api" | "portal-only";
+                                hint?: string;
+                            }[];
+                            licenseBoardState: ("AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY") | null;
+                            licenseNumber: string | null;
+                            licenseDocObjectPath: string | null;
+                            licenseUploadedAt: string | null;
+                            insuranceDocObjectPath: string | null;
+                            insuranceUploadedAt: string | null;
+                            decision: ("verified" | "rejected") | null;
+                            decisionAt: string | null;
+                            decisionByAdminUid: string | null;
+                            decisionNotes: string | null;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers/me/credentials/license": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record a completed Specialist license-document upload
+         * @description Called after the Provider portal uploads a license certificate through the signed-URL flow (POST /v1/uploads/signed-url with kind=license-doc). The body carries the returned objectPath plus optional licenseNumber and licenseBoardState. The server validates the objectPath is scoped to the caller and records the upload + metadata.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        objectPath: string;
+                        licenseNumber?: string | null;
+                        licenseBoardState?: ("AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY") | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            providerId: string;
+                            /** @enum {string} */
+                            kind: "caregiver" | "specialist";
+                            /** @enum {string} */
+                            residentState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                            specialty: ("slp" | "ot" | "aba" | "psychology" | "other") | null;
+                            licenseBoardSupported: boolean;
+                            defaultBoard: {
+                                /** @enum {string} */
+                                state: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                                /** @enum {string} */
+                                specialty: "slp" | "ot" | "aba" | "psychology" | "other";
+                                boardName: string;
+                                /** Format: uri */
+                                registerUrl: string;
+                                /** @enum {string} */
+                                mode: "api" | "portal-only";
+                                hint?: string;
+                            } | null;
+                            altBoardsInState: {
+                                /** @enum {string} */
+                                state: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                                /** @enum {string} */
+                                specialty: "slp" | "ot" | "aba" | "psychology" | "other";
+                                boardName: string;
+                                /** Format: uri */
+                                registerUrl: string;
+                                /** @enum {string} */
+                                mode: "api" | "portal-only";
+                                hint?: string;
+                            }[];
+                            licenseBoardState: ("AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY") | null;
+                            licenseNumber: string | null;
+                            licenseDocObjectPath: string | null;
+                            licenseUploadedAt: string | null;
+                            insuranceDocObjectPath: string | null;
+                            insuranceUploadedAt: string | null;
+                            decision: ("verified" | "rejected") | null;
+                            decisionAt: string | null;
+                            decisionByAdminUid: string | null;
+                            decisionNotes: string | null;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers/me/credentials/insurance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record a completed Specialist liability-insurance COI upload
+         * @description Called after the Provider portal uploads a Certificate of Insurance through the signed-URL flow (POST /v1/uploads/signed-url with kind=insurance-doc). Optional — encouraged but not required for activation.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        objectPath: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            providerId: string;
+                            /** @enum {string} */
+                            kind: "caregiver" | "specialist";
+                            /** @enum {string} */
+                            residentState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                            specialty: ("slp" | "ot" | "aba" | "psychology" | "other") | null;
+                            licenseBoardSupported: boolean;
+                            defaultBoard: {
+                                /** @enum {string} */
+                                state: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                                /** @enum {string} */
+                                specialty: "slp" | "ot" | "aba" | "psychology" | "other";
+                                boardName: string;
+                                /** Format: uri */
+                                registerUrl: string;
+                                /** @enum {string} */
+                                mode: "api" | "portal-only";
+                                hint?: string;
+                            } | null;
+                            altBoardsInState: {
+                                /** @enum {string} */
+                                state: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                                /** @enum {string} */
+                                specialty: "slp" | "ot" | "aba" | "psychology" | "other";
+                                boardName: string;
+                                /** Format: uri */
+                                registerUrl: string;
+                                /** @enum {string} */
+                                mode: "api" | "portal-only";
+                                hint?: string;
+                            }[];
+                            licenseBoardState: ("AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY") | null;
+                            licenseNumber: string | null;
+                            licenseDocObjectPath: string | null;
+                            licenseUploadedAt: string | null;
+                            insuranceDocObjectPath: string | null;
+                            insuranceUploadedAt: string | null;
+                            decision: ("verified" | "rejected") | null;
+                            decisionAt: string | null;
+                            decisionByAdminUid: string | null;
+                            decisionNotes: string | null;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/providers/{providerId}/license-verification": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Admin — read a Specialist Provider's license-board context + uploaded docs + decision
+         * @description Surfaces the per-state license-board metadata (board name + register URL + hint) so the admin can cross-check the uploaded license number on the right portal. Returns the same shape as the Provider-side endpoint plus the admin decision audit fields.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    providerId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            providerId: string;
+                            /** @enum {string} */
+                            kind: "caregiver" | "specialist";
+                            /** @enum {string} */
+                            residentState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                            specialty: ("slp" | "ot" | "aba" | "psychology" | "other") | null;
+                            licenseBoardSupported: boolean;
+                            defaultBoard: {
+                                /** @enum {string} */
+                                state: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                                /** @enum {string} */
+                                specialty: "slp" | "ot" | "aba" | "psychology" | "other";
+                                boardName: string;
+                                /** Format: uri */
+                                registerUrl: string;
+                                /** @enum {string} */
+                                mode: "api" | "portal-only";
+                                hint?: string;
+                            } | null;
+                            altBoardsInState: {
+                                /** @enum {string} */
+                                state: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                                /** @enum {string} */
+                                specialty: "slp" | "ot" | "aba" | "psychology" | "other";
+                                boardName: string;
+                                /** Format: uri */
+                                registerUrl: string;
+                                /** @enum {string} */
+                                mode: "api" | "portal-only";
+                                hint?: string;
+                            }[];
+                            licenseBoardState: ("AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY") | null;
+                            licenseNumber: string | null;
+                            licenseDocObjectPath: string | null;
+                            licenseUploadedAt: string | null;
+                            insuranceDocObjectPath: string | null;
+                            insuranceUploadedAt: string | null;
+                            decision: ("verified" | "rejected") | null;
+                            decisionAt: string | null;
+                            decisionByAdminUid: string | null;
+                            decisionNotes: string | null;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Admin — record a license-verification decision (verified | rejected)
+         * @description Admin manual verification flow per CONTEXT.md § Verification + ADR-0007 / OH-107. On `verified`, sets `provider_verifications.license_verified_at = now()`, which the Verification state machine reads to advance the Specialist toward `activated`. On `rejected`, sets `provider_verifications.rejected_at = now()` with the decision notes mirrored into rejection_reason.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    providerId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        decision: "verified" | "rejected";
+                        notes?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            providerId: string;
+                            /** @enum {string} */
+                            kind: "caregiver" | "specialist";
+                            /** @enum {string} */
+                            residentState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                            specialty: ("slp" | "ot" | "aba" | "psychology" | "other") | null;
+                            licenseBoardSupported: boolean;
+                            defaultBoard: {
+                                /** @enum {string} */
+                                state: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                                /** @enum {string} */
+                                specialty: "slp" | "ot" | "aba" | "psychology" | "other";
+                                boardName: string;
+                                /** Format: uri */
+                                registerUrl: string;
+                                /** @enum {string} */
+                                mode: "api" | "portal-only";
+                                hint?: string;
+                            } | null;
+                            altBoardsInState: {
+                                /** @enum {string} */
+                                state: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                                /** @enum {string} */
+                                specialty: "slp" | "ot" | "aba" | "psychology" | "other";
+                                boardName: string;
+                                /** Format: uri */
+                                registerUrl: string;
+                                /** @enum {string} */
+                                mode: "api" | "portal-only";
+                                hint?: string;
+                            }[];
+                            licenseBoardState: ("AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY") | null;
+                            licenseNumber: string | null;
+                            licenseDocObjectPath: string | null;
+                            licenseUploadedAt: string | null;
+                            insuranceDocObjectPath: string | null;
+                            insuranceUploadedAt: string | null;
+                            decision: ("verified" | "rejected") | null;
+                            decisionAt: string | null;
+                            decisionByAdminUid: string | null;
+                            decisionNotes: string | null;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers/me/home-childcare-registration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the authenticated Caregiver's state home-childcare registration context
+         * @description Returns the per-state home-childcare-licensing-agency context (agency name, programme name, register URL, admin hint) plus the current upload + admin-decision state. Eligibility: kind=caregiver AND caregiver_category in [babysitter, nanny] — Tutors and Specialists get 409. When the Provider's state is outside the launch slate, `homeChildcareBoardSupported` is false and `board` is null; the upload affordance should be hidden client-side.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            providerId: string;
+                            /** @enum {string} */
+                            kind: "caregiver" | "specialist";
+                            caregiverCategory: ("babysitter" | "tutor" | "nanny") | null;
+                            /** @enum {string} */
+                            residentState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                            homeChildcareBoardSupported: boolean;
+                            board: {
+                                /** @enum {string} */
+                                state: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                                agencyName: string;
+                                programName: string;
+                                /** Format: uri */
+                                registerUrl: string;
+                                hint: string;
+                            } | null;
+                            stateAtUpload: ("AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY") | null;
+                            certificateDocObjectPath: string | null;
+                            certificateUploadedAt: string | null;
+                            decision: ("verified" | "rejected") | null;
+                            decisionAt: string | null;
+                            decisionByAdminUid: string | null;
+                            decisionNotes: string | null;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Record a completed state home-childcare-registration certificate upload
+         * @description Called after the Provider portal uploads the state registration certificate through the signed-URL flow (POST /v1/uploads/signed-url with kind=state-childcare-registration). The body carries the returned objectPath; the server validates the objectPath is scoped to the caller and records the upload along with the Provider's resident state at upload time (so the badge keeps naming the correct agency if the Provider later moves).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        objectPath: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            providerId: string;
+                            /** @enum {string} */
+                            kind: "caregiver" | "specialist";
+                            caregiverCategory: ("babysitter" | "tutor" | "nanny") | null;
+                            /** @enum {string} */
+                            residentState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                            homeChildcareBoardSupported: boolean;
+                            board: {
+                                /** @enum {string} */
+                                state: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                                agencyName: string;
+                                programName: string;
+                                /** Format: uri */
+                                registerUrl: string;
+                                hint: string;
+                            } | null;
+                            stateAtUpload: ("AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY") | null;
+                            certificateDocObjectPath: string | null;
+                            certificateUploadedAt: string | null;
+                            decision: ("verified" | "rejected") | null;
+                            decisionAt: string | null;
+                            decisionByAdminUid: string | null;
+                            decisionNotes: string | null;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/providers/{providerId}/home-childcare-registration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Admin — read a Caregiver Provider's home-childcare-registration context + uploaded cert + decision
+         * @description Surfaces the per-state home-childcare-licensing-agency metadata (agency name + register URL + hint) so the admin can cross-check the uploaded certificate on the right state portal. Same response shape as the Provider-side endpoint.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    providerId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            providerId: string;
+                            /** @enum {string} */
+                            kind: "caregiver" | "specialist";
+                            caregiverCategory: ("babysitter" | "tutor" | "nanny") | null;
+                            /** @enum {string} */
+                            residentState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                            homeChildcareBoardSupported: boolean;
+                            board: {
+                                /** @enum {string} */
+                                state: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                                agencyName: string;
+                                programName: string;
+                                /** Format: uri */
+                                registerUrl: string;
+                                hint: string;
+                            } | null;
+                            stateAtUpload: ("AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY") | null;
+                            certificateDocObjectPath: string | null;
+                            certificateUploadedAt: string | null;
+                            decision: ("verified" | "rejected") | null;
+                            decisionAt: string | null;
+                            decisionByAdminUid: string | null;
+                            decisionNotes: string | null;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Admin — record a home-childcare-registration decision (verified | rejected)
+         * @description Admin manual verification flow per CONTEXT.md § CDCTC-eligibility & state childcare licensure. On `verified` the Provider's public profile gains the "State-registered home childcare" badge naming the specific state agency. On `rejected` the badge stays off. This decision is decoupled from the Verification state machine — it never blocks activation.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    providerId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        decision: "verified" | "rejected";
+                        notes?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            providerId: string;
+                            /** @enum {string} */
+                            kind: "caregiver" | "specialist";
+                            caregiverCategory: ("babysitter" | "tutor" | "nanny") | null;
+                            /** @enum {string} */
+                            residentState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                            homeChildcareBoardSupported: boolean;
+                            board: {
+                                /** @enum {string} */
+                                state: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+                                agencyName: string;
+                                programName: string;
+                                /** Format: uri */
+                                registerUrl: string;
+                                hint: string;
+                            } | null;
+                            stateAtUpload: ("AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY") | null;
+                            certificateDocObjectPath: string | null;
+                            certificateUploadedAt: string | null;
+                            decision: ("verified" | "rejected") | null;
+                            decisionAt: string | null;
+                            decisionByAdminUid: string | null;
+                            decisionNotes: string | null;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers/me/verification/screening/initiate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Initiate the $35 Stripe charge + create a background-screening row
+         * @description Creates a `provider_screenings` row in `payment_pending` and a Stripe PaymentIntent for the screening fee. The Provider confirms the intent client-side; on `payment_intent.succeeded` the Stripe webhook handler creates the Checkr invitation and records `screening_initiated_at`. Returns the PaymentIntent client_secret so the web portal can mount Stripe Elements. Rejects if the Provider hasn't completed the prior verification steps (ID upload) or already has an in-flight / cleared screening.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            screeningId: string;
+                            clientSecret: string;
+                            paymentIntentId: string;
+                            amountCents: number;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers/me/stripe-connect/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the authenticated Provider's Stripe Connect Express account summary
+         * @description Returns the read-only Connect account state mirrored from `account.updated` webhooks. Includes charges_enabled / payouts_enabled / details_submitted, the disabled_reason if Stripe has paused the account, and the requirement lists (currently_due, past_due, pending_verification) so the UI can surface what the Provider still needs to fix on Stripe's side. `accountReady` is true iff both capabilities are enabled — this is the OH-110 gate for verification activation + appearing in search.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            hasAccount: boolean;
+                            stripeAccountId: string | null;
+                            chargesEnabled: boolean;
+                            payoutsEnabled: boolean;
+                            detailsSubmitted: boolean;
+                            disabledReason: string | null;
+                            accountReady: boolean;
+                            accountReadyAt: string | null;
+                            requirementsCurrentlyDue: string[];
+                            requirementsPastDue: string[];
+                            requirementsPendingVerification: string[];
+                            lastWebhookAt: string | null;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers/me/stripe-connect/onboarding-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create / reuse a Stripe Connect Express account and return a hosted onboarding URL
+         * @description Idempotent: if the Provider already has a `provider_connect_accounts` row with a `stripe_account_id`, reuses it; otherwise creates a fresh Express account (type=express, country=US, capabilities=card_payments+transfers, business_type=individual) and stamps it onto the row. Returns a freshly-issued account-onboarding link the client should redirect to. Stripe redirects back to `STRIPE_CONNECT_RETURN_URL` on completion (the verification page picks up the change via the webhook + summary refresh).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            stripeAccountId: string;
+                            /** Format: uri */
+                            url: string;
+                            /** Format: date-time */
+                            expiresAt: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers/me/stripe-connect/dashboard-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue a Stripe Express dashboard login link — requires step-up MFA. Used for bank-detail edits and payout withdrawals (OH-110 AC #3, AC #4).
+         * @description Returns a one-time Stripe Express dashboard login URL. Bank-detail edits and payout withdrawals both happen inside the Express dashboard, so this single MFA-gated endpoint covers OH-110 AC #3 (bank-detail change requires step-up MFA) and AC #4 (withdrawal initiation requires step-up MFA). Requires a step-up MFA grant issued within the last 5 minutes (`POST /v1/auth/step-up` from OH-103); without it the auth plugin returns 403 `step_up_required`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uri */
+                            url: string;
+                            /** Format: date-time */
+                            createdAt: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/webhooks/stripe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stripe webhook — completes the OH-106 screening charge
+         * @description Receives Stripe webhook deliveries. Verifies the `Stripe-Signature` header (HMAC-SHA256 of `t.payload` with the webhook signing secret), then handles `payment_intent.succeeded` events whose metadata.purpose is `screening` by creating the Checkr invitation and stamping `screening_initiated_at`. Other event types acknowledge with 200.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            received: true;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/webhooks/stripe-connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stripe Connect Express webhook — mirrors account.updated onto provider_connect_accounts
+         * @description Receives Stripe Connect webhook deliveries (separate endpoint + signing secret from the screening webhook). Verifies the `Stripe-Signature` header using `STRIPE_CONNECT_WEBHOOK_SECRET`, then on `account.updated` mirrors charges_enabled / payouts_enabled / details_submitted / requirements / disabled_reason onto the row keyed by `stripe_account_id`. When both capabilities transition to enabled for the first time, stamps `account_ready_at` — that timestamp is the OH-110 gate on verification activation and search visibility.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            received: true;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/webhooks/checkr": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Checkr (background-check vendor) webhook — drives the Verification state machine
+         * @description Receives Checkr `report.*` deliveries. Verifies the `X-Checkr-Signature` HMAC against the webhook secret, normalizes the payload via the vendor-agnostic adapter, folds the result into the verification facts (screening_passed_at / rejected_at), and stamps the raw payload onto `provider_screenings.raw_payload` for FCRA-windowed retention. A second vendor (Sterling, GoodHire) would land on a sibling route using the same adapter contract.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            received: true;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
                         };
                     };
                 };

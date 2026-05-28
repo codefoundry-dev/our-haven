@@ -5,45 +5,137 @@ const EnvSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(8080),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 
-  GCP_PROJECT_ID: z.string().min(1),
-  GCP_REGION: z
-    .enum(['us-east1', 'us-east4'])
-    .default('us-east1')
-    .describe('Pinned to US per ADR-0004 + ADR-0009. us-east1 default, us-east4 fallback.'),
-  FIRESTORE_LOCATION: z
-    .literal('nam5')
-    .default('nam5')
-    .describe('Firestore US multi-region per ADR-0004 § 5.'),
-
   DATABASE_URL: z
     .string()
     .url()
-    .describe('Postgres connection string. Cloud SQL in prod, local Postgres in dev.'),
+    .describe(
+      'Postgres connection string. Supabase Postgres (US `us-east-1`) in prod, local Postgres in dev. ADR-0010.',
+    ),
   DATABASE_SSL: z.coerce.boolean().default(false),
 
-  GCS_UPLOAD_BUCKET: z
+  SUPABASE_URL: z
+    .string()
+    .url()
+    .describe('Supabase project URL, e.g. https://<ref>.supabase.co. US-region project per ADR-0010.'),
+  SUPABASE_SERVICE_ROLE_KEY: z
     .string()
     .min(1)
-    .describe('US-region GCS bucket for signed-URL uploads (ID docs, license docs, etc.).'),
-  GCS_SIGNED_URL_TTL_SECONDS: z.coerce.number().int().positive().max(3600).default(300),
+    .describe(
+      'Supabase service-role key. Server-only; gives the backend full admin access (auth.admin.updateUserById, storage create-signed-upload-url, etc.). NEVER ship to clients.',
+    ),
+  SUPABASE_JWT_SECRET: z
+    .string()
+    .min(1)
+    .describe(
+      'Supabase project JWT secret (HS256). Used by the auth plugin to verify access tokens locally without an extra network call.',
+    ),
+  SUPABASE_STORAGE_BUCKET: z
+    .string()
+    .min(1)
+    .describe('Supabase Storage bucket name for signed-URL uploads (ID docs, license docs, etc.).'),
+  SUPABASE_SIGNED_URL_TTL_SECONDS: z.coerce.number().int().positive().max(3600).default(300),
 
-  CLOUD_TASKS_QUEUE_BOOKING: z
+  QUEUE_BOOKING: z
     .string()
     .min(1)
-    .default('booking-lifecycle')
-    .describe('Cloud Tasks queue for booking 24h expiry + session 24h auto-confirm.'),
-  CLOUD_TASKS_QUEUE_RETENTION: z
+    .default('booking_lifecycle')
+    .describe('pgmq queue for booking 24h expiry + session 24h auto-confirm.'),
+  QUEUE_RETENTION: z
     .string()
     .min(1)
-    .default('retention-planner')
-    .describe('Cloud Tasks queue for retention/erasure jobs.'),
+    .default('retention_planner')
+    .describe('pgmq queue for retention/erasure jobs.'),
 
-  FIREBASE_SERVICE_ACCOUNT_PATH: z
+  LICENSE_BOARD_SUPPORTED_STATES: z
     .string()
+    .default('')
+    .describe(
+      'Comma-separated US-state codes whose per-state Specialist license-board adapter has shipped (OH-107). Specialists outside this list route to verification holding-state-not-supported. Empty = no adapter yet.',
+    ),
+
+  STRIPE_SECRET_KEY: z
+    .string()
+    .min(1)
+    .describe('Stripe secret API key (sk_test_… in dev, sk_live_… in prod). Server-only.'),
+  STRIPE_WEBHOOK_SECRET: z
+    .string()
+    .min(1)
+    .describe(
+      'Stripe webhook signing secret (whsec_…) for the screening-charge endpoint. Per Stripe webhook setup.',
+    ),
+  STRIPE_CONNECT_WEBHOOK_SECRET: z
+    .string()
+    .min(1)
+    .describe(
+      'Stripe Connect webhook signing secret (whsec_…) for `account.updated` events on Provider Connect Express accounts (OH-110). Configured separately from STRIPE_WEBHOOK_SECRET because Connect events ship on a distinct webhook endpoint.',
+    ),
+  STRIPE_CONNECT_RETURN_URL: z
+    .string()
+    .url()
+    .default('http://localhost:3000/portal/verification?stripe=return')
+    .describe(
+      'Where Stripe redirects a Provider after they finish (or close) the hosted Connect Express onboarding flow. The page should re-fetch the verification + Stripe-Connect summary to reflect new capabilities.',
+    ),
+  STRIPE_CONNECT_REFRESH_URL: z
+    .string()
+    .url()
+    .default('http://localhost:3000/portal/verification?stripe=refresh')
+    .describe(
+      'Where Stripe redirects when the Provider needs a fresh onboarding link mid-flow (e.g. the previous link expired). The page should request a new onboarding link and continue.',
+    ),
+  SCREENING_CHARGE_CENTS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(3500)
+    .describe('Amount charged to the Provider when initiating background screening (cents). $35 per ADR-0007.'),
+
+  // OH-111 Stripe Tax. Wired up at launch across all US states per
+  // ADR-0009 / CONTEXT.md § Sales tax model. The two tax codes are Stripe
+  // Tax product-category codes (https://docs.stripe.com/tax/tax-codes) —
+  // tweak per Stripe's taxonomy if their guidance shifts.
+  STRIPE_TAX_SUBSCRIPTION_TAX_CODE: z
+    .string()
+    .min(1)
+    .default('txcd_10103001')
+    .describe(
+      'Stripe Tax product tax code for Parent Subscription line items. `txcd_10103001` = "Software as a service (SaaS) — business use" which Stripe Tax routes per the subscriber\'s state for digital-access subscription taxability decisions.',
+    ),
+  STRIPE_TAX_COMMISSION_TAX_CODE: z
+    .string()
+    .min(1)
+    .default('txcd_20030000')
+    .describe(
+      'Stripe Tax product tax code for Commission line items. `txcd_20030000` = "Services — general" — Commission is a B2B marketplace facilitator service charged to the Provider; Stripe Tax decides taxability per the Provider\'s state.',
+    ),
+  STRIPE_TAX_ORIGIN_STATE: z
+    .string()
+    .length(2)
     .optional()
     .describe(
-      'Path to Firebase Admin service-account JSON. Omit in Cloud Run (uses workload identity / ADC).',
+      '2-letter US-state code where Our Haven is registered as the seller. Optional — when omitted, Stripe Tax falls back to the platform Stripe account\'s primary address for origin.',
     ),
+
+  CHECKR_API_KEY: z
+    .string()
+    .min(1)
+    .describe('Checkr secret API key. Used with HTTP Basic auth (key as username, empty password).'),
+  CHECKR_WEBHOOK_SECRET: z
+    .string()
+    .min(1)
+    .describe('Checkr webhook signing secret. HMAC-SHA256 over the raw body; matched against X-Checkr-Signature.'),
+  CHECKR_PACKAGE: z
+    .string()
+    .min(1)
+    .default('tasker_standard')
+    .describe(
+      'Checkr package slug — `tasker_standard` for the standard county+national+SO+SSN package per ADR-0007. May change if Checkr quotes a startup-discount package.',
+    ),
+  CHECKR_API_BASE: z
+    .string()
+    .url()
+    .default('https://api.checkr.com/v1')
+    .describe('Checkr API base URL. Overridable for staging / sandbox.'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

@@ -5,7 +5,7 @@
  *   - hold all v1 business rules (Booking lifecycle, Pricing & Commission,
  *     Cancellation policy, Disintermediation detector, Search ranking scorer,
  *     Rating reveal logic, Verification workflow, Retention/erasure planner),
- *   - import nothing from the database, Stripe, Twilio, Firebase, GCP, etc.,
+ *   - import nothing from the database, Stripe, Twilio, Supabase, Fly.io, etc.,
  *   - receive collaborators (db, clock, vendor adapters) at the handler layer.
  *
  * Phase 2 ticket 2.1 ships the package shell. Subsequent Phase 2 tickets
@@ -19,4 +19,7 @@ export * from './disintermediation/index.js';
 export * from './search-ranking/index.js';
 export * from './rating-reveal/index.js';
 export * from './verification-workflow/index.js';
+export * from './background-check/index.js';
+export * from './license-board/index.js';
+export * from './home-childcare-license-board/index.js';
 export * from './retention-planner/index.js';

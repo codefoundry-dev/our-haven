@@ -19,6 +19,7 @@ export default defineConfig({
         'src',
         'index.ts',
       ),
+      '@our-haven/shared': resolve(here, '..', '..', 'packages', 'shared', 'src', 'index.ts'),
     },
   },
   test: {

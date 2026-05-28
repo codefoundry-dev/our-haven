@@ -10,8 +10,8 @@ This repo is a **monorepo** holding every v1 surface:
 our-haven/
 ├── apps/
 │   ├── mobile/         React Native + Expo SDK 56 — Parent + Provider mobile app (Phase 3)
-│   ├── backend/        Node + TS + Fastify + OpenAPI + Postgres + Firestore (Phase 2)
-│   ├── provider-web/   Provider web portal — KYC, license uploads, payout mgmt (Phase 2, not yet scaffolded)
+│   ├── backend/        Node + TS + Fastify + OpenAPI + Postgres (Phase 2, deploys to Fly.io)
+│   ├── provider-web/   Provider web portal — KYC, license uploads, payout mgmt (Phase 2, Next.js → Vercel)
 │   └── admin/          Admin dashboard — verification queue, T&S, metrics (Phase 2, not yet scaffolded)
 ├── packages/
 │   ├── openapi-types/  TS types generated from apps/backend/openapi/openapi.yaml — shared by all apps
@@ -23,17 +23,19 @@ our-haven/
 | Layer | Technology |
 |---|---|
 | Mobile (Parent + Provider) | React Native + Expo SDK 56 (TypeScript) — `apps/mobile` |
-| Provider web portal | TypeScript (TBD framework) — `apps/provider-web` |
-| Admin dashboard | TypeScript (TBD framework) — `apps/admin`, TOTP MFA on every sign-in |
-| Backend API | Node + TypeScript + Fastify, OpenAPI-first REST, ADR-0004 — `apps/backend` |
-| Auth | Firebase Auth (US identity pool) |
-| Database | PostgreSQL (Cloud SQL) — system of record; Firestore (`nam5`) — messaging fan-out only |
+| Provider web portal | Next.js 16 (TypeScript), hosted on Vercel — `apps/provider-web` |
+| Admin dashboard | Next.js (TypeScript), hosted on Vercel — `apps/admin`, TOTP MFA on every sign-in |
+| Backend API | Node + TypeScript + Fastify, OpenAPI-first REST, ADR-0004 §§1–3,8 — `apps/backend` |
+| Auth | Supabase Auth (US-region project) |
+| Database | PostgreSQL on Supabase (`us-east-1`) — system of record + Supabase Realtime for live messaging fan-out |
+| File storage | Supabase Storage (US region) — signed-URL uploads for ID docs, license docs, etc. |
+| Background jobs | `pgmq` + `pg_cron` on Supabase Postgres — delayed and periodic jobs |
 | Payments | Stripe Connect Express (US entity) — commission marketplace + Parent Subscription |
 | Tax | Stripe Tax — per-state nexus + taxability decisions on Subscription + Commission |
 | Background screening | Checkr — standard package; ADR-0007 |
 | Video | Daily.co (US rooms) — embedded, ad-hoc, either party; ADR-0008 |
-| Notifications | FCM (push), SendGrid (email), Twilio (SMS) |
-| Hosting | GCP Cloud Run + Cloud SQL + Cloud Storage + Cloud Tasks + Cloud Scheduler — `us-east1` default, `us-east4` fallback |
+| Notifications | Expo Push (FCM/APNs), SendGrid (email), Twilio (SMS) |
+| Hosting | Fly.io `iad` (Ashburn, VA) for the Fastify backend + Vercel for the Next.js web surfaces + Supabase for Auth/Postgres/Realtime/Storage. Per ADR-0010. |
 
 ## Getting started
 
@@ -55,10 +57,12 @@ npm run mobile:web
 
 ```bash
 cp apps/backend/.env.example apps/backend/.env
-docker compose -f apps/backend/docker-compose.yml up -d   # local Postgres + Firestore emulator
+docker compose -f apps/backend/docker-compose.yml up -d   # local Postgres
 npm run backend                                            # http://localhost:8080  (Swagger UI at /docs)
 npm run backend:test
 ```
+
+For the full local Supabase stack (Auth + Storage + Realtime), install the Supabase CLI and run `supabase start` from the repo root instead.
 
 See `apps/backend/README.md` for full details.
 
@@ -89,6 +93,7 @@ Key ADRs:
 - **ADR-0007** — Background screening: Checkr standard package, not statutory Florida Level 2
 - **ADR-0008** — Embedded video calls via Daily.co — ad-hoc, in-chat, either party
 - **ADR-0009** — US-national launch (supersedes ADR-0003)
+- **ADR-0010** — Supabase + Fly.io + Vercel platform (supersedes ADR-0004 §§ 4–7 — Firestore, Firebase Auth, GCP hosting)
 
 ## Compliance context
 

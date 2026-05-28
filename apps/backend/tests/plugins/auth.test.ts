@@ -1,40 +1,28 @@
 import Fastify from 'fastify';
 import { serializerCompiler, validatorCompiler, type ZodTypeProvider } from 'fastify-type-provider-zod';
-import type { DecodedIdToken } from 'firebase-admin/auth';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { AppDeps } from '@/app.js';
 import { loadEnv, resetEnvForTests } from '@/config/env.js';
 import { authPlugin, type RequireAuthOptions } from '@/plugins/auth.js';
 
-function makeDeps(overrides?: {
-  verifyIdToken?: (token: string, checkRevoked?: boolean) => Promise<DecodedIdToken>;
-}): AppDeps {
+import { applyTestEnv, mintAccessToken } from '../helpers/test-jwt.js';
+
+function makeDeps(): AppDeps {
   resetEnvForTests();
-  process.env.NODE_ENV = 'test';
-  process.env.GCP_PROJECT_ID = 'our-haven-test';
-  process.env.DATABASE_URL = 'postgres://test:test@localhost:5432/our_haven_test';
-  process.env.GCS_UPLOAD_BUCKET = 'our-haven-test-bucket';
-  process.env.LOG_LEVEL = 'fatal';
+  applyTestEnv();
   const env = loadEnv();
 
   const passThrough = new Proxy({} as never, { get: () => passThrough });
 
-  const verifyIdToken =
-    overrides?.verifyIdToken ??
-    vi.fn(async () => {
-      throw new Error('verifyIdToken not stubbed for this test');
-    });
-
   return {
     env,
     db: passThrough,
-    firebase: {
-      auth: { verifyIdToken, setCustomUserClaims: vi.fn() } as never,
-      firestore: passThrough,
-    },
+    supabase: { admin: passThrough },
     storage: passThrough,
-    tasks: passThrough,
+    queue: passThrough,
+    stripe: passThrough,
+    backgroundCheck: passThrough,
   };
 }
 
@@ -49,25 +37,11 @@ async function buildTestApp(deps: AppDeps, opts?: RequireAuthOptions) {
     uid: req.principal!.uid,
     role: req.principal!.role,
     kind: req.principal!.kind,
+    secondFactor: req.principal!.secondFactor,
   }));
 
   return app;
 }
-
-const validDecoded = (extra?: Partial<DecodedIdToken & Record<string, unknown>>): DecodedIdToken =>
-  ({
-    uid: 'firebase-uid-123',
-    sub: 'firebase-uid-123',
-    aud: 'our-haven-test',
-    iss: 'https://securetoken.google.com/our-haven-test',
-    iat: Math.floor(Date.now() / 1000) - 5,
-    exp: Math.floor(Date.now() / 1000) + 3600,
-    auth_time: Math.floor(Date.now() / 1000) - 60,
-    email: 'parent@example.com',
-    phone_number: null,
-    firebase: { identities: {}, sign_in_provider: 'password' },
-    ...extra,
-  }) as unknown as DecodedIdToken;
 
 describe('auth plugin — requireAuth()', () => {
   beforeEach(() => {
@@ -99,19 +73,13 @@ describe('auth plugin — requireAuth()', () => {
     }
   });
 
-  it('returns 401 when verifyIdToken throws', async () => {
-    const app = await buildTestApp(
-      makeDeps({
-        verifyIdToken: vi.fn(async () => {
-          throw new Error('expired');
-        }),
-      }),
-    );
+  it('returns 401 when token signature is invalid', async () => {
+    const app = await buildTestApp(makeDeps());
     try {
       const res = await app.inject({
         method: 'GET',
         url: '/probe',
-        headers: { authorization: 'Bearer bogus' },
+        headers: { authorization: 'Bearer not.a.real.jwt' },
       });
       expect(res.statusCode).toBe(401);
       expect(res.json()).toEqual({ error: 'invalid_token' });
@@ -120,35 +88,34 @@ describe('auth plugin — requireAuth()', () => {
     }
   });
 
-  it('populates principal on a valid token', async () => {
-    const app = await buildTestApp(
-      makeDeps({
-        verifyIdToken: vi.fn(async () => validDecoded({ role: 'parent' })),
-      }),
-    );
+  it('populates principal on a valid token (parent)', async () => {
+    const app = await buildTestApp(makeDeps());
+    const token = await mintAccessToken({
+      sub: 'supabase-uid-123',
+      email: 'parent@example.com',
+      appMetadata: { role: 'parent' },
+    });
     try {
       const res = await app.inject({
         method: 'GET',
         url: '/probe',
-        headers: { authorization: 'Bearer good' },
+        headers: { authorization: `Bearer ${token}` },
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ uid: 'firebase-uid-123', role: 'parent', kind: null });
+      expect(res.json()).toMatchObject({ uid: 'supabase-uid-123', role: 'parent', kind: null });
     } finally {
       await app.close();
     }
   });
 
   it('returns 403 when token has no role claim but route requires one', async () => {
-    const deps = makeDeps({
-      verifyIdToken: vi.fn(async () => validDecoded()),
-    });
-    const app = await buildTestApp(deps, { roles: ['parent'] });
+    const app = await buildTestApp(makeDeps(), { roles: ['parent'] });
+    const token = await mintAccessToken({ sub: 'supabase-uid-123' });
     try {
       const res = await app.inject({
         method: 'GET',
         url: '/probe',
-        headers: { authorization: 'Bearer good' },
+        headers: { authorization: `Bearer ${token}` },
       });
       expect(res.statusCode).toBe(403);
       expect(res.json()).toEqual({ error: 'forbidden_role' });
@@ -158,15 +125,16 @@ describe('auth plugin — requireAuth()', () => {
   });
 
   it('returns 403 when role mismatches', async () => {
-    const deps = makeDeps({
-      verifyIdToken: vi.fn(async () => validDecoded({ role: 'parent' })),
+    const app = await buildTestApp(makeDeps(), { roles: ['admin'] });
+    const token = await mintAccessToken({
+      sub: 'supabase-uid-123',
+      appMetadata: { role: 'parent' },
     });
-    const app = await buildTestApp(deps, { roles: ['admin'] });
     try {
       const res = await app.inject({
         method: 'GET',
         url: '/probe',
-        headers: { authorization: 'Bearer good' },
+        headers: { authorization: `Bearer ${token}` },
       });
       expect(res.statusCode).toBe(403);
     } finally {
@@ -174,18 +142,17 @@ describe('auth plugin — requireAuth()', () => {
     }
   });
 
-  it('honors provider kind from custom claims', async () => {
-    const app = await buildTestApp(
-      makeDeps({
-        verifyIdToken: vi.fn(async () => validDecoded({ role: 'provider', kind: 'specialist' })),
-      }),
-      { roles: ['provider'] },
-    );
+  it('honors provider kind from app_metadata', async () => {
+    const app = await buildTestApp(makeDeps(), { roles: ['provider'] });
+    const token = await mintAccessToken({
+      sub: 'supabase-uid-123',
+      appMetadata: { role: 'provider', kind: 'specialist' },
+    });
     try {
       const res = await app.inject({
         method: 'GET',
         url: '/probe',
-        headers: { authorization: 'Bearer good' },
+        headers: { authorization: `Bearer ${token}` },
       });
       expect(res.statusCode).toBe(200);
       expect(res.json()).toMatchObject({ role: 'provider', kind: 'specialist' });
@@ -195,19 +162,62 @@ describe('auth plugin — requireAuth()', () => {
   });
 
   it('strips kind for non-provider roles', async () => {
-    const app = await buildTestApp(
-      makeDeps({
-        verifyIdToken: vi.fn(async () => validDecoded({ role: 'parent', kind: 'specialist' })),
-      }),
-    );
+    const app = await buildTestApp(makeDeps());
+    const token = await mintAccessToken({
+      sub: 'supabase-uid-123',
+      appMetadata: { role: 'parent', kind: 'specialist' },
+    });
     try {
       const res = await app.inject({
         method: 'GET',
         url: '/probe',
-        headers: { authorization: 'Bearer good' },
+        headers: { authorization: `Bearer ${token}` },
       });
       expect(res.statusCode).toBe(200);
       expect(res.json()).toMatchObject({ role: 'parent', kind: null });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('derives secondFactor=totp from aal2 + amr={mfa/totp}', async () => {
+    const app = await buildTestApp(makeDeps());
+    const token = await mintAccessToken({
+      sub: 'supabase-uid-123',
+      appMetadata: { role: 'provider', kind: 'caregiver' },
+      aal: 'aal2',
+      amr: [
+        { method: 'password', timestamp: Math.floor(Date.now() / 1000) - 60 },
+        { method: 'mfa/totp', timestamp: Math.floor(Date.now() / 1000) - 5 },
+      ],
+    });
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/probe',
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ secondFactor: 'totp' });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('leaves secondFactor null on aal1 tokens', async () => {
+    const app = await buildTestApp(makeDeps());
+    const token = await mintAccessToken({
+      sub: 'supabase-uid-123',
+      appMetadata: { role: 'provider', kind: 'caregiver' },
+    });
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/probe',
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ secondFactor: null });
     } finally {
       await app.close();
     }

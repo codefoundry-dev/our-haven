@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { Storage, type Bucket } from '@google-cloud/storage';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 import type { Env } from '@/config/env.js';
 
@@ -13,6 +13,7 @@ export interface SignedUploadRequest {
 
 export interface SignedUploadResult {
   uploadUrl: string;
+  uploadToken: string;
   objectPath: string;
   expiresAt: string;
 }
@@ -36,13 +37,12 @@ export class UploadValidationError extends Error {
 }
 
 export interface StorageHandles {
-  bucket: Bucket;
+  bucket: string;
   createSignedUploadUrl(req: SignedUploadRequest): Promise<SignedUploadResult>;
 }
 
-export function initStorage(env: Env): StorageHandles {
-  const storage = new Storage({ projectId: env.GCP_PROJECT_ID });
-  const bucket = storage.bucket(env.GCS_UPLOAD_BUCKET);
+export function initStorage(env: Env, supabase: SupabaseClient): StorageHandles {
+  const bucket = env.SUPABASE_STORAGE_BUCKET;
 
   return {
     bucket,
@@ -56,21 +56,17 @@ export function initStorage(env: Env): StorageHandles {
       }
       const extension = req.contentType === 'application/pdf' ? 'pdf' : req.contentType.split('/')[1];
       const objectPath = `${req.kind}/${req.ownerId}/${randomUUID()}.${extension}`;
-      const expiresAtMs = Date.now() + env.GCS_SIGNED_URL_TTL_SECONDS * 1000;
+      const expiresAtMs = Date.now() + env.SUPABASE_SIGNED_URL_TTL_SECONDS * 1000;
 
-      const [uploadUrl] = await bucket.file(objectPath).getSignedUrl({
-        version: 'v4',
-        action: 'write',
-        expires: expiresAtMs,
-        contentType: req.contentType,
-        extensionHeaders: {
-          'x-goog-content-length-range': `0,${maxBytes}`,
-        },
-      });
+      const { data, error } = await supabase.storage.from(bucket).createSignedUploadUrl(objectPath);
+      if (error || !data) {
+        throw new Error(`Supabase Storage createSignedUploadUrl failed: ${error?.message ?? 'no data'}`);
+      }
 
       return {
-        uploadUrl,
-        objectPath,
+        uploadUrl: data.signedUrl,
+        uploadToken: data.token,
+        objectPath: data.path,
         expiresAt: new Date(expiresAtMs).toISOString(),
       };
     },

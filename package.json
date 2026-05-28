@@ -16,6 +16,8 @@
     "backend": "npm run dev --workspace=@our-haven/backend",
     "backend:test": "npm test --workspace=@our-haven/backend",
     "backend:build": "npm run build --workspace=@our-haven/backend",
+    "provider-web": "npm run dev --workspace=@our-haven/provider-web",
+    "provider-web:build": "npm run build --workspace=@our-haven/provider-web",
     "openapi:generate": "npm run generate --workspace=@our-haven/openapi-types",
     "domain:test": "npm test --workspace=@our-haven/domain",
     "typecheck": "npm run typecheck --workspaces --if-present",

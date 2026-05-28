@@ -1,14 +1,13 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
-import type { DecodedIdToken } from 'firebase-admin/auth';
+import { jwtVerify } from 'jose';
 
-import type { Principal, SecondFactor } from '@/auth/principal.js';
+import type { Principal, SecondFactor, SupabaseJwtPayload } from '@/auth/principal.js';
 import { isProviderKind, isRole, type Role } from '@/auth/roles.js';
 
 export interface RequireAuthOptions {
   roles?: Role[];
   stepUpMaxAgeSec?: number;
-  checkRevoked?: boolean;
 }
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -25,6 +24,8 @@ declare module 'fastify' {
 const authPluginCallback: FastifyPluginAsync = async (app) => {
   app.decorateRequest('principal', null);
 
+  const jwtSecret = new TextEncoder().encode(app.deps.env.SUPABASE_JWT_SECRET);
+
   const requireAuth = (opts: RequireAuthOptions = {}): PreHandler => {
     return async (req, reply) => {
       const header = req.headers.authorization;
@@ -34,16 +35,20 @@ const authPluginCallback: FastifyPluginAsync = async (app) => {
         return;
       }
 
-      let decoded: DecodedIdToken;
+      let payload: SupabaseJwtPayload;
       try {
-        decoded = await app.deps.firebase.auth.verifyIdToken(token, opts.checkRevoked ?? false);
+        const verified = await jwtVerify(token, jwtSecret, {
+          algorithms: ['HS256'],
+          audience: 'authenticated',
+        });
+        payload = verified.payload as SupabaseJwtPayload;
       } catch (err) {
-        req.log.warn({ err }, 'firebase id token verification failed');
+        req.log.warn({ err }, 'supabase access token verification failed');
         reply.code(401).send({ error: 'invalid_token' });
         return;
       }
 
-      const principal = principalFromToken(decoded);
+      const principal = principalFromPayload(payload);
       req.principal = principal;
 
       if (opts.roles && opts.roles.length > 0) {
@@ -84,23 +89,29 @@ function extractBearer(header: string | undefined): string | null {
   return token.length > 0 ? token : null;
 }
 
-function principalFromToken(decoded: DecodedIdToken): Principal {
-  const rawRole = (decoded as Record<string, unknown>).role;
-  const rawKind = (decoded as Record<string, unknown>).kind;
-  const role = isRole(rawRole) ? rawRole : null;
-  const kind = isProviderKind(rawKind) ? rawKind : null;
-  const sf = decoded.firebase?.sign_in_second_factor;
-  const secondFactor: SecondFactor | null = sf === 'totp' || sf === 'phone' ? sf : null;
+function principalFromPayload(payload: SupabaseJwtPayload): Principal {
+  const appMeta = (payload.app_metadata ?? {}) as Record<string, unknown>;
+  const role = isRole(appMeta.role) ? appMeta.role : null;
+  const kind = isProviderKind(appMeta.kind) ? appMeta.kind : null;
 
   return {
-    uid: decoded.uid,
+    uid: payload.sub,
     role,
     kind: role === 'provider' ? kind : null,
-    email: decoded.email ?? null,
-    phone: decoded.phone_number ?? null,
-    secondFactor,
-    claims: decoded,
+    email: payload.email ?? null,
+    phone: payload.phone ?? null,
+    secondFactor: deriveSecondFactor(payload),
+    claims: payload,
   };
+}
+
+function deriveSecondFactor(payload: SupabaseJwtPayload): SecondFactor | null {
+  if (payload.aal !== 'aal2') return null;
+  const amr = payload.amr ?? [];
+  const methods = new Set(amr.map((entry) => entry.method));
+  if (methods.has('totp') || methods.has('mfa/totp')) return 'totp';
+  if (methods.has('phone') || methods.has('mfa/phone') || methods.has('phone_otp')) return 'phone';
+  return null;
 }
 
 export const authPlugin = fp(authPluginCallback, { name: 'auth' });

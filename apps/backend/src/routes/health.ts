@@ -12,7 +12,6 @@ const ReadinessResponse = z.object({
   status: z.enum(['ready', 'degraded']),
   checks: z.object({
     postgres: z.enum(['ok', 'fail']),
-    firestore: z.enum(['ok', 'fail']),
   }),
 });
 
@@ -41,33 +40,22 @@ export const healthRoutes: FastifyPluginAsyncZod = async (app) => {
         tags: ['health'],
         summary: 'Readiness probe',
         description:
-          'Checks Postgres + Firestore reachability. Returns 503 with status=degraded if any dependency is unreachable.',
+          'Checks Postgres reachability. Returns 503 with status=degraded if Postgres is unreachable. (Supabase Auth + Storage + Realtime share the same Postgres backend, so this single check covers the data plane per ADR-0010.)',
         response: { 200: ReadinessResponse, 503: ReadinessResponse },
       },
     },
     async (_req, reply) => {
-      const { db, firebase } = app.deps;
+      const { db } = app.deps;
 
-      const [postgresOk, firestoreOk] = await Promise.all([
-        sql`select 1`.execute(db).then(
-          () => true,
-          () => false,
-        ),
-        firebase.firestore
-          .collection('__health')
-          .limit(1)
-          .get()
-          .then(
-            () => true,
-            () => false,
-          ),
-      ]);
+      const postgresOk = await sql`select 1`.execute(db).then(
+        () => true,
+        () => false,
+      );
 
       const body = {
-        status: postgresOk && firestoreOk ? ('ready' as const) : ('degraded' as const),
+        status: postgresOk ? ('ready' as const) : ('degraded' as const),
         checks: {
           postgres: postgresOk ? ('ok' as const) : ('fail' as const),
-          firestore: firestoreOk ? ('ok' as const) : ('fail' as const),
         },
       };
       reply.code(body.status === 'ready' ? 200 : 503);

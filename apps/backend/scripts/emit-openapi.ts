@@ -20,22 +20,31 @@ const OUTPUT = resolve(__dirname, '..', 'openapi', 'openapi.yaml');
 
 function fakeEnv(): ReturnType<typeof loadEnv> {
   process.env.NODE_ENV = 'test';
-  process.env.GCP_PROJECT_ID ??= 'our-haven-local';
   process.env.DATABASE_URL ??= 'postgres://localhost/our_haven_unused';
-  process.env.GCS_UPLOAD_BUCKET ??= 'our-haven-uploads-unused';
+  process.env.SUPABASE_URL ??= 'http://localhost:54321';
+  process.env.SUPABASE_SERVICE_ROLE_KEY ??= 'unused-service-role-key';
+  process.env.SUPABASE_JWT_SECRET ??= 'unused-jwt-secret';
+  process.env.SUPABASE_STORAGE_BUCKET ??= 'uploads';
+  process.env.STRIPE_SECRET_KEY ??= 'sk_test_unused';
+  process.env.STRIPE_WEBHOOK_SECRET ??= 'whsec_unused';
+  process.env.STRIPE_CONNECT_WEBHOOK_SECRET ??= 'whsec_connect_unused';
+  process.env.CHECKR_API_KEY ??= 'unused-checkr-key';
+  process.env.CHECKR_WEBHOOK_SECRET ??= 'unused-checkr-secret';
   return loadEnv();
 }
 
 async function main(): Promise<void> {
   const env = fakeEnv();
-  // Stubs — emit-openapi only inspects route schemas, doesn't talk to GCP/DB.
+  // Stubs — emit-openapi only inspects route schemas, doesn't talk to Supabase/DB.
   const stub = new Proxy({} as never, { get: () => stub });
   const app = await buildApp({
     env,
     db: stub,
-    firebase: stub,
+    supabase: { admin: stub },
     storage: stub,
-    tasks: stub,
+    queue: stub,
+    stripe: stub,
+    backgroundCheck: stub,
   });
   await app.ready();
   const spec = app.swagger();

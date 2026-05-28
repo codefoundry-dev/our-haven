@@ -11,7 +11,8 @@
     "paths": {
       "@/*": ["src/*"],
       "@our-haven/domain": ["../../packages/domain/src/index.ts"],
-      "@our-haven/openapi-types": ["../../packages/openapi-types/src/index.ts"]
+      "@our-haven/openapi-types": ["../../packages/openapi-types/src/index.ts"],
+      "@our-haven/shared": ["../../packages/shared/src/index.ts"]
     }
   },
   "include": ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"],

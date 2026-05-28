@@ -66,3 +66,6 @@ apps/mobile/android
 # Misc
 *.pem
 example
+
+# Claude design handoff bundle (extracted from anthropic design API for reference)
+.design-bundle/

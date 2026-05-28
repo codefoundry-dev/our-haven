@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-# Our Haven backend — Cloud Run image. US-region only (ADR-0004 §5, ADR-0009).
+# Our Haven backend — Fly.io image. US-region only (ADR-0010 — Fly.io `iad`, ADR-0009).
 
 FROM node:20.11.1-alpine AS deps
 WORKDIR /workspace

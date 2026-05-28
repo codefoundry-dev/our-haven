@@ -1,7 +1,7 @@
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 
-import { UploadValidationError } from '@/gcp/storage.js';
+import { UploadValidationError } from '@/supabase/storage.js';
 
 const SignedUploadRequest = z.object({
   kind: z.enum(['id-doc', 'license-doc', 'insurance-doc', 'state-childcare-registration', 'avatar']),
@@ -11,6 +11,7 @@ const SignedUploadRequest = z.object({
 
 const SignedUploadResponse = z.object({
   uploadUrl: z.string().url(),
+  uploadToken: z.string(),
   objectPath: z.string(),
   expiresAt: z.string().datetime(),
 });
@@ -27,10 +28,10 @@ export const uploadRoutes: FastifyPluginAsyncZod = async (app) => {
       preHandler: app.requireAuth(),
       schema: {
         tags: ['uploads'],
-        summary: 'Create a v4 signed PUT URL for client-side GCS upload',
+        summary: 'Create a short-lived signed PUT URL for client-side Supabase Storage upload',
         description:
-          'Returns a short-lived (5 min default) v4 signed URL the client uses to PUT a file directly to GCS. Content-type and max size are enforced via x-goog-content-length-range on the signed request.',
-        security: [{ firebaseIdToken: [] }],
+          'Returns a short-lived (5 min default) Supabase Storage signed upload URL + token. The client uses `uploadToSignedUrl` (or a fetch PUT with the token) to send the file directly to Supabase Storage. Content-type and per-kind max size are validated on the request; bucket-level size caps in Supabase Storage backstop the limit.',
+        security: [{ supabaseAccessToken: [] }],
         body: SignedUploadRequest,
         response: {
           200: SignedUploadResponse,

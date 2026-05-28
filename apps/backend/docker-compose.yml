@@ -1,10 +1,14 @@
 # Local-only dev dependencies for the Our Haven backend.
-# Postgres mirrors Cloud SQL; Firestore emulator mirrors the nam5 Firestore
-# we use in prod (ADR-0004 §5).
+# Postgres mirrors Supabase Postgres in shape (vanilla Postgres + pgmq); production runs
+# the same backend on Fly.io connecting to a hosted Supabase project (ADR-0010).
 #
 # Start:    docker compose -f apps/backend/docker-compose.yml up -d
 # Stop:     docker compose -f apps/backend/docker-compose.yml down
 # Reset:    docker compose -f apps/backend/docker-compose.yml down -v
+#
+# Note: for full-featured local Supabase (Auth + Storage + Realtime), run
+# `supabase start` from the repo root using the Supabase CLI. This compose
+# file is the lightweight path — just Postgres for backend dev/test.
 
 services:
   postgres:
@@ -23,18 +27,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-
-  firestore-emulator:
-    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:slim
-    container_name: our-haven-firestore-emulator
-    command: >
-      gcloud emulators firestore start
-      --host-port=0.0.0.0:8085
-      --quiet
-    ports:
-      - '8085:8085'
-    environment:
-      CLOUDSDK_CORE_PROJECT: our-haven-local
 
 volumes:
   postgres-data:

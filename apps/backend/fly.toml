@@ -1,0 +1,50 @@
+# Fly.io deploy config for the Our Haven Fastify backend.
+# ADR-0010 — Supabase + Fly.io + Vercel platform.
+#
+# Bootstrap (run from apps/backend):
+#   fly launch --no-deploy --name our-haven-backend --region iad
+#   fly secrets set \
+#     DATABASE_URL=...        \
+#     SUPABASE_URL=...        \
+#     SUPABASE_SERVICE_ROLE_KEY=... \
+#     SUPABASE_JWT_SECRET=... \
+#     SUPABASE_STORAGE_BUCKET=uploads
+#   fly deploy
+
+app = "our-haven-backend"
+primary_region = "iad"  # Ashburn, VA — closest to Supabase US-East-1.
+
+[build]
+  dockerfile = "Dockerfile"
+  # When deploying from the repo root, use:
+  #   fly deploy --config apps/backend/fly.toml --dockerfile apps/backend/Dockerfile .
+
+[env]
+  NODE_ENV = "production"
+  PORT = "8080"
+  LOG_LEVEL = "info"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1  # keep one warm to avoid cold starts on mobile.
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "30s"
+  method = "GET"
+  timeout = "5s"
+  path = "/v1/healthz"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512

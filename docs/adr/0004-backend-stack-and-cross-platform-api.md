@@ -1,6 +1,6 @@
 # Backend stack and cross-platform API — Node + TypeScript, OpenAPI-first REST, Postgres + Firestore split, GCP `us-east`
 
-**Status:** accepted (2026-05-08; region updated 2026-05-11 to track the Miami/Florida pivot in ADR-0003)
+**Status:** accepted (2026-05-08; region updated 2026-05-11 to track the Miami/Florida pivot in ADR-0003). **§§ 4, 5, 6, 7 superseded by ADR-0010 (2026-05-27)** — Firestore for messaging real-time, GCP Cloud Run + Cloud SQL + Cloud Storage + Cloud Tasks hosting, and Firebase Auth identity have been replaced by Supabase (Auth + Postgres + Realtime + Storage + `pgmq`) + Fly.io (backend) + Vercel (web). **§§ 1, 2, 3, 8 carry forward unchanged.**
 
 ## Context
 

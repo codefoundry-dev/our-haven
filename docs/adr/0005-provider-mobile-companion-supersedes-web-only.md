@@ -34,7 +34,7 @@ This ADR revises ADR-0002 in light of those changes. It does **not** discard ADR
   - *Phase 3 timeline integrity* — re-evaluated in the context of ADR-0006. The Job-board build is sized so that the Provider mobile surface is delivered as part of the same workstream, not as a separately-scoped addition. Heavy web-only Provider features (KYC, document review correspondence) absorb no new mobile build.
   - *Heavy doc upload workflow* — preserved on web by Decision #4's linkout pattern. The admin↔Provider correspondence on a license review never crosses to mobile; the workflow stays on one surface.
 - **Parent App Store posture is unchanged.** From an App Store reviewer's perspective, a Parent test account still sees a consumer marketplace app with Subscription via Stripe web checkout — exactly the shape Phase 4 was set up to ship.
-- **Provider data residency, MFA posture, and Verification rules carry over from `CONTEXT.md` unchanged.** The mobile companion is an additional surface, not a different identity or compliance regime.
+- **Provider data residency, MFA posture, and Verification rules carry over from `CONTEXT.md` unchanged.** The mobile companion is an additional surface, not a different identity or compliance regime. *(Identity provider is Supabase Auth per ADR-0010, 2026-05-27, replacing the originally specified Firebase Auth — the Apple + Google + email/password + step-up MFA shape is unchanged.)*
 
 ## Considered alternatives
 

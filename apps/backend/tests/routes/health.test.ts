@@ -3,23 +3,28 @@ import { describe, expect, it } from 'vitest';
 import { buildApp } from '@/app.js';
 import { loadEnv, resetEnvForTests } from '@/config/env.js';
 
+import { applyTestEnv } from '../helpers/test-jwt.js';
+
 const envForTest = () => {
   resetEnvForTests();
-  process.env.NODE_ENV = 'test';
-  process.env.GCP_PROJECT_ID = 'our-haven-test';
-  process.env.DATABASE_URL = 'postgres://test:test@localhost:5432/our_haven_test';
-  process.env.GCS_UPLOAD_BUCKET = 'our-haven-test-bucket';
-  process.env.LOG_LEVEL = 'fatal';
+  applyTestEnv();
   return loadEnv();
 };
 
 const stubCollaborators = () => {
   const stub = new Proxy({} as never, { get: () => stub });
-  return { db: stub, firebase: stub, storage: stub, tasks: stub };
+  return {
+    db: stub,
+    supabase: { admin: stub },
+    storage: stub,
+    queue: stub,
+    stripe: stub,
+    backgroundCheck: stub,
+  };
 };
 
 describe('GET /v1/healthz', () => {
-  it('returns 200 + status=ok without touching db/firestore', async () => {
+  it('returns 200 + status=ok without touching db/supabase', async () => {
     const env = envForTest();
     const app = await buildApp({ env, ...stubCollaborators() });
     try {

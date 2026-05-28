@@ -63,10 +63,10 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
       preHandler: app.requireAuth(),
       schema: {
         tags: ['auth'],
-        summary: 'Set the permanent role + kind on the authenticated Firebase user',
+        summary: 'Set the permanent role + kind on the authenticated Supabase user',
         description:
-          'Idempotent. Rejects with 409 if the user already has a role claim that differs from the request. Once set, role is permanent per CONTEXT.md § Authentication.',
-        security: [{ firebaseIdToken: [] }],
+          'Idempotent. Rejects with 409 if the user already has a role claim that differs from the request. Once set, role is permanent per CONTEXT.md § Authentication. Claims are written to Supabase `app_metadata`; the client must refresh its session to receive an access token carrying the new claims.',
+        security: [{ supabaseAccessToken: [] }],
         body: RoleClaimRequest,
         response: {
           200: RoleClaimResponse,
@@ -90,23 +90,22 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
         return { error: 'role_already_claimed', reason: 'role is permanent and cannot be changed' };
       }
 
-      const claims: Record<string, unknown> = {
-        ...(principal.claims as Record<string, unknown>),
+      const existingAppMeta = (principal.claims.app_metadata ?? {}) as Record<string, unknown>;
+      const nextAppMeta: Record<string, unknown> = {
+        ...existingAppMeta,
         role: desired.role,
       };
-      if (desired.kind) claims.kind = desired.kind;
-      if (desired.caregiverCategory) claims.caregiver_category = desired.caregiverCategory;
-      if (desired.specialty) claims.specialty = desired.specialty;
-      delete claims.iat;
-      delete claims.exp;
-      delete claims.aud;
-      delete claims.iss;
-      delete claims.sub;
-      delete claims.auth_time;
-      delete claims.firebase;
-      delete claims.uid;
+      if (desired.kind) nextAppMeta.kind = desired.kind;
+      if (desired.caregiverCategory) nextAppMeta.caregiver_category = desired.caregiverCategory;
+      if (desired.specialty) nextAppMeta.specialty = desired.specialty;
 
-      await app.deps.firebase.auth.setCustomUserClaims(principal.uid, claims);
+      const { error } = await app.deps.supabase.admin.auth.admin.updateUserById(principal.uid, {
+        app_metadata: nextAppMeta,
+      });
+      if (error) {
+        req.log.error({ err: error }, 'supabase updateUserById failed');
+        throw new Error('failed_to_set_role_claim');
+      }
       return { role: desired.role, kind: desired.kind ?? null };
     },
   );
@@ -120,7 +119,7 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
         summary: 'Issue an email-OTP for the authenticated user',
         description:
           'Email-OTP fallback path per CONTEXT.md § MFA posture — used for pre-paywall Parents without a phone on file. The notifier is a dev stub today; SendGrid wiring lands in OH-115 (Notifications dispatcher).',
-        security: [{ firebaseIdToken: [] }],
+        security: [{ supabaseAccessToken: [] }],
         response: {
           200: EmailOtpIssueResponse,
           400: ErrorResponse,
@@ -146,7 +145,7 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
       schema: {
         tags: ['auth'],
         summary: 'Verify an email-OTP and open a step-up window',
-        security: [{ firebaseIdToken: [] }],
+        security: [{ supabaseAccessToken: [] }],
         body: EmailOtpVerifyRequest,
         response: {
           200: StepUpRefreshResponse,
@@ -177,10 +176,10 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
       preHandler: app.requireAuth(),
       schema: {
         tags: ['auth'],
-        summary: 'Record a fresh MFA challenge from a Firebase MFA-extended ID token',
+        summary: 'Record a fresh MFA challenge from a Supabase aal2 access token',
         description:
-          'Called by clients after completing Firebase TOTP or phone MFA. Reads sign_in_second_factor from the verified token and opens a step-up window. Rejects when the ID token was not minted from an MFA-extended sign-in.',
-        security: [{ firebaseIdToken: [] }],
+          'Called by clients after completing a Supabase MFA challenge (TOTP enrollment / phone factor). Reads the token\'s `aal` and `amr` claims and opens a step-up window. Rejects when the access token is not `aal2`.',
+        security: [{ supabaseAccessToken: [] }],
         response: {
           200: StepUpRefreshResponse,
           400: ErrorResponse,
@@ -192,7 +191,7 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
       const principal = req.principal!;
       if (!principal.secondFactor) {
         reply.code(400);
-        return { error: 'no_second_factor', reason: 'token was not minted from MFA-extended sign-in' };
+        return { error: 'no_second_factor', reason: 'access token is not aal2' };
       }
       const grant = await grantStepUp(app, principal.uid, principal.secondFactor);
       return {
