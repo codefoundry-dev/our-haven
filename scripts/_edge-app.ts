@@ -13,7 +13,7 @@ function fakeDeps(): AppDeps {
     NODE_ENV: 'test',
     DATABASE_URL: 'postgres://localhost/our_haven_unused',
     DATABASE_SSL: 'false',
-    SUPABASE_JWT_SECRET: 'unused-edge-openapi-jwt-secret',
+    JWT_SECRET: 'unused-edge-openapi-jwt-secret',
   });
   return { env, db: stub };
 }
