@@ -13,7 +13,7 @@ export function buildTestEnv(overrides: Record<string, string | undefined> = {})
     NODE_ENV: 'test',
     DATABASE_URL: 'postgres://test:test@localhost:5432/our_haven_test',
     DATABASE_SSL: 'false',
-    SUPABASE_JWT_SECRET: TEST_JWT_SECRET,
+    JWT_SECRET: TEST_JWT_SECRET,
     ...overrides,
   });
 }

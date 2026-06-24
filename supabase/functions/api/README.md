@@ -27,7 +27,16 @@ curl -i http://localhost:54321/functions/v1/api/v1/healthz
 
 # deploy
 supabase functions deploy api --no-verify-jwt
+
+# set production secrets — DATABASE_URL must be the :6543 transaction pooler
+# (not the auto-injected SUPABASE_DB_URL, which is the direct :5432 connection)
+supabase secrets set --env-file supabase/functions/api/.env
 ```
+
+Required secrets: `DATABASE_URL` (Supavisor `:6543` pooler) + `JWT_SECRET`
+(named without the reserved `SUPABASE_` prefix). A missing/invalid one makes
+the function return a readable `503 {"error":"boot_failed", …}` rather than a
+generic `WORKER_ERROR`.
 
 ## Node-side tooling (from repo root — supabase/ is not an npm workspace)
 

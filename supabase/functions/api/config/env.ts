@@ -26,11 +26,11 @@ const EnvSchema = z.object({
     .default(true)
     .describe('TLS to Postgres. Supavisor requires TLS in prod; local dev may set false.'),
 
-  SUPABASE_JWT_SECRET: z
+  JWT_SECRET: z
     .string()
     .min(1)
     .describe(
-      'Supabase project JWT secret (HS256). The auth middleware verifies access tokens locally on every request — no extra network call.',
+      "Supabase project JWT secret (HS256) — Dashboard → Settings → API → JWT Secret. The auth middleware verifies access tokens locally on every request. NOT named SUPABASE_JWT_SECRET: Supabase reserves the SUPABASE_ prefix for its own auto-injected vars, so a SUPABASE_*-prefixed secret can't be set via `supabase secrets set`.",
     ),
 });
 

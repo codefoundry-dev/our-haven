@@ -29,7 +29,7 @@ export function requireAuth(opts: RequireAuthOptions = {}): MiddlewareHandler<Ap
 
     let payload: SupabaseJwtPayload;
     try {
-      const verified = await jwtVerify(token, new TextEncoder().encode(env.SUPABASE_JWT_SECRET), {
+      const verified = await jwtVerify(token, new TextEncoder().encode(env.JWT_SECRET), {
         algorithms: ['HS256'],
         audience: 'authenticated',
       });
