@@ -1,0 +1,11 @@
+{
+  "//": "Node-side typecheck for the Deno `api` Edge Function tree (ADR-0019). Bundler resolution + allowImportingTsExtensions so the explicit-.ts Deno source typechecks on Node. index.ts is excluded because it references the Deno global (validated by `supabase functions serve`/deploy, and by `deno check` in CI later). Deps + this config are owned at the repo root because supabase/ is a root-level dir, not part of the apps/backend workspace.",
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "allowImportingTsExtensions": true,
+    "noEmit": true
+  },
+  "include": ["supabase/functions/api/**/*.ts", "scripts/**/*.ts"],
+  "exclude": ["supabase/functions/api/index.ts", "node_modules"]
+}
