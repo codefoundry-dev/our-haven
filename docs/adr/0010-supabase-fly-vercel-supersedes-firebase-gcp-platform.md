@@ -26,7 +26,9 @@ The v1 platform stack:
 7. **Provider web portal hosting:** **Vercel** for the Next.js 16 App Router build. The admin dashboard (Phase 2, not yet scaffolded) will also ship to Vercel as a sibling Next.js app.
 8. **Webhook posture (Stripe, Checkr, Daily.co):** **unchanged.** Webhooks terminate on the Fastify backend on Fly.io, with signature verification → internal events for the deep modules. The vendor-agnostic background-check webhook interface from ADR-0004 § 8 carries over.
 
-Data residency remains US-only. Supabase project is provisioned in **`us-east-1`** (the closest Supabase region to ADR-0009's documented `us-east1` / `us-east4` GCP posture); Fly.io runs in **`iad`** (Ashburn, VA). Daily.co stays on US rooms per ADR-0008. Stripe Connect Express US entity, Stripe Tax, Checkr, Twilio, SendGrid — all unchanged per ADR-0009.
+Data residency remains US-only. Supabase project is provisioned in **`us-east-1`** (the closest Supabase region to ADR-0009's documented `us-east1` / `us-east4` GCP posture); Fly.io runs in **`iad`** (Ashburn, VA). Daily.co stays on US rooms per ADR-0008. Stripe Connect Express US entity, Stripe Tax, Checkr, Twilio — all unchanged per ADR-0009. **Resend** replaces SendGrid as the transactional email vendor (2026-05-28 amendment, see note below); the rest of the vendor list carries over unchanged.
+
+> **2026-05-28 — vendor amendment:** the SendGrid line above is superseded. Transactional email now ships via **Resend** (`apps/backend/src/vendors/resend.ts`). The dispatcher contract, audit-row shape, and per-event channel matrix are unchanged; only the SDK/wire format and the `vendor` audit string (`'sendgrid'` → `'resend'`) shift. Twilio + Stripe + Checkr are unaffected. Rationale: cleaner developer-experience for the OH-116 dispatcher's transactional flow (single `POST /emails` endpoint, JSON `id` response, first-class `tags` for webhook correlation that replace SendGrid's split `categories` + `custom_args`).
 
 ## Why
 

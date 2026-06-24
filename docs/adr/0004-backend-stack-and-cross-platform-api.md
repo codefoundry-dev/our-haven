@@ -23,7 +23,7 @@ The v1 backend stack:
 
 ## Why
 
-- **Node + TypeScript has the best SDK fit for this specific integration list** — Stripe Connect, Stripe Tax, Twilio, SendGrid, Firebase Admin, Daily.co, Cloud Tasks, Checkr (and the major US background-check vendors generally). Choosing a language that requires hand-rolled clients for any of these costs more than the language choice itself.
+- **Node + TypeScript has the best SDK fit for this specific integration list** — Stripe Connect, Stripe Tax, Twilio, Resend, Firebase Admin, Daily.co, Cloud Tasks, Checkr (and the major US background-check vendors generally). Choosing a language that requires hand-rolled clients for any of these costs more than the language choice itself. *(2026-05-28: SendGrid → Resend per the amendment to ADR-0010 § 29; rest of this paragraph unchanged.)*
 - **TypeScript also matches the Provider web portal and admin dashboard** (both will be TS web apps). Backend ↔ web frontend share types via the OpenAPI codegen step; tribal knowledge transfers freely between surfaces.
 - **OpenAPI-first REST** is the only protocol that produces typed clients in **both Dart (Flutter) and TypeScript (web)** without bespoke effort. tRPC was considered but breaks for Flutter — no native client; GraphQL adds operational complexity (caching, N+1, schema evolution) that doesn't pay off at v1 scale.
 - **Postgres** is required for the audit trail that the PIA will reference, for the 7-year financial-record retention with pseudonymization, for relational integrity across Bookings/Sessions/Payouts, and for the Booking lifecycle state machine's transactional needs. NoSQL alternatives are not credible for a financial marketplace under FDBR / FIPA / COPPA-aware audit pressure.

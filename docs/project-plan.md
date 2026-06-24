@@ -80,7 +80,7 @@
 - Admin dashboard v1: Provider review queue (background-check results, license verification for Specialists, FCCH certificate verification, approve/reject), basic metrics (sign-ups, active Subscriptions, cancellations, Bookings, **Jobs posted, Applications filed, Award rate**)
 - Trust & Safety admin role with audit-logged thread access (flagged-thread queue + on-demand investigation access). Flagged-thread queue surfaces both Messages and Offers whose `scope_note` tripped disintermediation
 - Authentication (Supabase Auth, US-region project, per ADR-0010 supersedes Firebase Auth from ADR-0004): email/password + Sign in with Google for Provider web portal; admin TOTP MFA mandatory; Provider step-up MFA on payout-sensitive actions
-- Provider-side notification plumbing: web push + email (SendGrid) + SMS (Twilio) for Booking-request, **Job-awarded**, cancellation, and session-reminder events
+- Provider-side notification plumbing: web push + email (Resend) + SMS (Twilio) for Booking-request, **Job-awarded**, cancellation, and session-reminder events
 - **(v1.1) Four new deep modules (per ADR-0006):**
   - **Job lifecycle state machine** (`draft → open → awarded | expired | cancelled → closed`; 14-day auto-expiry; awarded-side-effects)
   - **Application lifecycle state machine** (`submitted → countered | awarded | declined | withdrawn | expired`; per-Job cap at 15)
@@ -262,7 +262,7 @@
     - Stripe transaction fees (standard US rates) + Stripe Tax (~0.5% per taxable transaction) + Stripe Connect Express (Form 1099-K issuance included)
     - Daily.co per-participant-minute fees (~$0.004/min/participant; US rooms)
     - Twilio SMS fees (~$0.0075/SMS to US numbers + carrier fees)
-    - SendGrid email (volume-based)
+    - Resend email (volume-based)
     - US privacy counsel retainer or per-engagement fees (replaces the UK fractional-DPO retainer; Phase 0 firm-pick determines structure)
     - Hosting and infrastructure costs (estimated separately at end of discovery; **Supabase Pro plan** for Auth + Postgres + Realtime + Storage, US-region; **Fly.io shared-CPU machine** in `iad` for the Fastify backend; **Vercel Pro** for the Next.js web surfaces — per ADR-0010, replacing the originally estimated GCP `us-east1` / `us-east4` Cloud Run + Cloud SQL + Firestore stack)
 
