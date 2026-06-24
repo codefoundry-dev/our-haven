@@ -20,6 +20,15 @@ export const openApiInfo = {
       'Our Haven v1 API — single Hono fat Edge Function (ADR-0019). Source of truth per ADR-0004 (§§ 1–3, 8). US-region only.',
     license: { name: 'Proprietary' },
   },
+  // The function is served under the Supabase Edge function base (the `/api`
+  // slug is part of the URL, not the paths); paths below stay clean `/v1/*`.
+  servers: [
+    {
+      url: 'https://<project-ref>.supabase.co/functions/v1/api',
+      description: 'Supabase Edge Function (production) — replace <project-ref>.',
+    },
+    { url: 'http://localhost:54321/functions/v1/api', description: 'Local (supabase functions serve)' },
+  ],
   tags: [{ name: 'health', description: 'Liveness and readiness probes' }],
 };
 

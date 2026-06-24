@@ -9,9 +9,12 @@
 import { buildApp } from './app.ts';
 import { loadEnv } from './config/env.ts';
 import { createDb } from './db/kysely.ts';
+import { mountUnderSlug } from './edge.ts';
 
 const env = loadEnv(Deno.env.toObject());
 const db = createDb(env);
 const app = buildApp({ env, db });
 
-Deno.serve(app.fetch);
+// Supabase keeps the function slug (`api`) in the request path, so mount the
+// app under `/api` here in the host glue — the app itself stays slug-agnostic.
+Deno.serve(mountUnderSlug(app, 'api').fetch);
