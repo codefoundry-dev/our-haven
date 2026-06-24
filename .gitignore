@@ -15,6 +15,11 @@ expo-env.d.ts
 **/build/
 *.tsbuildinfo
 
+# Next.js build output (apps/admin, apps/provider-web)
+.next/
+out/
+next-env.d.ts
+
 # Backend env / secrets
 apps/*/.env
 apps/*/.env.*
@@ -69,3 +74,6 @@ example
 
 # Claude design handoff bundle (extracted from anthropic design API for reference)
 .design-bundle/
+
+# Claude local state (project-level .claude)
+.claude/scheduled_tasks.lock
