@@ -83,6 +83,28 @@ const EnvSchema = z.object({
     .url()
     .default('https://api.stripe.com/v1')
     .describe('Stripe API base URL. Overridable for staging / sandbox; tests inject a fetch stub instead.'),
+
+  // ── Supply verification (OH-184) ─────────────────────────────────────────
+  // Resident-state slate for the Provider license gate. The CANONICAL slate is
+  // `LICENSE_BOARD_LAUNCH_STATES` in @our-haven/domain (license-board), but that
+  // module is not Deno-clean (it has a value import from @our-haven/shared), so
+  // we mirror it here as an ops-overridable CSV default. OH-186 wires the real
+  // per-state adapter; keep this in sync until then. A Provider whose resident
+  // state is outside this set rests in `holding-state-not-supported`. Caregivers
+  // ignore it (Checkr is multi-state).
+  LICENSE_BOARD_SUPPORTED_STATES: z
+    .string()
+    .default('CA,FL,TX,NY,IL,GA,NC,PA,OH,AZ,WA,MA')
+    .describe(
+      'Comma-separated US state codes with a shipped license-board adapter (mirrors @our-haven/domain LICENSE_BOARD_LAUNCH_STATES). Drives the Provider holding-state branch (OH-184/OH-186).',
+    ),
+  ID_DOC_BUCKET: z
+    .string()
+    .min(1)
+    .default('id-docs')
+    .describe(
+      'Private Supabase Storage bucket holding government-ID uploads. Signed upload URLs are minted by the service-role admin client (POST /v1/uploads/signed-url); objects are namespaced id-doc/<uid>/<uuid>. Provisioned by migration 20260627000001.',
+    ),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
