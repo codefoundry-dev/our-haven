@@ -11,7 +11,6 @@ our-haven/
 ├── apps/
 │   ├── mobile/         React Native + Expo SDK 56 — Parent + Provider mobile app (Phase 3)
 │   ├── backend/        Node + TS + Fastify + OpenAPI + Postgres (Phase 2, deploys to Fly.io)
-│   ├── provider-web/   Provider web portal — KYC, license uploads, payout mgmt (Phase 2, Next.js → Vercel)
 │   └── admin/          Admin dashboard — verification queue, T&S, metrics (Phase 2, not yet scaffolded)
 ├── packages/
 │   ├── openapi-types/  TS types generated from apps/backend/openapi/openapi.yaml — shared by all apps
@@ -22,8 +21,7 @@ our-haven/
 
 | Layer | Technology |
 |---|---|
-| Mobile (Parent + Provider) | React Native + Expo SDK 56 (TypeScript) — `apps/mobile` |
-| Provider web portal | Next.js 16 (TypeScript), hosted on Vercel — `apps/provider-web` |
+| Unified app (Parent / Caregiver / Provider, web + mobile) | React Native + Expo SDK 56 (TypeScript) — `apps/mobile` (renders supply onboarding on web and the run-the-day surfaces on mobile; no separate web portal) |
 | Admin dashboard | Next.js (TypeScript), hosted on Vercel — `apps/admin`, TOTP MFA on every sign-in |
 | Backend API | Node + TypeScript + Fastify, OpenAPI-first REST, ADR-0004 §§1–3,8 — `apps/backend` |
 | Auth | Supabase Auth (US-region project) |
