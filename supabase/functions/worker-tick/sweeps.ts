@@ -11,11 +11,17 @@ import type { Db } from './db/kysely.ts';
  * on them inside one transaction.
  *
  * Today exactly one due-work source exists in the schema — FCRA screening
- * disposal (`provider_screenings.purge_at`). The Booking 24h-expiry, Session
- * auto-confirm, Offer 72h-expiry and retention/erasure sweeps named in ADR-0019
- * land here as their owning tickets (OH-177 / OH-179 / OH-182) add the
- * `bookings` / `offers` tables and their deadline columns: implement a `Sweep`
- * and push it onto `SWEEPS`.
+ * disposal (`provider_screenings.purge_at`), which IS the background-check raw
+ * 6-month retention sweep (CONTEXT § Retention; @our-haven/domain
+ * `RETENTION_HORIZONS.BACKGROUND_CHECK_RAW_RETENTION_MONTHS`). The Booking
+ * 24h-expiry, Session auto-confirm, Offer 72h-expiry and the remaining
+ * retention/erasure sweeps named in ADR-0019 land here as their owning tickets
+ * add the `bookings` / `offers` / account / message tables and their deadline
+ * columns (OH-177 / OH-179 / OH-200 / OH-2.13): implement a `Sweep` that scans
+ * the deadline column and applies the matching action. OH-182 ships the pure
+ * policy those sweeps consume — `planErasure` → `dueDirectives(plan, now)` in
+ * @our-haven/domain `retention-planner` decides the {category, action, dueAt};
+ * a sweep stays a thin "claim due rows, apply the directive" loop.
  */
 
 export interface SweepContext {
