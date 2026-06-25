@@ -20,8 +20,9 @@ export default function AppLayout() {
       <Tabs.Screen name="bookings" />
       <Tabs.Screen name="messages" />
       <Tabs.Screen name="account" />
-      {/* Reached from Account, not the tab bar (OH-184). */}
+      {/* Reached from Account, not the tab bar (OH-184 / OH-188). */}
       <Tabs.Screen name="verification" options={{ href: null }} />
+      <Tabs.Screen name="profile-builder" options={{ href: null }} />
     </Tabs>
   );
 }

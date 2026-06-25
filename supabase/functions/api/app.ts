@@ -6,6 +6,7 @@ import { registerAdminStripeTaxRoutes } from './routes/admin/stripe-tax.ts';
 import { registerAuthRoutes } from './routes/auth.ts';
 import { registerCaregiverBadgeRoutes } from './routes/caregiver-badges.ts';
 import { registerCaregiverConnectRoutes } from './routes/caregiver-connect.ts';
+import { registerCaregiverProfileRoutes } from './routes/caregiver-profile.ts';
 import { registerHealthRoutes } from './routes/health.ts';
 import { registerProviderCredentialsRoutes } from './routes/provider-credentials.ts';
 import { registerScreeningRoutes } from './routes/screening.ts';
@@ -48,6 +49,11 @@ export const openApiInfo = {
       name: 'badges',
       description:
         'Optional Caregiver badges (OH-187) — W-10 "Tax-credit-friendly" self-attest + per-state home-childcare (FCCH) registration; neither gates activation.',
+    },
+    {
+      name: 'profile',
+      description:
+        'Caregiver profile builder (OH-188) — per-category Rate + surcharge, availability, negotiable toggle, ages-served + behaviour-comfort, and the Credentials umbrella (admin-reviewed).',
     },
     { name: 'verification', description: 'Supply verification — state + email/phone/ID-doc facts (OH-184)' },
     {
@@ -100,6 +106,7 @@ export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerVerificationRoutes(v1);
   registerProviderCredentialsRoutes(v1);
   registerCaregiverBadgeRoutes(v1);
+  registerCaregiverProfileRoutes(v1);
   registerScreeningRoutes(v1);
   registerUploadRoutes(v1);
   registerStripeConnectWebhookRoutes(v1);

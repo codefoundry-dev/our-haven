@@ -856,7 +856,70 @@ export interface paths {
             };
         };
         put?: never;
-        post?: never;
+        /**
+         * Add a Caregiver Credential (title / certification / training)
+         * @description Creates a Credential in `pending` review — hidden from the public profile until an admin approves it. A `title` that reads as a licensed clinical role is accepted but flagged (`clinicalFlag`) so the UI can warn it may be rejected (protecting the Caregiver/Provider line). Never gates activation.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CaregiverCredentialCreateRequest"];
+                };
+            };
+            responses: {
+                /** @description Credential created (pending) */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverCredentialCreateResponse"];
+                    };
+                };
+                /** @description Invalid credential */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverProfileError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverProfileError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverProfileError"];
+                    };
+                };
+                /** @description Supply (caregiver) row not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverProfileError"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -1611,6 +1674,362 @@ export interface paths {
             };
         };
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers/me/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the authenticated Caregiver's editable profile
+         * @description Returns the unified Caregiver profile: identity, per-category Published Rates (+ surcharge) with the derived "from $X" teaser, availability grid/note/paused, the negotiable toggle, ages-served + behaviour-comfort, and Credentials (each with its caregiver-facing status — pending Credentials are visible to the Caregiver here but hidden on the public Parent view).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The editable profile */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverProfile"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverProfileError"];
+                    };
+                };
+                /** @description Wrong role (provider / parent / admin) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverProfileError"];
+                    };
+                };
+                /** @description Supply (caregiver) row not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverProfileError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update the authenticated Caregiver's profile (partial)
+         * @description Partial update — only the supplied fields change. `categoryRates`, when present, replaces the FULL set of per-category Rates (each must be one of the Caregiver's own categories; a per-child surcharge is rejected for Tutor — Babysitter/Nanny only). `agesServed` / `behaviourComfort` are validated against the shared age-band / Safety-Behaviors taxonomy. Availability note is capped at 200 chars.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CaregiverProfilePatchRequest"];
+                };
+            };
+            responses: {
+                /** @description The updated profile */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverProfile"];
+                    };
+                };
+                /** @description Invalid rates / fields */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverProfileError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverProfileError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverProfileError"];
+                    };
+                };
+                /** @description Supply (caregiver) row not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverProfileError"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/v1/providers/me/credentials/{credentialId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove one of the authenticated Caregiver's Credentials */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    credentialId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Credential removed */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            deleted: true;
+                        };
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverProfileError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverProfileError"];
+                    };
+                };
+                /** @description Credential not found (or not owned) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverProfileError"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/providers/{providerId}/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Admin — list a Caregiver's Credentials for review
+         * @description Returns every Credential with its review state, the clinical-title flag, and the detected clinical terms (`clinicalMatches`) so the admin can explain a rejection. Admin role requires aal2 + TOTP.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    providerId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Credentials for review */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminCaregiverCredentialList"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverProfileError"];
+                    };
+                };
+                /** @description Not an admin / TOTP required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverProfileError"];
+                    };
+                };
+                /** @description Caregiver not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverProfileError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/providers/{providerId}/credentials/{credentialId}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Admin — approve or reject a Caregiver Credential
+         * @description Applies an admin review decision. Only a `pending` Credential can be decided (approved / rejected are terminal in v1 — resubmission is the path to re-review). On approve the Credential becomes publicly visible; on reject it carries the reason. Decoupled from the Verification state machine.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    providerId: string;
+                    credentialId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AdminCaregiverCredentialDecisionRequest"];
+                };
+            };
+            responses: {
+                /** @description Decision recorded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminCaregiverCredential"];
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverProfileError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverProfileError"];
+                    };
+                };
+                /** @description Not an admin / TOTP required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverProfileError"];
+                    };
+                };
+                /** @description Caregiver / credential not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverProfileError"];
+                    };
+                };
+                /** @description Credential is not pending */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverProfileError"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -2424,6 +2843,82 @@ export interface components {
         };
         TaxCreditAttestationRequest: {
             selfAttested: boolean;
+        };
+        CaregiverProfile: {
+            providerId: string;
+            categories: ("babysitter" | "tutor" | "nanny")[];
+            displayName: string | null;
+            headline: string | null;
+            bio: string | null;
+            categoryRates: components["schemas"]["CaregiverCategoryRate"][];
+            fromRateCents: number | null;
+            availabilityGrid: components["schemas"]["CaregiverAvailabilityGrid"];
+            availabilityNote: string | null;
+            paused: boolean;
+            negotiable: boolean;
+            agesServed: ("infant" | "toddler" | "preschool" | "school-age" | "teen")[];
+            behaviourComfort: ("aggression" | "self-injury" | "elopement" | "meltdowns" | "property-destruction" | "pica" | "sensory-sensitivity" | "communication-support" | "transition-difficulty" | "sleep-disturbance")[];
+            credentials: components["schemas"]["CaregiverCredential"][];
+        };
+        CaregiverCategoryRate: {
+            /** @enum {string} */
+            category: "babysitter" | "tutor" | "nanny";
+            publishedRateCents: number;
+            perChildSurchargeCents: number | null;
+        };
+        CaregiverAvailabilityGrid: {
+            [key: string]: {
+                [key: string]: boolean;
+            };
+        };
+        CaregiverCredential: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            type: "title" | "certification" | "training";
+            label: string;
+            /** @enum {string} */
+            review: "pending" | "approved" | "rejected";
+            statusLabel: string;
+            rejectionReason: string | null;
+            clinicalFlag: boolean;
+        };
+        CaregiverProfileError: {
+            error: string;
+            reason?: string;
+        };
+        CaregiverProfilePatchRequest: {
+            displayName?: string | null;
+            headline?: string | null;
+            bio?: string | null;
+            categoryRates?: components["schemas"]["CaregiverCategoryRate"][];
+            availabilityGrid?: components["schemas"]["CaregiverAvailabilityGrid"];
+            availabilityNote?: string | null;
+            paused?: boolean;
+            negotiable?: boolean;
+            agesServed?: ("infant" | "toddler" | "preschool" | "school-age" | "teen")[];
+            behaviourComfort?: ("aggression" | "self-injury" | "elopement" | "meltdowns" | "property-destruction" | "pica" | "sensory-sensitivity" | "communication-support" | "transition-difficulty" | "sleep-disturbance")[];
+        };
+        CaregiverCredentialCreateResponse: {
+            credential: components["schemas"]["CaregiverCredential"];
+        };
+        CaregiverCredentialCreateRequest: {
+            /** @enum {string} */
+            type: "title" | "certification" | "training";
+            label: string;
+        };
+        AdminCaregiverCredentialList: {
+            providerId: string;
+            credentials: components["schemas"]["AdminCaregiverCredential"][];
+        };
+        AdminCaregiverCredential: components["schemas"]["CaregiverCredential"] & {
+            providerId: string;
+            clinicalMatches: string[];
+        };
+        AdminCaregiverCredentialDecisionRequest: {
+            /** @enum {string} */
+            decision: "approve" | "reject";
+            reason?: string;
         };
         ScreeningInitiateResponse: {
             /** Format: uuid */

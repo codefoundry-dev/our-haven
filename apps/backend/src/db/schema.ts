@@ -60,12 +60,57 @@ export interface ProviderProfilesTable {
   languages: ColumnType<string[], string[] | undefined, string[]>;
   specialty_tags: ColumnType<string[], string[] | undefined, string[]>;
   photo_object_path: string | null;
+  // Provider display-only per-session Rate. Caregiver per-category rates live in
+  // `provider_category_rates` (OH-188); these single columns serve the Provider.
   published_rate_cents: number | null;
   per_child_surcharge_cents: number | null;
   availability_grid: ColumnType<Record<string, Record<string, boolean>>, Record<string, Record<string, boolean>> | undefined, Record<string, Record<string, boolean>>>;
   availability_note: string | null;
   paused: ColumnType<boolean, boolean | undefined, boolean>;
   w10_tax_credit_friendly: ColumnType<boolean, boolean | undefined, boolean>;
+  // Caregiver profile builder (OH-188 / ADR-0015,0017). `negotiable` default ON.
+  // `ages_served` / `behaviour_comfort` are taxonomy keys from @our-haven/shared,
+  // enforced at the API layer (no DB check).
+  negotiable: ColumnType<boolean, boolean | undefined, boolean>;
+  ages_served: ColumnType<string[], string[] | undefined, string[]>;
+  behaviour_comfort: ColumnType<string[], string[] | undefined, string[]>;
+  created_at: Generated<Date>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
+/**
+ * Per-category Published Rate for a Caregiver (OH-188 / CONTEXT.md § Rate). One
+ * row per (provider, category). `per_child_surcharge_cents` is Babysitter /
+ * Nanny only (DB-checked + API-guarded); null for Tutor and for an unset
+ * surcharge. Drives Offer pre-fill, the search Rate-ceiling filter, and the
+ * "from $X" lowest-rate teaser.
+ */
+export interface ProviderCategoryRatesTable {
+  provider_id: string;
+  category: 'babysitter' | 'tutor' | 'nanny';
+  published_rate_cents: number;
+  per_child_surcharge_cents: number | null;
+  created_at: Generated<Date>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
+/**
+ * Caregiver Credentials umbrella (OH-188 / CONTEXT.md § Credentials). Distinct
+ * from `specialist_credentials` (Provider license + insurance). Each Credential
+ * is born `pending`, hidden from the public profile until an admin approves it
+ * (the Caregiver sees "Pending review"). Never an activation gate.
+ */
+export interface CaregiverCredentialsTable {
+  id: Generated<string>;
+  provider_id: string;
+  type: 'title' | 'certification' | 'training';
+  label: string;
+  review_state: ColumnType<
+    'pending' | 'approved' | 'rejected',
+    'pending' | 'approved' | 'rejected' | undefined,
+    'pending' | 'approved' | 'rejected'
+  >;
+  rejection_reason: string | null;
   created_at: Generated<Date>;
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
 }
@@ -199,6 +244,8 @@ export interface Database {
   providers: ProvidersTable;
   provider_verifications: ProviderVerificationsTable;
   provider_profiles: ProviderProfilesTable;
+  provider_category_rates: ProviderCategoryRatesTable;
+  caregiver_credentials: CaregiverCredentialsTable;
   provider_screenings: ProviderScreeningsTable;
   specialist_credentials: SpecialistCredentialsTable;
   provider_home_childcare_registrations: ProviderHomeChildcareRegistrationsTable;
