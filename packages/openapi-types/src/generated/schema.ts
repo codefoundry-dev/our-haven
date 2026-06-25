@@ -343,7 +343,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/caregiver/payout-settings": {
+    "/v1/caregiver/connect/summary": {
         parameters: {
             query?: never;
             header?: never;
@@ -351,8 +351,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * SCAFFOLD — sample step-up-MFA-gated payout-sensitive endpoint
-         * @description Demonstrates the step-up MFA gate for payout-sensitive Caregiver actions (CONTEXT § MFA posture). Requires role=caregiver AND a fresh step-up grant (POST /v1/auth/step-up/refresh within 15 min) — otherwise 403 `step_up_required`. OH-190 replaces this scaffold with the real Stripe Connect bank-detail / withdrawal endpoints.
+         * Read the authenticated Caregiver's Stripe Connect Express account summary
+         * @description Returns the read-only Connect account state mirrored from `account.updated` webhooks: charges_enabled / payouts_enabled / details_submitted, the disabled_reason if Stripe paused the account, and the requirement lists (currently_due, past_due, pending_verification). `accountReady` is true iff both capabilities are enabled — the gate on verification activation + appearing in search (OH-190).
          */
         get: {
             parameters: {
@@ -363,13 +363,13 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Step-up satisfied */
+                /** @description Connect account summary */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["StepUpSampleResponse"];
+                        "application/json": components["schemas"]["CaregiverConnectSummary"];
                     };
                 };
                 /** @description Unauthenticated */
@@ -378,7 +378,168 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["AuthErrorResponse"];
+                        "application/json": components["schemas"]["CaregiverConnectError"];
+                    };
+                };
+                /** @description Wrong role (Providers have no Connect) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverConnectError"];
+                    };
+                };
+                /** @description Caregiver not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverConnectError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/caregiver/connect/onboarding-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create / reuse a Stripe Connect Express account and return a hosted onboarding URL
+         * @description Idempotent: if the Caregiver already has a `provider_connect_accounts` row with a `stripe_account_id`, reuses it; otherwise creates a fresh Express account (type=express, country=US, capabilities=card_payments+transfers, business_type=individual) and stamps it onto the row. Returns a freshly-issued Stripe-hosted account-onboarding link (the KYC flow — PRD story 49). Precondition: Checkr screening has cleared (`screening_passed_at`).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Onboarding link issued */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverConnectOnboardingLink"];
+                    };
+                };
+                /** @description Screening not cleared / no email */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverConnectError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverConnectError"];
+                    };
+                };
+                /** @description Wrong role (Providers have no Connect) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverConnectError"];
+                    };
+                };
+                /** @description Caregiver not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverConnectError"];
+                    };
+                };
+                /** @description Verification terminated */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverConnectError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/caregiver/connect/dashboard-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue a Stripe Express dashboard login link — requires step-up MFA (bank/withdrawal gate)
+         * @description Returns a one-time Stripe Express dashboard login URL. Bank-detail edits and payout withdrawals both happen inside the Express dashboard, so this single MFA-gated endpoint satisfies OH-190 AC #3 (step-up MFA enforced on bank/withdrawal — PRD story 57). Requires a step-up MFA grant issued within the last 5 minutes (`POST /v1/auth/step-up/refresh`); without it the auth middleware returns 403 `step_up_required`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Dashboard login link issued */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverConnectDashboardLink"];
+                    };
+                };
+                /** @description Connect account missing */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverConnectError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverConnectError"];
                     };
                 };
                 /** @description Wrong role or step-up required */
@@ -387,13 +548,68 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["AuthErrorResponse"];
+                        "application/json": components["schemas"]["CaregiverConnectError"];
+                    };
+                };
+                /** @description Caregiver not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverConnectError"];
                     };
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/webhooks/stripe-connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
         put?: never;
-        post?: never;
+        /**
+         * Stripe Connect Express webhook — mirrors account.updated onto provider_connect_accounts
+         * @description Receives Stripe Connect webhook deliveries (separate endpoint + signing secret from the screening webhook). Verifies the `Stripe-Signature` header with STRIPE_CONNECT_WEBHOOK_SECRET, then on `account.updated` mirrors charges_enabled / payouts_enabled / details_submitted / requirements / disabled_reason onto the row keyed by `stripe_account_id`. When both capabilities transition to enabled for the first time, stamps `account_ready_at`. Public route — the Stripe signature is the authentication.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Acknowledged */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StripeConnectWebhookAck"];
+                    };
+                };
+                /** @description Invalid signature or payload */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StripeConnectWebhookError"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -445,11 +661,46 @@ export interface components {
             /** Format: date-time */
             expiresAt: string;
         };
-        StepUpSampleResponse: {
-            uid: string;
-            /** @enum {string} */
-            stepUp: "satisfied";
-            note: string;
+        CaregiverConnectSummary: {
+            hasAccount: boolean;
+            stripeAccountId: string | null;
+            chargesEnabled: boolean;
+            payoutsEnabled: boolean;
+            detailsSubmitted: boolean;
+            disabledReason: string | null;
+            accountReady: boolean;
+            /** Format: date-time */
+            accountReadyAt: string | null;
+            requirementsCurrentlyDue: string[];
+            requirementsPastDue: string[];
+            requirementsPendingVerification: string[];
+            /** Format: date-time */
+            lastWebhookAt: string | null;
+        };
+        CaregiverConnectError: {
+            error: string;
+            reason?: string;
+        };
+        CaregiverConnectOnboardingLink: {
+            stripeAccountId: string;
+            /** Format: uri */
+            url: string;
+            /** Format: date-time */
+            expiresAt: string;
+        };
+        CaregiverConnectDashboardLink: {
+            /** Format: uri */
+            url: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        StripeConnectWebhookAck: {
+            /** @enum {boolean} */
+            received: true;
+        };
+        StripeConnectWebhookError: {
+            error: string;
+            reason?: string;
         };
     };
     responses: never;

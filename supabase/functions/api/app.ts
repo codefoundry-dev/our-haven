@@ -3,7 +3,9 @@ import { OpenAPIHono } from '@hono/zod-openapi';
 import type { AppEnv } from './context.ts';
 import type { AppDeps } from './deps.ts';
 import { registerAuthRoutes } from './routes/auth.ts';
+import { registerCaregiverConnectRoutes } from './routes/caregiver-connect.ts';
 import { registerHealthRoutes } from './routes/health.ts';
+import { registerStripeConnectWebhookRoutes } from './routes/webhooks/stripe-connect.ts';
 
 export const OPENAPI_DOC_PATH = '/openapi.json';
 
@@ -33,6 +35,8 @@ export const openApiInfo = {
   tags: [
     { name: 'health', description: 'Liveness and readiness probes' },
     { name: 'auth', description: 'Authentication — role-claim, email-OTP, step-up MFA' },
+    { name: 'caregiver', description: 'Caregiver Stripe Connect Express — onboarding, summary, dashboard (OH-190)' },
+    { name: 'webhooks', description: 'Vendor webhooks — Stripe Connect account.updated (OH-190)' },
   ],
 };
 
@@ -63,6 +67,8 @@ export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   const v1 = new OpenAPIHono<AppEnv>();
   registerHealthRoutes(v1);
   registerAuthRoutes(v1);
+  registerCaregiverConnectRoutes(v1);
+  registerStripeConnectWebhookRoutes(v1);
   app.route('/v1', v1);
 
   // Bearer security scheme for the Supabase access token (ADR-0010 § 62).
