@@ -10,6 +10,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: [
+      'supabase/functions/_shared/**/*.test.ts',
       'supabase/functions/api/**/*.test.ts',
       'supabase/functions/worker-tick/**/*.test.ts',
       'scripts/**/*.test.ts',

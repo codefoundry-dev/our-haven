@@ -18,6 +18,8 @@ export function buildTestEnv(overrides: Record<string, string | undefined> = {})
     SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
     STRIPE_SECRET_KEY: 'sk_test_unused',
     STRIPE_CONNECT_WEBHOOK_SECRET: 'whsec_test_connect',
+    STRIPE_PAYMENTS_WEBHOOK_SECRET: 'whsec_test_payments',
+    CHECKR_WEBHOOK_SECRET: 'checkr_whsec_test',
     ...overrides,
   });
 }
@@ -28,7 +30,7 @@ export function buildTestEnv(overrides: Record<string, string | undefined> = {})
  *  stubs. */
 export function stubDeps(): AppDeps {
   const stub = new Proxy({} as never, { get: () => stub });
-  return { env: buildTestEnv(), db: stub, supabase: stub, stripe: stub };
+  return { env: buildTestEnv(), db: stub, supabase: stub, stripe: stub, backgroundCheck: stub };
 }
 
 export interface TestTokenInput {

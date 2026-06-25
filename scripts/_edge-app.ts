@@ -18,8 +18,10 @@ function fakeDeps(): AppDeps {
     SUPABASE_SERVICE_ROLE_KEY: 'unused-service-role-key',
     STRIPE_SECRET_KEY: 'sk_test_unused',
     STRIPE_CONNECT_WEBHOOK_SECRET: 'whsec_unused',
+    STRIPE_PAYMENTS_WEBHOOK_SECRET: 'whsec_payments_unused',
+    CHECKR_WEBHOOK_SECRET: 'checkr_whsec_unused',
   });
-  return { env, db: stub, supabase: stub, stripe: stub };
+  return { env, db: stub, supabase: stub, stripe: stub, backgroundCheck: stub };
 }
 
 export async function edgeOpenApiDocument(): Promise<unknown> {

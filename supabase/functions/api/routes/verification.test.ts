@@ -127,6 +127,7 @@ function makeDeps(opts: { db?: AppDeps['db']; supabase?: SupabaseHandles } = {})
     db: (opts.db ?? stub) as AppDeps['db'],
     supabase: (opts.supabase ?? stub) as AppDeps['supabase'],
     stripe: stub,
+    backgroundCheck: stub,
   };
 }
 

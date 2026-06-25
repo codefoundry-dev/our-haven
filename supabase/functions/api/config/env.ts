@@ -84,6 +84,42 @@ const EnvSchema = z.object({
     .default('https://api.stripe.com/v1')
     .describe('Stripe API base URL. Overridable for staging / sandbox; tests inject a fetch stub instead.'),
 
+  // ── Background screening (OH-185; ADR-0007) ──────────────────────────────
+  // The $35 Stripe charge + Checkr standard-package screening. The Checkr
+  // invitation (the slow vendor call) is made by the worker-tick off the
+  // notification outbox; the `api` function only (1) creates the charge, (2)
+  // verifies the payments webhook, and (3) verifies the Checkr report webhook —
+  // so it needs the two webhook secrets + the charge amount + the package slug
+  // (stamped onto the screening row), but NOT CHECKR_API_KEY (that lives on the
+  // worker-tick, which is the only host that calls Checkr's REST API).
+  STRIPE_PAYMENTS_WEBHOOK_SECRET: z
+    .string()
+    .min(1)
+    .describe(
+      'Stripe webhook signing secret (whsec_…) for the payments endpoint that delivers `payment_intent.succeeded` for the screening charge. Distinct endpoint + secret from the Connect webhook (OH-190).',
+    ),
+  CHECKR_WEBHOOK_SECRET: z
+    .string()
+    .min(1)
+    .describe(
+      'Checkr webhook signing secret. The Checkr webhook route HMAC-verifies the raw body against it (X-Checkr-Signature). Server-only; set via `supabase secrets set`.',
+    ),
+  CHECKR_PACKAGE: z
+    .string()
+    .min(1)
+    .default('tasker_standard')
+    .describe(
+      'Checkr package slug stamped onto provider_screenings.package and used by the worker-tick invitation call (ADR-0007: county criminal 7yr + national criminal DB + national sex-offender registry + SSN trace).',
+    ),
+  SCREENING_CHARGE_CENTS: z
+    .coerce.number()
+    .int()
+    .positive()
+    .default(3500)
+    .describe(
+      'The background-screening fee charged to the applicant, in cents (default 3500 = $35). Platform margin over Checkr’s ~$30 standard-package cost (PRD-0001 story 42).',
+    ),
+
   // ── Supply verification (OH-184) ─────────────────────────────────────────
   // Resident-state slate for the Provider license gate. The CANONICAL slate is
   // `LICENSE_BOARD_LAUNCH_STATES` in @our-haven/domain (license-board), but that

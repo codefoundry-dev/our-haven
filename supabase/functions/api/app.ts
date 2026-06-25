@@ -6,9 +6,12 @@ import { registerAdminStripeTaxRoutes } from './routes/admin/stripe-tax.ts';
 import { registerAuthRoutes } from './routes/auth.ts';
 import { registerCaregiverConnectRoutes } from './routes/caregiver-connect.ts';
 import { registerHealthRoutes } from './routes/health.ts';
+import { registerScreeningRoutes } from './routes/screening.ts';
 import { registerUploadRoutes } from './routes/uploads.ts';
 import { registerVerificationRoutes } from './routes/verification.ts';
+import { registerCheckrWebhookRoutes } from './routes/webhooks/checkr.ts';
 import { registerStripeConnectWebhookRoutes } from './routes/webhooks/stripe-connect.ts';
+import { registerStripePaymentsWebhookRoutes } from './routes/webhooks/stripe-payments.ts';
 
 export const OPENAPI_DOC_PATH = '/openapi.json';
 
@@ -40,8 +43,16 @@ export const openApiInfo = {
     { name: 'auth', description: 'Authentication — role-claim, email-OTP, step-up MFA' },
     { name: 'caregiver', description: 'Caregiver Stripe Connect Express — onboarding, summary, dashboard (OH-190)' },
     { name: 'verification', description: 'Supply verification — state + email/phone/ID-doc facts (OH-184)' },
+    {
+      name: 'screening',
+      description: 'Background screening — $35 Stripe charge + Checkr standard package (OH-185)',
+    },
     { name: 'uploads', description: 'Signed URLs for client-direct private Storage uploads (OH-184)' },
-    { name: 'webhooks', description: 'Vendor webhooks — Stripe Connect account.updated (OH-190)' },
+    {
+      name: 'webhooks',
+      description:
+        'Vendor webhooks — Stripe Connect account.updated (OH-190), Stripe payments payment_intent.succeeded + Checkr report.* (OH-185)',
+    },
     { name: 'admin', description: 'Admin-only surfaces (Stripe Tax registrations + calculation audit, etc.)' },
     {
       name: 'tax',
@@ -80,8 +91,11 @@ export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerAuthRoutes(v1);
   registerCaregiverConnectRoutes(v1);
   registerVerificationRoutes(v1);
+  registerScreeningRoutes(v1);
   registerUploadRoutes(v1);
   registerStripeConnectWebhookRoutes(v1);
+  registerStripePaymentsWebhookRoutes(v1);
+  registerCheckrWebhookRoutes(v1);
   registerAdminStripeTaxRoutes(v1);
   app.route('/v1', v1);
 

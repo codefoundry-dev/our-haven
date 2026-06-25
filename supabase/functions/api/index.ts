@@ -6,6 +6,7 @@
 // unchanged under vitest on Node — this file is the only Deno-coupled module
 // and is intentionally excluded from the Node typecheck (it references the
 // `Deno` global). Validated by `supabase functions serve` / deploy.
+import { createCheckrAdapter } from '../_shared/checkr.ts';
 import { buildApp } from './app.ts';
 import { loadEnv } from './config/env.ts';
 import { createDb } from './db/kysely.ts';
@@ -23,6 +24,7 @@ function boot(): (req: Request) => Response | Promise<Response> {
   const stripe = createStripeAdapter({
     secretKey: env.STRIPE_SECRET_KEY,
     connectWebhookSecret: env.STRIPE_CONNECT_WEBHOOK_SECRET,
+    paymentsWebhookSecret: env.STRIPE_PAYMENTS_WEBHOOK_SECRET,
     apiBase: env.STRIPE_API_BASE,
     tax: {
       subscriptionTaxCode: env.STRIPE_TAX_SUBSCRIPTION_TAX_CODE,
@@ -30,7 +32,13 @@ function boot(): (req: Request) => Response | Promise<Response> {
       originState: env.STRIPE_TAX_ORIGIN_STATE,
     },
   });
-  return mountUnderSlug(buildApp({ env, db, supabase, stripe }), 'api').fetch;
+  // The api host only verifies the Checkr webhook — the slow REST calls
+  // (candidates + invitations) run on the worker-tick, so no CHECKR_API_KEY here.
+  const backgroundCheck = createCheckrAdapter({
+    webhookSecret: env.CHECKR_WEBHOOK_SECRET,
+    packageSlug: env.CHECKR_PACKAGE,
+  });
+  return mountUnderSlug(buildApp({ env, db, supabase, stripe, backgroundCheck }), 'api').fetch;
 }
 
 // A boot failure is almost always a missing/invalid secret (DATABASE_URL,

@@ -57,6 +57,7 @@ function makeDeps(opts: {
     db: (opts.db ?? stub) as AppDeps['db'],
     supabase: { admin: { auth: { admin: { updateUserById } } } } as unknown as AppDeps['supabase'],
     stripe: stub as AppDeps['stripe'],
+    backgroundCheck: stub as AppDeps['backgroundCheck'],
   };
 }
 

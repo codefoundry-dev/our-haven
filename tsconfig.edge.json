@@ -7,6 +7,7 @@
     "noEmit": true
   },
   "include": [
+    "supabase/functions/_shared/**/*.ts",
     "supabase/functions/api/**/*.ts",
     "supabase/functions/worker-tick/**/*.ts",
     "scripts/**/*.ts"

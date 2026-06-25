@@ -96,6 +96,7 @@ function makeDeps(opts: { db?: AppDeps['db']; stripe?: Partial<AppDeps['stripe']
     db: (opts.db ?? stub) as AppDeps['db'],
     supabase: stub,
     stripe: (opts.stripe ?? stub) as AppDeps['stripe'],
+    backgroundCheck: stub as AppDeps['backgroundCheck'],
   };
 }
 

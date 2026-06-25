@@ -1,3 +1,4 @@
+import type { BackgroundCheckAdapter } from '../../../packages/domain/src/background-check/index.ts';
 import type { Env } from './config/env.ts';
 import type { Db } from './db/kysely.ts';
 import type { SupabaseHandles } from './supabase/admin.ts';
@@ -15,4 +16,7 @@ export interface AppDeps {
   supabase: SupabaseHandles;
   /** Stripe Connect Express — Caregiver payment rail (OH-190). */
   stripe: StripeAdapter;
+  /** Background-check vendor (Checkr) — webhook verify + normalize on the api
+   *  host; the slow invitation call lives on the worker-tick (OH-185). */
+  backgroundCheck: BackgroundCheckAdapter;
 }
