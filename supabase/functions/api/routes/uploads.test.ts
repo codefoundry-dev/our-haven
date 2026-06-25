@@ -109,6 +109,29 @@ describe('POST /v1/uploads/signed-url', () => {
     expect(calledPath.startsWith('insurance-doc/uid-1/')).toBe(true);
   });
 
+  it('mints a state-childcare-registration upload, uid-namespaced under state-childcare-registration/', async () => {
+    const { supabase, from, createSignedUploadUrl } = makeStorage({
+      data: {
+        signedUrl: 'https://storage/sign/fcch',
+        token: 'fcch-token',
+        path: 'state-childcare-registration/uid-1/generated',
+      },
+    });
+    const app = buildApp(makeDeps({ supabase }));
+    const res = await app.request(
+      '/v1/uploads/signed-url',
+      post(await caregiverToken(), { kind: 'state-childcare-registration' }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      bucket: 'id-docs',
+      objectPath: 'state-childcare-registration/uid-1/generated',
+    });
+    expect(from).toHaveBeenCalledWith('id-docs');
+    const calledPath = createSignedUploadUrl.mock.calls[0]?.[0] as string;
+    expect(calledPath.startsWith('state-childcare-registration/uid-1/')).toBe(true);
+  });
+
   it('502 when Storage returns an error', async () => {
     const { supabase } = makeStorage({ data: null, error: { message: 'bucket missing' } });
     const app = buildApp(makeDeps({ supabase }));

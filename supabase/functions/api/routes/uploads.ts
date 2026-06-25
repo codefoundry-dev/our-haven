@@ -19,16 +19,18 @@ import type { SupabaseHandles } from '../supabase/admin.ts';
  * member's object nor smuggle an out-of-namespace path past the confirm checks
  * on the owning resource.
  *
- * Kinds (OH-184 / OH-186): `id-doc` (government ID), `license-doc` (Provider
- * professional license certificate), `insurance-doc` (Provider liability COI).
- * All three are sensitive supply-verification PII and share the one private
- * `id-docs` bucket (env.ID_DOC_BUCKET), separated by the kind path prefix; the
- * owning resource validates the prefix on confirm (id-doc →
+ * Kinds (OH-184 / OH-186 / OH-187): `id-doc` (government ID), `license-doc`
+ * (Provider professional license certificate), `insurance-doc` (Provider
+ * liability COI), `state-childcare-registration` (Caregiver FCCH home-childcare
+ * registration certificate). All share the one private `id-docs` bucket
+ * (env.ID_DOC_BUCKET), separated by the kind path prefix; the owning resource
+ * validates the prefix on confirm (id-doc →
  * /v1/providers/me/verification/id-doc; license-doc + insurance-doc →
- * /v1/providers/me/credentials/{license,insurance}).
+ * /v1/providers/me/credentials/{license,insurance}; state-childcare-registration
+ * → /v1/providers/me/home-childcare-registration).
  */
 
-const UPLOAD_KINDS = ['id-doc', 'license-doc', 'insurance-doc'] as const;
+const UPLOAD_KINDS = ['id-doc', 'license-doc', 'insurance-doc', 'state-childcare-registration'] as const;
 type UploadKind = (typeof UPLOAD_KINDS)[number];
 
 const SUPPLY_ROLES = ['caregiver', 'provider'] as const;
@@ -68,6 +70,8 @@ function objectKeyFor(kind: UploadKind, uid: string): string {
       return `license-doc/${uid}/${unique}`;
     case 'insurance-doc':
       return `insurance-doc/${uid}/${unique}`;
+    case 'state-childcare-registration':
+      return `state-childcare-registration/${uid}/${unique}`;
   }
 }
 
@@ -82,7 +86,7 @@ const signedUrlRoute = createRoute({
   tags: ['uploads'],
   summary: 'Mint a one-time signed URL for a client-direct private Storage upload',
   description:
-    'Returns a signed upload URL + token for a server-chosen, uid-namespaced object key in a private Supabase Storage bucket. The client PUTs the file with supabase.storage.from(bucket).uploadToSignedUrl(objectPath, token, file), then confirms the objectPath to the owning resource (id-doc → POST /v1/providers/me/verification/id-doc; license-doc → POST /v1/providers/me/credentials/license; insurance-doc → POST /v1/providers/me/credentials/insurance). Supply-scoped (caregiver / provider).',
+    'Returns a signed upload URL + token for a server-chosen, uid-namespaced object key in a private Supabase Storage bucket. The client PUTs the file with supabase.storage.from(bucket).uploadToSignedUrl(objectPath, token, file), then confirms the objectPath to the owning resource (id-doc → POST /v1/providers/me/verification/id-doc; license-doc → POST /v1/providers/me/credentials/license; insurance-doc → POST /v1/providers/me/credentials/insurance; state-childcare-registration → POST /v1/providers/me/home-childcare-registration). Supply-scoped (caregiver / provider).',
   security: [{ supabaseAccessToken: [] }],
   middleware: [requireAuth({ roles: [...SUPPLY_ROLES] })] as const,
   request: { body: { content: json(SignedUrlRequest), required: true } },

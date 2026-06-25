@@ -4,6 +4,7 @@ import type { AppEnv } from './context.ts';
 import type { AppDeps } from './deps.ts';
 import { registerAdminStripeTaxRoutes } from './routes/admin/stripe-tax.ts';
 import { registerAuthRoutes } from './routes/auth.ts';
+import { registerCaregiverBadgeRoutes } from './routes/caregiver-badges.ts';
 import { registerCaregiverConnectRoutes } from './routes/caregiver-connect.ts';
 import { registerHealthRoutes } from './routes/health.ts';
 import { registerProviderCredentialsRoutes } from './routes/provider-credentials.ts';
@@ -43,6 +44,11 @@ export const openApiInfo = {
     { name: 'health', description: 'Liveness and readiness probes' },
     { name: 'auth', description: 'Authentication — role-claim, email-OTP, step-up MFA' },
     { name: 'caregiver', description: 'Caregiver Stripe Connect Express — onboarding, summary, dashboard (OH-190)' },
+    {
+      name: 'badges',
+      description:
+        'Optional Caregiver badges (OH-187) — W-10 "Tax-credit-friendly" self-attest + per-state home-childcare (FCCH) registration; neither gates activation.',
+    },
     { name: 'verification', description: 'Supply verification — state + email/phone/ID-doc facts (OH-184)' },
     {
       name: 'screening',
@@ -93,6 +99,7 @@ export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerCaregiverConnectRoutes(v1);
   registerVerificationRoutes(v1);
   registerProviderCredentialsRoutes(v1);
+  registerCaregiverBadgeRoutes(v1);
   registerScreeningRoutes(v1);
   registerUploadRoutes(v1);
   registerStripeConnectWebhookRoutes(v1);
