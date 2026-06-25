@@ -72,7 +72,7 @@ describe('POST /v1/auth/role-claim', () => {
         payload: { role: 'parent' },
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ role: 'parent', kind: null });
+      expect(res.json()).toEqual({ role: 'parent', categories: null, specialty: null });
       expect(updateUserById).toHaveBeenCalledWith(
         'supabase-uid-123',
         expect.objectContaining({
@@ -97,7 +97,7 @@ describe('POST /v1/auth/role-claim', () => {
         method: 'POST',
         url: '/v1/auth/role-claim',
         headers: { authorization: `Bearer ${token}` },
-        payload: { role: 'provider', kind: 'caregiver' },
+        payload: { role: 'caregiver', categories: ['babysitter'] },
       });
       expect(res.statusCode).toBe(409);
       expect(updateUserById).not.toHaveBeenCalled();
@@ -106,30 +106,30 @@ describe('POST /v1/auth/role-claim', () => {
     }
   });
 
-  it('is idempotent when role+kind match', async () => {
+  it('is idempotent when role+specialty match', async () => {
     const updateUserById = vi.fn(async () => ({ data: null, error: null }));
     const deps = makeDeps({ updateUserById });
     const app = await buildAppWithRoutes(deps);
     const token = await mintAccessToken({
       sub: 'supabase-uid-123',
-      appMetadata: { role: 'provider', kind: 'specialist' },
+      appMetadata: { role: 'provider', specialty: 'slp' },
     });
     try {
       const res = await app.inject({
         method: 'POST',
         url: '/v1/auth/role-claim',
         headers: { authorization: `Bearer ${token}` },
-        payload: { role: 'provider', kind: 'specialist' },
+        payload: { role: 'provider', specialty: 'slp' },
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ role: 'provider', kind: 'specialist' });
+      expect(res.json()).toEqual({ role: 'provider', categories: null, specialty: 'slp' });
       expect(updateUserById).not.toHaveBeenCalled();
     } finally {
       await app.close();
     }
   });
 
-  it('400s when provider role is requested without a kind', async () => {
+  it('400s when provider role is requested without a specialty', async () => {
     const app = await buildAppWithRoutes(makeDeps({}));
     const token = await mintAccessToken({ sub: 'supabase-uid-123' });
     try {
@@ -145,7 +145,7 @@ describe('POST /v1/auth/role-claim', () => {
     }
   });
 
-  it('400s when caregiverCategory accompanies kind=specialist', async () => {
+  it('400s when categories accompany role=provider', async () => {
     const app = await buildAppWithRoutes(makeDeps({}));
     const token = await mintAccessToken({ sub: 'supabase-uid-123' });
     try {
@@ -153,7 +153,7 @@ describe('POST /v1/auth/role-claim', () => {
         method: 'POST',
         url: '/v1/auth/role-claim',
         headers: { authorization: `Bearer ${token}` },
-        payload: { role: 'provider', kind: 'specialist', caregiverCategory: 'babysitter' },
+        payload: { role: 'provider', specialty: 'slp', categories: ['babysitter'] },
       });
       expect(res.statusCode).toBe(400);
     } finally {

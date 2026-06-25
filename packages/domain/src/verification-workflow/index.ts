@@ -6,13 +6,18 @@
  * email/phone confirmation timestamps) — not vendor APIs. Vendor adapters live
  * at the handler layer and reduce to the timestamp facts on this struct.
  *
- * Per CONTEXT.md § Verification:
- *   - All Providers: email + phone + ID upload + Checkr screening + Stripe
- *     Connect Express account ready (OH-110: charges_enabled AND payouts_enabled).
- *   - Specialists additionally: license verified against the per-state
- *     license-board adapter; Specialists in launch-unsupported states route
- *     to `holding-state-not-supported` until the adapter ships.
+ * Per CONTEXT.md § Verification (roles per ADR-0011: caregiver | provider):
+ *   - All supply (Caregiver + Provider): email + phone + ID upload + Checkr
+ *     screening + Stripe Connect Express account ready (OH-110).
+ *   - Providers (clinical tier) additionally: license verified against the
+ *     per-state license-board adapter; Providers in launch-unsupported states
+ *     route to `holding-state-not-supported` until the adapter ships.
  *   - Caregivers never need a license; Checkr is multi-state.
+ *
+ * NB: the behavioural forks ADR-0011 implies for the clinical tier (Provider
+ * has no Stripe Connect / payout — clinical payment is off-platform) are
+ * deferred to the per-role Verification rework (OH-181) + Connect ticket
+ * (OH-190). This module preserves the prior behaviour on the flat role.
  *
  * Transition order encoded:
  *   unverified
@@ -22,17 +27,17 @@
  *     → screening-initiated
  *     → screening-passed
  *     → (Caregiver: connect-pending → activated)
- *     → (Specialist, supported state: license-pending → license-verified → connect-pending → activated)
- *     → (Specialist, unsupported state: holding-state-not-supported)
+ *     → (Provider, supported state: license-pending → license-verified → connect-pending → activated)
+ *     → (Provider, unsupported state: holding-state-not-supported)
  *     → rejected (terminal, from any state)
  *
  * `connect-pending` is the OH-110 gate that holds the Provider out of search
  * results until Stripe confirms the Connect Express account can both charge
  * (collect Booking payments) and pay out (receive funds). It applies equally
- * to Caregivers and Specialists.
+ * to Caregivers and Providers.
  */
 
-import type { ProviderKind, UsState } from '@our-haven/shared';
+import type { SupplyRole, UsState } from '@our-haven/shared';
 
 export const VERIFICATION_STATES = [
   'unverified',
@@ -74,7 +79,7 @@ export interface VerificationFacts {
 }
 
 export interface ComputeVerificationStateInput {
-  kind: ProviderKind;
+  role: SupplyRole;
   state: UsState;
   /**
    * The set of US states for which a per-state license-board adapter has
@@ -94,7 +99,7 @@ export interface ComputeVerificationStateInput {
  * recording the facts; this module only interprets them.
  */
 export function computeVerificationState(input: ComputeVerificationStateInput): VerificationState {
-  const { kind, state, supportedStates, facts } = input;
+  const { role, state, supportedStates, facts } = input;
 
   if (facts.rejectedAt) return 'rejected';
   if (!facts.emailConfirmedAt) return 'unverified';
@@ -103,7 +108,7 @@ export function computeVerificationState(input: ComputeVerificationStateInput): 
   if (!facts.screeningInitiatedAt) return 'id-uploaded';
   if (!facts.screeningPassedAt) return 'screening-initiated';
 
-  if (kind === 'specialist') {
+  if (role === 'provider') {
     if (!supportedStates.has(state)) return 'holding-state-not-supported';
     if (!facts.licenseVerifiedAt) return 'license-pending';
   }

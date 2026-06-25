@@ -110,7 +110,7 @@ paths:
                 additionalProperties: false
   /v1/auth/role-claim:
     post:
-      summary: Set the permanent role + kind on the authenticated Supabase user
+      summary: Set the permanent role on the authenticated Supabase user
       tags:
         - auth
       description: Idempotent. Rejects with 409 if the user already has a role claim
@@ -129,20 +129,25 @@ paths:
                   type: string
                   enum:
                     - parent
-                    - provider
-                kind:
-                  type: string
-                  enum:
                     - caregiver
-                    - specialist
-                caregiverCategory:
-                  type: string
-                  minLength: 1
-                  maxLength: 64
+                    - provider
+                categories:
+                  minItems: 1
+                  type: array
+                  items:
+                    type: string
+                    enum:
+                      - babysitter
+                      - tutor
+                      - nanny
                 specialty:
                   type: string
-                  minLength: 1
-                  maxLength: 64
+                  enum:
+                    - slp
+                    - ot
+                    - aba
+                    - psychology
+                    - other
               required:
                 - role
       security:
@@ -159,17 +164,32 @@ paths:
                     type: string
                     enum:
                       - parent
+                      - caregiver
                       - provider
-                  kind:
+                  categories:
+                    anyOf:
+                      - type: array
+                        items:
+                          type: string
+                          enum:
+                            - babysitter
+                            - tutor
+                            - nanny
+                      - type: "null"
+                  specialty:
                     anyOf:
                       - type: string
                         enum:
-                          - caregiver
-                          - specialist
+                          - slp
+                          - ot
+                          - aba
+                          - psychology
+                          - other
                       - type: "null"
                 required:
                   - role
-                  - kind
+                  - categories
+                  - specialty
                 additionalProperties: false
         "400":
           description: Default Response
@@ -505,17 +525,17 @@ paths:
                 additionalProperties: false
   /v1/providers:
     post:
-      summary: Provider sign-up — persist Provider row + set role/kind/state claims
+      summary: Supply sign-up — persist the supply row + set role/state claims
       tags:
         - providers
-      description: "Creates a Provider row keyed by Supabase user id and writes custom
-        claims to Supabase `app_metadata` (role=provider, kind, state,
-        caregiver_category | specialty). Idempotent: re-posting identical
-        attributes returns 200 with the existing row; mismatched kind / category
-        / specialty / state returns 409 (role + kind + state are permanent per
-        CONTEXT.md § Authentication / Account roles). A user already bound to
-        role=parent or role=admin cannot sign up as provider — they must create
-        a second account."
+      description: "Creates a supply row keyed by Supabase user id and writes custom
+        claims to Supabase `app_metadata` (role ∈ {caregiver, provider}, state,
+        categories | specialty per ADR-0011). Idempotent: re-posting identical
+        attributes returns 200 with the existing row; a mismatched role /
+        categories / specialty / state returns 409 (role + sub-type + state are
+        permanent per CONTEXT.md § Authentication). A user already bound to
+        role=parent or role=admin cannot sign up as supply — they must create a
+        second account."
       requestBody:
         required: true
         content:
@@ -524,16 +544,19 @@ paths:
               oneOf:
                 - type: object
                   properties:
-                    kind:
+                    role:
                       type: string
                       enum:
                         - caregiver
-                    caregiverCategory:
-                      type: string
-                      enum:
-                        - babysitter
-                        - tutor
-                        - nanny
+                    categories:
+                      minItems: 1
+                      type: array
+                      items:
+                        type: string
+                        enum:
+                          - babysitter
+                          - tutor
+                          - nanny
                     state:
                       type: string
                       enum:
@@ -589,16 +612,16 @@ paths:
                         - WI
                         - WY
                   required:
-                    - kind
-                    - caregiverCategory
+                    - role
+                    - categories
                     - state
                   additionalProperties: false
                 - type: object
                   properties:
-                    kind:
+                    role:
                       type: string
                       enum:
-                        - specialist
+                        - provider
                     specialty:
                       type: string
                       enum:
@@ -662,7 +685,7 @@ paths:
                         - WI
                         - WY
                   required:
-                    - kind
+                    - role
                     - specialty
                     - state
                   additionalProperties: false
@@ -682,18 +705,20 @@ paths:
                     pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
                   uid:
                     type: string
-                  kind:
+                  role:
                     type: string
                     enum:
                       - caregiver
-                      - specialist
-                  caregiverCategory:
+                      - provider
+                  categories:
                     anyOf:
-                      - type: string
-                        enum:
-                          - babysitter
-                          - tutor
-                          - nanny
+                      - type: array
+                        items:
+                          type: string
+                          enum:
+                            - babysitter
+                            - tutor
+                            - nanny
                       - type: "null"
                   specialty:
                     anyOf:
@@ -766,8 +791,8 @@ paths:
                 required:
                   - id
                   - uid
-                  - kind
-                  - caregiverCategory
+                  - role
+                  - categories
                   - specialty
                   - state
                   - createdAt
@@ -785,18 +810,20 @@ paths:
                     pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
                   uid:
                     type: string
-                  kind:
+                  role:
                     type: string
                     enum:
                       - caregiver
-                      - specialist
-                  caregiverCategory:
+                      - provider
+                  categories:
                     anyOf:
-                      - type: string
-                        enum:
-                          - babysitter
-                          - tutor
-                          - nanny
+                      - type: array
+                        items:
+                          type: string
+                          enum:
+                            - babysitter
+                            - tutor
+                            - nanny
                       - type: "null"
                   specialty:
                     anyOf:
@@ -869,8 +896,8 @@ paths:
                 required:
                   - id
                   - uid
-                  - kind
-                  - caregiverCategory
+                  - role
+                  - categories
                   - specialty
                   - state
                   - createdAt
@@ -919,11 +946,11 @@ paths:
                 additionalProperties: false
   /v1/providers/me/profile:
     get:
-      summary: Read the authenticated Provider's public-profile editor state
+      summary: Read the authenticated supply account's public-profile editor state
       tags:
         - providers
-      description: Returns the Provider profile fields edited on the web portal —
-        published rate, optional per-child surcharge (Babysitter/Nanny only),
+      description: Returns the profile fields edited on the supply onboarding surface
+        — published rate, optional per-child surcharge (Babysitter/Nanny only),
         availability summary grid + note + paused flag, W-10 self-attestation
         toggle, bio, languages, specialty tags, photo. Creates an empty row on
         first read so the editor always has a target.
@@ -941,18 +968,20 @@ paths:
                     type: string
                     format: uuid
                     pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
-                  kind:
+                  role:
                     type: string
                     enum:
                       - caregiver
-                      - specialist
-                  caregiverCategory:
+                      - provider
+                  categories:
                     anyOf:
-                      - type: string
-                        enum:
-                          - babysitter
-                          - tutor
-                          - nanny
+                      - type: array
+                        items:
+                          type: string
+                          enum:
+                            - babysitter
+                            - tutor
+                            - nanny
                       - type: "null"
                   specialty:
                     anyOf:
@@ -1166,8 +1195,8 @@ paths:
                       - type: "null"
                 required:
                   - providerId
-                  - kind
-                  - caregiverCategory
+                  - role
+                  - categories
                   - specialty
                   - displayName
                   - headline
@@ -1229,14 +1258,14 @@ paths:
                   - error
                 additionalProperties: false
     patch:
-      summary: Update the authenticated Provider's public-profile editor state
+      summary: Update the authenticated supply account's public-profile editor state
       tags:
         - providers
       description: "Partial update — any field omitted is left untouched. Per-child
-        surcharge and W-10 toggle are rejected with 400 unless the Provider is a
-        Babysitter or Nanny (kind=caregiver + caregiver_category in
-        [babysitter,nanny]). Availability grid is normalised: only true cells
-        are persisted."
+        surcharge and W-10 toggle are rejected with 400 unless the account is a
+        Babysitter or Nanny (role=caregiver + categories includes
+        babysitter|nanny). Availability grid is normalised: only true cells are
+        persisted."
       requestBody:
         required: true
         content:
@@ -1392,18 +1421,20 @@ paths:
                     type: string
                     format: uuid
                     pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
-                  kind:
+                  role:
                     type: string
                     enum:
                       - caregiver
-                      - specialist
-                  caregiverCategory:
+                      - provider
+                  categories:
                     anyOf:
-                      - type: string
-                        enum:
-                          - babysitter
-                          - tutor
-                          - nanny
+                      - type: array
+                        items:
+                          type: string
+                          enum:
+                            - babysitter
+                            - tutor
+                            - nanny
                       - type: "null"
                   specialty:
                     anyOf:
@@ -1617,8 +1648,8 @@ paths:
                       - type: "null"
                 required:
                   - providerId
-                  - kind
-                  - caregiverCategory
+                  - role
+                  - categories
                   - specialty
                   - displayName
                   - headline
@@ -1727,11 +1758,11 @@ paths:
                       - activated
                       - rejected
                       - holding-state-not-supported
-                  kind:
+                  role:
                     type: string
                     enum:
                       - caregiver
-                      - specialist
+                      - provider
                   residentState:
                     type: string
                     enum:
@@ -1867,7 +1898,7 @@ paths:
                     additionalProperties: false
                 required:
                   - state
-                  - kind
+                  - role
                   - residentState
                   - licenseBoardSupported
                   - facts
@@ -1948,11 +1979,11 @@ paths:
                       - activated
                       - rejected
                       - holding-state-not-supported
-                  kind:
+                  role:
                     type: string
                     enum:
                       - caregiver
-                      - specialist
+                      - provider
                   residentState:
                     type: string
                     enum:
@@ -2088,7 +2119,7 @@ paths:
                     additionalProperties: false
                 required:
                   - state
-                  - kind
+                  - role
                   - residentState
                   - licenseBoardSupported
                   - facts
@@ -2197,11 +2228,11 @@ paths:
                       - activated
                       - rejected
                       - holding-state-not-supported
-                  kind:
+                  role:
                     type: string
                     enum:
                       - caregiver
-                      - specialist
+                      - provider
                   residentState:
                     type: string
                     enum:
@@ -2337,7 +2368,7 @@ paths:
                     additionalProperties: false
                 required:
                   - state
-                  - kind
+                  - role
                   - residentState
                   - licenseBoardSupported
                   - facts
@@ -2400,12 +2431,13 @@ paths:
                 additionalProperties: false
   /v1/providers/me/credentials:
     get:
-      summary: Read the authenticated Specialist's license + insurance credentials
+      summary: Read the authenticated Provider's license + insurance credentials
       tags:
         - providers
       description: Returns the per-state license-board context (board name, register
-        URL, hint) plus the current upload + decision state for the Specialist.
-        Caregivers (kind=caregiver) get 409 — they never need a license.
+        URL, hint) plus the current upload + decision state for the clinical
+        Provider. Caregivers are rejected by the provider-only role guard (403)
+        — they never need a license.
       security:
         - supabaseAccessToken: []
       responses:
@@ -2420,11 +2452,11 @@ paths:
                     type: string
                     format: uuid
                     pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
-                  kind:
+                  role:
                     type: string
                     enum:
                       - caregiver
-                      - specialist
+                      - provider
                   residentState:
                     type: string
                     enum:
@@ -2766,7 +2798,7 @@ paths:
                       - type: "null"
                 required:
                   - providerId
-                  - kind
+                  - role
                   - residentState
                   - specialty
                   - licenseBoardSupported
@@ -2841,10 +2873,10 @@ paths:
                 additionalProperties: false
   /v1/providers/me/credentials/license:
     post:
-      summary: Record a completed Specialist license-document upload
+      summary: Record a completed Provider license-document upload
       tags:
         - providers
-      description: Called after the Provider portal uploads a license certificate
+      description: Called after the supply portal uploads a license certificate
         through the signed-URL flow (POST /v1/uploads/signed-url with
         kind=license-doc). The body carries the returned objectPath plus
         optional licenseNumber and licenseBoardState. The server validates the
@@ -2939,11 +2971,11 @@ paths:
                     type: string
                     format: uuid
                     pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
-                  kind:
+                  role:
                     type: string
                     enum:
                       - caregiver
-                      - specialist
+                      - provider
                   residentState:
                     type: string
                     enum:
@@ -3285,7 +3317,7 @@ paths:
                       - type: "null"
                 required:
                   - providerId
-                  - kind
+                  - role
                   - residentState
                   - specialty
                   - licenseBoardSupported
@@ -3374,10 +3406,10 @@ paths:
                 additionalProperties: false
   /v1/providers/me/credentials/insurance:
     post:
-      summary: Record a completed Specialist liability-insurance COI upload
+      summary: Record a completed Provider liability-insurance COI upload
       tags:
         - providers
-      description: Called after the Provider portal uploads a Certificate of Insurance
+      description: Called after the supply portal uploads a Certificate of Insurance
         through the signed-URL flow (POST /v1/uploads/signed-url with
         kind=insurance-doc). Optional — encouraged but not required for
         activation.
@@ -3409,11 +3441,11 @@ paths:
                     type: string
                     format: uuid
                     pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
-                  kind:
+                  role:
                     type: string
                     enum:
                       - caregiver
-                      - specialist
+                      - provider
                   residentState:
                     type: string
                     enum:
@@ -3755,7 +3787,7 @@ paths:
                       - type: "null"
                 required:
                   - providerId
-                  - kind
+                  - role
                   - residentState
                   - specialty
                   - licenseBoardSupported
@@ -3844,7 +3876,7 @@ paths:
                 additionalProperties: false
   /v1/admin/providers/{providerId}/license-verification:
     get:
-      summary: Admin — read a Specialist Provider's license-board context + uploaded
+      summary: Admin — read a clinical Provider's license-board context + uploaded
         docs + decision
       tags:
         - providers
@@ -3874,11 +3906,11 @@ paths:
                     type: string
                     format: uuid
                     pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
-                  kind:
+                  role:
                     type: string
                     enum:
                       - caregiver
-                      - specialist
+                      - provider
                   residentState:
                     type: string
                     enum:
@@ -4220,7 +4252,7 @@ paths:
                       - type: "null"
                 required:
                   - providerId
-                  - kind
+                  - role
                   - residentState
                   - specialty
                   - licenseBoardSupported
@@ -4300,7 +4332,7 @@ paths:
       description: Admin manual verification flow per CONTEXT.md § Verification +
         ADR-0007 / OH-107. On `verified`, sets
         `provider_verifications.license_verified_at = now()`, which the
-        Verification state machine reads to advance the Specialist toward
+        Verification state machine reads to advance the Provider toward
         `activated`. On `rejected`, sets `provider_verifications.rejected_at =
         now()` with the decision notes mirrored into rejection_reason.
       requestBody:
@@ -4343,11 +4375,11 @@ paths:
                     type: string
                     format: uuid
                     pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
-                  kind:
+                  role:
                     type: string
                     enum:
                       - caregiver
-                      - specialist
+                      - provider
                   residentState:
                     type: string
                     enum:
@@ -4689,7 +4721,7 @@ paths:
                       - type: "null"
                 required:
                   - providerId
-                  - kind
+                  - role
                   - residentState
                   - specialty
                   - licenseBoardSupported
@@ -4770,9 +4802,10 @@ paths:
         - providers
       description: "Returns the per-state home-childcare-licensing-agency context
         (agency name, programme name, register URL, admin hint) plus the current
-        upload + admin-decision state. Eligibility: kind=caregiver AND
-        caregiver_category in [babysitter, nanny] — Tutors and Specialists get
-        409. When the Provider's state is outside the launch slate,
+        upload + admin-decision state. Eligibility: role=caregiver AND
+        categories includes babysitter or nanny — Tutor-only Caregivers get 409;
+        Providers (clinical) are rejected by the role guard (403). When the
+        resident state is outside the launch slate,
         `homeChildcareBoardSupported` is false and `board` is null; the upload
         affordance should be hidden client-side."
       security:
@@ -4789,18 +4822,20 @@ paths:
                     type: string
                     format: uuid
                     pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
-                  kind:
+                  role:
                     type: string
                     enum:
                       - caregiver
-                      - specialist
-                  caregiverCategory:
+                      - provider
+                  categories:
                     anyOf:
-                      - type: string
-                        enum:
-                          - babysitter
-                          - tutor
-                          - nanny
+                      - type: array
+                        items:
+                          type: string
+                          enum:
+                            - babysitter
+                            - tutor
+                            - nanny
                       - type: "null"
                   residentState:
                     type: string
@@ -5022,8 +5057,8 @@ paths:
                       - type: "null"
                 required:
                   - providerId
-                  - kind
-                  - caregiverCategory
+                  - role
+                  - categories
                   - residentState
                   - homeChildcareBoardSupported
                   - board
@@ -5095,13 +5130,13 @@ paths:
       summary: Record a completed state home-childcare-registration certificate upload
       tags:
         - providers
-      description: Called after the Provider portal uploads the state registration
+      description: Called after the supply portal uploads the state registration
         certificate through the signed-URL flow (POST /v1/uploads/signed-url
         with kind=state-childcare-registration). The body carries the returned
         objectPath; the server validates the objectPath is scoped to the caller
-        and records the upload along with the Provider's resident state at
+        and records the upload along with the Caregiver's resident state at
         upload time (so the badge keeps naming the correct agency if the
-        Provider later moves).
+        Caregiver later moves).
       requestBody:
         required: true
         content:
@@ -5130,18 +5165,20 @@ paths:
                     type: string
                     format: uuid
                     pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
-                  kind:
+                  role:
                     type: string
                     enum:
                       - caregiver
-                      - specialist
-                  caregiverCategory:
+                      - provider
+                  categories:
                     anyOf:
-                      - type: string
-                        enum:
-                          - babysitter
-                          - tutor
-                          - nanny
+                      - type: array
+                        items:
+                          type: string
+                          enum:
+                            - babysitter
+                            - tutor
+                            - nanny
                       - type: "null"
                   residentState:
                     type: string
@@ -5363,8 +5400,8 @@ paths:
                       - type: "null"
                 required:
                   - providerId
-                  - kind
-                  - caregiverCategory
+                  - role
+                  - categories
                   - residentState
                   - homeChildcareBoardSupported
                   - board
@@ -5448,8 +5485,8 @@ paths:
                 additionalProperties: false
   /v1/admin/providers/{providerId}/home-childcare-registration:
     get:
-      summary: Admin — read a Caregiver Provider's home-childcare-registration context
-        + uploaded cert + decision
+      summary: Admin — read a Caregiver's home-childcare-registration context +
+        uploaded cert + decision
       tags:
         - providers
       description: Surfaces the per-state home-childcare-licensing-agency metadata
@@ -5478,18 +5515,20 @@ paths:
                     type: string
                     format: uuid
                     pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
-                  kind:
+                  role:
                     type: string
                     enum:
                       - caregiver
-                      - specialist
-                  caregiverCategory:
+                      - provider
+                  categories:
                     anyOf:
-                      - type: string
-                        enum:
-                          - babysitter
-                          - tutor
-                          - nanny
+                      - type: array
+                        items:
+                          type: string
+                          enum:
+                            - babysitter
+                            - tutor
+                            - nanny
                       - type: "null"
                   residentState:
                     type: string
@@ -5711,8 +5750,8 @@ paths:
                       - type: "null"
                 required:
                   - providerId
-                  - kind
-                  - caregiverCategory
+                  - role
+                  - categories
                   - residentState
                   - homeChildcareBoardSupported
                   - board
@@ -5786,7 +5825,7 @@ paths:
       tags:
         - providers
       description: Admin manual verification flow per CONTEXT.md § CDCTC-eligibility &
-        state childcare licensure. On `verified` the Provider's public profile
+        state childcare licensure. On `verified` the Caregiver's public profile
         gains the "State-registered home childcare" badge naming the specific
         state agency. On `rejected` the badge stays off. This decision is
         decoupled from the Verification state machine — it never blocks
@@ -5831,18 +5870,20 @@ paths:
                     type: string
                     format: uuid
                     pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
-                  kind:
+                  role:
                     type: string
                     enum:
                       - caregiver
-                      - specialist
-                  caregiverCategory:
+                      - provider
+                  categories:
                     anyOf:
-                      - type: string
-                        enum:
-                          - babysitter
-                          - tutor
-                          - nanny
+                      - type: array
+                        items:
+                          type: string
+                          enum:
+                            - babysitter
+                            - tutor
+                            - nanny
                       - type: "null"
                   residentState:
                     type: string
@@ -6064,8 +6105,8 @@ paths:
                       - type: "null"
                 required:
                   - providerId
-                  - kind
-                  - caregiverCategory
+                  - role
+                  - categories
                   - residentState
                   - homeChildcareBoardSupported
                   - board

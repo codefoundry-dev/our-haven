@@ -23,9 +23,11 @@ export interface AuthStepUpGrantsTable {
 export interface ProvidersTable {
   id: Generated<string>;
   uid: string;
-  kind: 'caregiver' | 'specialist';
-  caregiver_category: string | null;
-  specialty: string | null;
+  // Flat supply role (ADR-0011). The account-level role also lives in Supabase
+  // `app_metadata`; this column is the physical store of the supply sub-type.
+  role: 'caregiver' | 'provider';
+  categories: string[] | null; // role=caregiver — one or more (babysitter|tutor|nanny)
+  specialty: string | null; // role=provider
   state: string;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;

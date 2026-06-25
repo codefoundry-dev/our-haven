@@ -1,7 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
-import { CAREGIVER_CATEGORIES, PROVIDER_KINDS, US_STATES_50_PLUS_DC } from '@our-haven/shared';
+import { CAREGIVER_CATEGORIES, SUPPLY_ROLES, US_STATES_50_PLUS_DC } from '@our-haven/shared';
 
 import {
   computeVerificationState,
@@ -45,14 +45,14 @@ const factsArb: fc.Arbitrary<VerificationFacts> = fc.record({
   rejectedAt: dateOrNull,
 });
 
-const kindArb = fc.constantFrom(...PROVIDER_KINDS);
+const roleArb = fc.constantFrom(...SUPPLY_ROLES);
 const stateArb = fc.constantFrom(...US_STATES_50_PLUS_DC);
 const supportedStatesArb = fc
   .subarray([...US_STATES_50_PLUS_DC])
   .map((arr) => new Set(arr));
 
 const inputArb: fc.Arbitrary<ComputeVerificationStateInput> = fc.record({
-  kind: kindArb,
+  role: roleArb,
   state: stateArb,
   supportedStates: supportedStatesArb,
   facts: factsArb,
@@ -62,7 +62,7 @@ describe('computeVerificationState — happy-path step-by-step', () => {
   it('starts at unverified with no facts', () => {
     expect(
       computeVerificationState({
-        kind: 'caregiver',
+        role: 'caregiver',
         state: 'NY',
         supportedStates: ALL_STATES_SET,
         facts: EMPTY_FACTS,
@@ -85,7 +85,7 @@ describe('computeVerificationState — happy-path step-by-step', () => {
         if (earlier.field === field) break;
       }
       const state = computeVerificationState({
-        kind: 'caregiver',
+        role: 'caregiver',
         state: 'NY',
         supportedStates: ALL_STATES_SET,
         facts,
@@ -96,7 +96,7 @@ describe('computeVerificationState — happy-path step-by-step', () => {
 
   it('caregiver activates after screening passes + Stripe Connect ready', () => {
     const state = computeVerificationState({
-      kind: 'caregiver',
+      role: 'caregiver',
       state: 'TX',
       supportedStates: ALL_STATES_SET,
       facts: {
@@ -114,7 +114,7 @@ describe('computeVerificationState — happy-path step-by-step', () => {
 
   it('caregiver stalls at connect-pending if Stripe Connect is not yet ready (OH-110 gate)', () => {
     const state = computeVerificationState({
-      kind: 'caregiver',
+      role: 'caregiver',
       state: 'TX',
       supportedStates: ALL_STATES_SET,
       facts: {
@@ -129,9 +129,9 @@ describe('computeVerificationState — happy-path step-by-step', () => {
     expect(state).toBe('connect-pending');
   });
 
-  it('specialist in supported state reaches license-pending after screening', () => {
+  it('provider in supported state reaches license-pending after screening', () => {
     const state = computeVerificationState({
-      kind: 'specialist',
+      role: 'provider',
       state: 'FL',
       supportedStates: FL_NY_ONLY,
       facts: {
@@ -146,9 +146,9 @@ describe('computeVerificationState — happy-path step-by-step', () => {
     expect(state).toBe('license-pending');
   });
 
-  it('specialist activates after license is verified + Stripe Connect ready', () => {
+  it('provider activates after license is verified + Stripe Connect ready', () => {
     const state = computeVerificationState({
-      kind: 'specialist',
+      role: 'provider',
       state: 'FL',
       supportedStates: FL_NY_ONLY,
       facts: {
@@ -165,9 +165,9 @@ describe('computeVerificationState — happy-path step-by-step', () => {
     expect(state).toBe('activated');
   });
 
-  it('specialist with verified license but no Stripe Connect ready stalls at connect-pending', () => {
+  it('provider with verified license but no Stripe Connect ready stalls at connect-pending', () => {
     const state = computeVerificationState({
-      kind: 'specialist',
+      role: 'provider',
       state: 'FL',
       supportedStates: FL_NY_ONLY,
       facts: {
@@ -183,9 +183,9 @@ describe('computeVerificationState — happy-path step-by-step', () => {
     expect(state).toBe('connect-pending');
   });
 
-  it('specialist in unsupported state routes to holding after screening', () => {
+  it('provider in unsupported state routes to holding after screening', () => {
     const state = computeVerificationState({
-      kind: 'specialist',
+      role: 'provider',
       state: 'WY',
       supportedStates: FL_NY_ONLY,
       facts: {
@@ -202,7 +202,7 @@ describe('computeVerificationState — happy-path step-by-step', () => {
 
   it('rejected wins from any otherwise-clearing fact set', () => {
     const state = computeVerificationState({
-      kind: 'specialist',
+      role: 'provider',
       state: 'FL',
       supportedStates: FL_NY_ONLY,
       facts: {
@@ -223,7 +223,7 @@ describe('computeVerificationState — happy-path step-by-step', () => {
     // Caregivers don't need a license — but having one set should not skip
     // earlier gates either.
     const state = computeVerificationState({
-      kind: 'caregiver',
+      role: 'caregiver',
       state: 'NY',
       supportedStates: ALL_STATES_SET,
       facts: { ...EMPTY_FACTS, licenseVerifiedAt: ANY_DATE },
@@ -260,7 +260,7 @@ describe('computeVerificationState — property-based', () => {
 
   it('caregiver never reaches license-pending, license-verified, or holding-state-not-supported', () => {
     const caregiverInputArb = fc.record({
-      kind: fc.constant<'caregiver'>('caregiver'),
+      role: fc.constant<'caregiver'>('caregiver'),
       state: stateArb,
       supportedStates: supportedStatesArb,
       facts: factsArb,
@@ -275,9 +275,9 @@ describe('computeVerificationState — property-based', () => {
     );
   });
 
-  it('specialist in unsupported state never reaches activated (without rejection)', () => {
+  it('provider in unsupported state never reaches activated (without rejection)', () => {
     const specialistInputArb = fc.record({
-      kind: fc.constant<'specialist'>('specialist'),
+      role: fc.constant<'provider'>('provider'),
       state: stateArb,
       facts: factsArb.map((f) => ({ ...f, rejectedAt: null })),
     });
@@ -325,16 +325,16 @@ describe('computeVerificationState — property-based', () => {
 
     fc.assert(
       fc.property(
-        kindArb,
+        roleArb,
         stateArb,
         supportedStatesArb,
         fc.constantFrom(...factOrder),
         fc.date({ min: new Date('2026-01-01T00:00:00Z'), max: new Date('2027-01-01T00:00:00Z') }),
         factsArb.map((f) => ({ ...f, rejectedAt: null })),
-        (kind, state, supportedStates, field, when, baseFacts) => {
-          const before = computeVerificationState({ kind, state, supportedStates, facts: baseFacts });
+        (role, state, supportedStates, field, when, baseFacts) => {
+          const before = computeVerificationState({ role, state, supportedStates, facts: baseFacts });
           const after = computeVerificationState({
-            kind,
+            role,
             state,
             supportedStates,
             facts: { ...baseFacts, [field]: when },

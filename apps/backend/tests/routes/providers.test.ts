@@ -18,8 +18,8 @@ function envForTest() {
 interface ProviderRow {
   id: string;
   uid: string;
-  kind: 'caregiver' | 'specialist';
-  caregiver_category: string | null;
+  role: 'caregiver' | 'provider';
+  categories: string[] | null;
   specialty: string | null;
   state: string;
   created_at: Date;
@@ -103,7 +103,7 @@ describe('POST /v1/providers', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/v1/providers',
-        payload: { kind: 'caregiver', caregiverCategory: 'babysitter', state: 'NY' },
+        payload: { role: 'caregiver', categories: ['babysitter'], state: 'NY' },
       });
       expect(res.statusCode).toBe(401);
     } finally {
@@ -120,7 +120,7 @@ describe('POST /v1/providers', () => {
         method: 'POST',
         url: '/v1/providers',
         headers: { authorization: `Bearer ${token}` },
-        payload: { kind: 'caregiver', caregiverCategory: 'babysitter', state: 'ZZ' },
+        payload: { role: 'caregiver', categories: ['babysitter'], state: 'ZZ' },
       });
       expect(res.statusCode).toBe(400);
     } finally {
@@ -128,7 +128,7 @@ describe('POST /v1/providers', () => {
     }
   });
 
-  it('400s when caregiver tab includes specialty', async () => {
+  it('400s when caregiver tab includes specialty (strict schema)', async () => {
     const { db } = makeDbStub({ existing: null });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     const token = await mintAccessToken({ sub: 'supabase-uid-prov-1', email: 'provider@example.com' });
@@ -137,7 +137,7 @@ describe('POST /v1/providers', () => {
         method: 'POST',
         url: '/v1/providers',
         headers: { authorization: `Bearer ${token}` },
-        payload: { kind: 'caregiver', caregiverCategory: 'babysitter', specialty: 'slp', state: 'NY' },
+        payload: { role: 'caregiver', categories: ['babysitter'], specialty: 'slp', state: 'NY' },
       });
       expect(res.statusCode).toBe(400);
     } finally {
@@ -149,8 +149,8 @@ describe('POST /v1/providers', () => {
     const insertReturns: ProviderRow = {
       id: '0193a4b1-0001-7a01-9abc-000000000001',
       uid: 'supabase-uid-prov-1',
-      kind: 'caregiver',
-      caregiver_category: 'babysitter',
+      role: 'caregiver',
+      categories: ['babysitter'],
       specialty: null,
       state: 'NY',
       created_at: new Date('2026-05-27T12:00:00Z'),
@@ -164,14 +164,14 @@ describe('POST /v1/providers', () => {
         method: 'POST',
         url: '/v1/providers',
         headers: { authorization: `Bearer ${token}` },
-        payload: { kind: 'caregiver', caregiverCategory: 'babysitter', state: 'NY' },
+        payload: { role: 'caregiver', categories: ['babysitter'], state: 'NY' },
       });
       expect(res.statusCode).toBe(201);
       expect(res.json()).toEqual({
         id: insertReturns.id,
         uid: insertReturns.uid,
-        kind: 'caregiver',
-        caregiverCategory: 'babysitter',
+        role: 'caregiver',
+        categories: ['babysitter'],
         specialty: null,
         state: 'NY',
         createdAt: '2026-05-27T12:00:00.000Z',
@@ -181,9 +181,8 @@ describe('POST /v1/providers', () => {
         'supabase-uid-prov-1',
         expect.objectContaining({
           app_metadata: expect.objectContaining({
-            role: 'provider',
-            kind: 'caregiver',
-            caregiver_category: 'babysitter',
+            role: 'caregiver',
+            categories: ['babysitter'],
             state: 'NY',
           }),
         }),
@@ -193,12 +192,12 @@ describe('POST /v1/providers', () => {
     }
   });
 
-  it('creates a specialist Provider with specialty + state', async () => {
+  it('creates a Provider (clinical) with specialty + state', async () => {
     const insertReturns: ProviderRow = {
       id: '0193a4b1-0002-7a02-9abc-000000000002',
       uid: 'supabase-uid-prov-1',
-      kind: 'specialist',
-      caregiver_category: null,
+      role: 'provider',
+      categories: null,
       specialty: 'slp',
       state: 'CA',
       created_at: new Date('2026-05-27T12:30:00Z'),
@@ -212,19 +211,18 @@ describe('POST /v1/providers', () => {
         method: 'POST',
         url: '/v1/providers',
         headers: { authorization: `Bearer ${token}` },
-        payload: { kind: 'specialist', specialty: 'slp', state: 'CA' },
+        payload: { role: 'provider', specialty: 'slp', state: 'CA' },
       });
       expect(res.statusCode).toBe(201);
       const body = res.json();
       expect(body.specialty).toBe('slp');
-      expect(body.caregiverCategory).toBeNull();
+      expect(body.categories).toBeNull();
       expect(body.state).toBe('CA');
       expect(updateUserById).toHaveBeenCalledWith(
         'supabase-uid-prov-1',
         expect.objectContaining({
           app_metadata: expect.objectContaining({
             role: 'provider',
-            kind: 'specialist',
             specialty: 'slp',
             state: 'CA',
           }),
@@ -239,8 +237,8 @@ describe('POST /v1/providers', () => {
     const existing: ProviderRow = {
       id: '0193a4b1-0003-7a03-9abc-000000000003',
       uid: 'supabase-uid-prov-1',
-      kind: 'caregiver',
-      caregiver_category: 'nanny',
+      role: 'caregiver',
+      categories: ['nanny'],
       specialty: null,
       state: 'TX',
       created_at: new Date('2026-05-20T08:00:00Z'),
@@ -254,7 +252,7 @@ describe('POST /v1/providers', () => {
         method: 'POST',
         url: '/v1/providers',
         headers: { authorization: `Bearer ${token}` },
-        payload: { kind: 'caregiver', caregiverCategory: 'nanny', state: 'TX' },
+        payload: { role: 'caregiver', categories: ['nanny'], state: 'TX' },
       });
       expect(res.statusCode).toBe(200);
       expect(insertSpy).not.toHaveBeenCalled();
@@ -264,12 +262,12 @@ describe('POST /v1/providers', () => {
     }
   });
 
-  it('409s when existing Provider differs on kind/category/state', async () => {
+  it('409s when existing Provider differs on role/categories/state', async () => {
     const existing: ProviderRow = {
       id: '0193a4b1-0004-7a04-9abc-000000000004',
       uid: 'supabase-uid-prov-1',
-      kind: 'caregiver',
-      caregiver_category: 'babysitter',
+      role: 'caregiver',
+      categories: ['babysitter'],
       specialty: null,
       state: 'NY',
       created_at: new Date('2026-05-20T08:00:00Z'),
@@ -283,7 +281,7 @@ describe('POST /v1/providers', () => {
         method: 'POST',
         url: '/v1/providers',
         headers: { authorization: `Bearer ${token}` },
-        payload: { kind: 'caregiver', caregiverCategory: 'tutor', state: 'NY' },
+        payload: { role: 'caregiver', categories: ['tutor'], state: 'NY' },
       });
       expect(res.statusCode).toBe(409);
       expect(updateUserById).not.toHaveBeenCalled();
@@ -306,7 +304,7 @@ describe('POST /v1/providers', () => {
         method: 'POST',
         url: '/v1/providers',
         headers: { authorization: `Bearer ${token}` },
-        payload: { kind: 'caregiver', caregiverCategory: 'babysitter', state: 'NY' },
+        payload: { role: 'caregiver', categories: ['babysitter'], state: 'NY' },
       });
       expect(res.statusCode).toBe(409);
       expect(updateUserById).not.toHaveBeenCalled();

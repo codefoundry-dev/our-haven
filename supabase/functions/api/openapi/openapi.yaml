@@ -14,7 +14,16 @@ servers:
 tags:
   - name: health
     description: Liveness and readiness probes
+  - name: auth
+    description: Authentication — role-claim, email-OTP, step-up MFA
 components:
+  securitySchemes:
+    supabaseAccessToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Supabase Auth access token (HS256). Verified locally with the
+        project JWT secret on every request.
   schemas:
     LivenessResponse:
       type: object
@@ -52,6 +61,92 @@ components:
       required:
         - status
         - checks
+    RoleClaimResponse:
+      type: object
+      properties:
+        role:
+          type: string
+          enum:
+            - parent
+            - caregiver
+            - provider
+        categories:
+          type: array
+          nullable: true
+          items:
+            type: string
+            enum:
+              - babysitter
+              - tutor
+              - nanny
+        specialty:
+          type: string
+          nullable: true
+          enum:
+            - slp
+            - ot
+            - aba
+            - psychology
+            - other
+            - null
+      required:
+        - role
+        - categories
+        - specialty
+    AuthErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
+    EmailOtpIssueResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        expiresAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - expiresAt
+    StepUpRefreshResponse:
+      type: object
+      properties:
+        secondFactor:
+          type: string
+          enum:
+            - totp
+            - phone
+        grantedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+      required:
+        - secondFactor
+        - grantedAt
+        - expiresAt
+    StepUpSampleResponse:
+      type: object
+      properties:
+        uid:
+          type: string
+        stepUp:
+          type: string
+          enum:
+            - satisfied
+        note:
+          type: string
+      required:
+        - uid
+        - stepUp
+        - note
   parameters: {}
 paths:
   /v1/healthz:
@@ -88,3 +183,202 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReadinessResponse"
+  /v1/auth/role-claim:
+    post:
+      tags:
+        - auth
+      summary: Set the permanent role on the authenticated Supabase user
+      description: Idempotent. Rejects with 409 if the user already has a role claim
+        that differs from the request — role is permanent (ADR-0011 / CONTEXT §
+        Authentication). `role` is one of {parent, caregiver, provider} (admin
+        is internal-only, never self-assignable). A caregiver must include
+        `categories`; a provider must include `specialty`. Claims are written to
+        Supabase `app_metadata`; the client must refresh its session to receive
+        an access token carrying the new claims.
+      security:
+        - supabaseAccessToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role:
+                  type: string
+                  enum:
+                    - parent
+                    - caregiver
+                    - provider
+                categories:
+                  type: array
+                  items:
+                    type: string
+                    enum:
+                      - babysitter
+                      - tutor
+                      - nanny
+                  minItems: 1
+                specialty:
+                  type: string
+                  enum:
+                    - slp
+                    - ot
+                    - aba
+                    - psychology
+                    - other
+              required:
+                - role
+      responses:
+        "200":
+          description: Role claim set (or already matching)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleClaimResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorResponse"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorResponse"
+        "409":
+          description: Role already claimed (permanent)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorResponse"
+  /v1/auth/email-otp/issue:
+    post:
+      tags:
+        - auth
+      summary: Issue an email-OTP for the authenticated user
+      description: Email-OTP fallback per CONTEXT § MFA posture — used for pre-paywall
+        Parents without a phone on file. The notifier is a dev stub today;
+        Resend wiring lands in OH-194.
+      security:
+        - supabaseAccessToken: []
+      responses:
+        "200":
+          description: OTP issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailOtpIssueResponse"
+        "400":
+          description: No email on account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorResponse"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorResponse"
+  /v1/auth/email-otp/verify:
+    post:
+      tags:
+        - auth
+      summary: Verify an email-OTP and open a step-up window
+      security:
+        - supabaseAccessToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code:
+                  type: string
+                  pattern: ^\d{6}$
+              required:
+                - code
+      responses:
+        "200":
+          description: OTP verified — step-up window opened
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StepUpRefreshResponse"
+        "400":
+          description: OTP rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorResponse"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorResponse"
+  /v1/auth/step-up/refresh:
+    post:
+      tags:
+        - auth
+      summary: Record a fresh MFA challenge from a Supabase aal2 access token
+      description: Called by clients after completing a Supabase MFA challenge (TOTP /
+        phone factor). Reads the token's `aal` + `amr` claims and opens a
+        15-minute step-up window in `auth_step_up_grants`. Rejects when the
+        access token is not `aal2`.
+      security:
+        - supabaseAccessToken: []
+      responses:
+        "200":
+          description: Step-up window opened
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StepUpRefreshResponse"
+        "400":
+          description: Access token is not aal2
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorResponse"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorResponse"
+  /v1/caregiver/payout-settings:
+    get:
+      tags:
+        - auth
+      summary: SCAFFOLD — sample step-up-MFA-gated payout-sensitive endpoint
+      description: Demonstrates the step-up MFA gate for payout-sensitive Caregiver
+        actions (CONTEXT § MFA posture). Requires role=caregiver AND a fresh
+        step-up grant (POST /v1/auth/step-up/refresh within 15 min) — otherwise
+        403 `step_up_required`. OH-190 replaces this scaffold with the real
+        Stripe Connect bank-detail / withdrawal endpoints.
+      security:
+        - supabaseAccessToken: []
+      responses:
+        "200":
+          description: Step-up satisfied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StepUpSampleResponse"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorResponse"
+        "403":
+          description: Wrong role or step-up required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorResponse"

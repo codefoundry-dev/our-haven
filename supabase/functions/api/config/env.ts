@@ -32,6 +32,22 @@ const EnvSchema = z.object({
     .describe(
       "Supabase project JWT secret (HS256) — Dashboard → Settings → API → JWT Secret. The auth middleware verifies access tokens locally on every request. NOT named SUPABASE_JWT_SECRET: Supabase reserves the SUPABASE_ prefix for its own auto-injected vars, so a SUPABASE_*-prefixed secret can't be set via `supabase secrets set`.",
     ),
+
+  // SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY power the management-plane admin
+  // client (auth.admin.updateUserById for role-claim — OH-175). Unlike
+  // JWT_SECRET, the SUPABASE_-prefixed vars ARE auto-injected by the platform
+  // into every deployed Edge Function (and by local `supabase functions serve`);
+  // tests + the OpenAPI emit script supply them explicitly.
+  SUPABASE_URL: z
+    .string()
+    .url()
+    .describe('Supabase project URL (https://<ref>.supabase.co). US-region project (ADR-0010). Auto-injected into deployed Edge Functions.'),
+  SUPABASE_SERVICE_ROLE_KEY: z
+    .string()
+    .min(1)
+    .describe(
+      'Supabase service-role key — server-only, full Auth admin access (writes role claims to app_metadata). NEVER ship to clients. Auto-injected into deployed Edge Functions.',
+    ),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

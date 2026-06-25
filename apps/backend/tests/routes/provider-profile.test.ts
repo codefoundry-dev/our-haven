@@ -18,8 +18,8 @@ function envForTest() {
 interface ProviderRow {
   id: string;
   uid: string;
-  kind: 'caregiver' | 'specialist';
-  caregiver_category: string | null;
+  role: 'caregiver' | 'provider';
+  categories: string[] | null;
   specialty: string | null;
 }
 
@@ -173,32 +173,44 @@ async function buildAppWithRoutes(deps: AppDeps) {
 const PROVIDER_BABYSITTER: ProviderRow = {
   id: '0193a4b1-0001-7a01-9abc-000000000001',
   uid: 'supabase-uid-babysitter',
-  kind: 'caregiver',
-  caregiver_category: 'babysitter',
+  role: 'caregiver',
+  categories: ['babysitter'],
   specialty: null,
 };
 
 const PROVIDER_TUTOR: ProviderRow = {
   id: '0193a4b1-0002-7a02-9abc-000000000002',
   uid: 'supabase-uid-tutor',
-  kind: 'caregiver',
-  caregiver_category: 'tutor',
+  role: 'caregiver',
+  categories: ['tutor'],
   specialty: null,
 };
 
 const PROVIDER_SPECIALIST: ProviderRow = {
   id: '0193a4b1-0003-7a03-9abc-000000000003',
   uid: 'supabase-uid-specialist',
-  kind: 'specialist',
-  caregiver_category: null,
+  role: 'provider',
+  categories: null,
   specialty: 'ot',
 };
 
-async function tokenFor(uid: string): Promise<string> {
+/**
+ * Mint a supply token whose role/categories/specialty mirror the given provider
+ * fixture, so the `roles: ['caregiver','provider']` guard sees the right role.
+ * Eligibility itself is derived from the DB provider row, not the token.
+ */
+async function tokenFor(provider: ProviderRow): Promise<string> {
+  const appMetadata: Record<string, unknown> = { role: provider.role };
+  if (provider.role === 'caregiver' && provider.categories) {
+    appMetadata.categories = provider.categories;
+  }
+  if (provider.role === 'provider' && provider.specialty) {
+    appMetadata.specialty = provider.specialty;
+  }
   return mintAccessToken({
-    sub: uid,
-    email: `${uid}@example.com`,
-    appMetadata: { role: 'provider' },
+    sub: provider.uid,
+    email: `${provider.uid}@example.com`,
+    appMetadata,
   });
 }
 
@@ -239,7 +251,12 @@ describe('GET /v1/providers/me/profile', () => {
     const { db } = makeDbStub({ provider: null });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
-      const token = await tokenFor('orphan-uid');
+      // Valid supply token (passes the role guard) but no provider row in the DB.
+      const token = await mintAccessToken({
+        sub: 'orphan-uid',
+        email: 'orphan-uid@example.com',
+        appMetadata: { role: 'caregiver', categories: ['babysitter'] },
+      });
       const res = await app.inject({
         method: 'GET',
         url: '/v1/providers/me/profile',
@@ -255,7 +272,7 @@ describe('GET /v1/providers/me/profile', () => {
     const { db } = makeDbStub({ provider: PROVIDER_BABYSITTER });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
-      const token = await tokenFor(PROVIDER_BABYSITTER.uid);
+      const token = await tokenFor(PROVIDER_BABYSITTER);
       const res = await app.inject({
         method: 'GET',
         url: '/v1/providers/me/profile',
@@ -264,8 +281,8 @@ describe('GET /v1/providers/me/profile', () => {
       expect(res.statusCode).toBe(200);
       const body = res.json();
       expect(body.providerId).toBe(PROVIDER_BABYSITTER.id);
-      expect(body.kind).toBe('caregiver');
-      expect(body.caregiverCategory).toBe('babysitter');
+      expect(body.role).toBe('caregiver');
+      expect(body.categories).toEqual(['babysitter']);
       expect(body.rateUnit).toBe('hour');
       expect(body.multiChildSurchargeEligible).toBe(true);
       expect(body.w10Eligible).toBe(true);
@@ -281,7 +298,7 @@ describe('GET /v1/providers/me/profile', () => {
     const { db } = makeDbStub({ provider: PROVIDER_TUTOR });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
-      const token = await tokenFor(PROVIDER_TUTOR.uid);
+      const token = await tokenFor(PROVIDER_TUTOR);
       const res = await app.inject({
         method: 'GET',
         url: '/v1/providers/me/profile',
@@ -297,11 +314,11 @@ describe('GET /v1/providers/me/profile', () => {
     }
   });
 
-  it('reports per-session rate unit for Specialist', async () => {
+  it('reports per-session rate unit for Provider (clinical)', async () => {
     const { db } = makeDbStub({ provider: PROVIDER_SPECIALIST });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
-      const token = await tokenFor(PROVIDER_SPECIALIST.uid);
+      const token = await tokenFor(PROVIDER_SPECIALIST);
       const res = await app.inject({
         method: 'GET',
         url: '/v1/providers/me/profile',
@@ -322,7 +339,7 @@ describe('GET /v1/providers/me/profile', () => {
     const { db } = makeDbStub({ provider: PROVIDER_BABYSITTER });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
-      const token = await tokenFor(PROVIDER_BABYSITTER.uid);
+      const token = await tokenFor(PROVIDER_BABYSITTER);
       const res = await app.inject({
         method: 'GET',
         url: '/v1/providers/me/profile',
@@ -346,7 +363,7 @@ describe('GET /v1/providers/me/profile', () => {
     });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
-      const token = await tokenFor(PROVIDER_BABYSITTER.uid);
+      const token = await tokenFor(PROVIDER_BABYSITTER);
       const res = await app.inject({
         method: 'GET',
         url: '/v1/providers/me/profile',
@@ -371,7 +388,7 @@ describe('GET /v1/providers/me/profile', () => {
     });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
-      const token = await tokenFor(PROVIDER_BABYSITTER.uid);
+      const token = await tokenFor(PROVIDER_BABYSITTER);
       const res = await app.inject({
         method: 'GET',
         url: '/v1/providers/me/profile',
@@ -400,7 +417,7 @@ describe('GET /v1/providers/me/profile', () => {
     });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
-      const token = await tokenFor(PROVIDER_TUTOR.uid);
+      const token = await tokenFor(PROVIDER_TUTOR);
       const res = await app.inject({
         method: 'GET',
         url: '/v1/providers/me/profile',
@@ -421,7 +438,7 @@ describe('PATCH /v1/providers/me/profile', () => {
     const { db, updateSpy, getProfile } = makeDbStub({ provider: PROVIDER_BABYSITTER });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
-      const token = await tokenFor(PROVIDER_BABYSITTER.uid);
+      const token = await tokenFor(PROVIDER_BABYSITTER);
       const res = await app.inject({
         method: 'PATCH',
         url: '/v1/providers/me/profile',
@@ -467,7 +484,7 @@ describe('PATCH /v1/providers/me/profile', () => {
     const { db, updateSpy } = makeDbStub({ provider: PROVIDER_TUTOR });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
-      const token = await tokenFor(PROVIDER_TUTOR.uid);
+      const token = await tokenFor(PROVIDER_TUTOR);
       const res = await app.inject({
         method: 'PATCH',
         url: '/v1/providers/me/profile',
@@ -482,11 +499,11 @@ describe('PATCH /v1/providers/me/profile', () => {
     }
   });
 
-  it('400s when a Specialist tries to set W-10 = true', async () => {
+  it('400s when a Provider (clinical) tries to set W-10 = true', async () => {
     const { db, updateSpy } = makeDbStub({ provider: PROVIDER_SPECIALIST });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
-      const token = await tokenFor(PROVIDER_SPECIALIST.uid);
+      const token = await tokenFor(PROVIDER_SPECIALIST);
       const res = await app.inject({
         method: 'PATCH',
         url: '/v1/providers/me/profile',
@@ -505,7 +522,7 @@ describe('PATCH /v1/providers/me/profile', () => {
     const { db } = makeDbStub({ provider: PROVIDER_BABYSITTER });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
-      const token = await tokenFor(PROVIDER_BABYSITTER.uid);
+      const token = await tokenFor(PROVIDER_BABYSITTER);
       const res = await app.inject({
         method: 'PATCH',
         url: '/v1/providers/me/profile',
@@ -522,7 +539,7 @@ describe('PATCH /v1/providers/me/profile', () => {
     const { db } = makeDbStub({ provider: PROVIDER_BABYSITTER });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
-      const token = await tokenFor(PROVIDER_BABYSITTER.uid);
+      const token = await tokenFor(PROVIDER_BABYSITTER);
       const res = await app.inject({
         method: 'PATCH',
         url: '/v1/providers/me/profile',
@@ -535,11 +552,11 @@ describe('PATCH /v1/providers/me/profile', () => {
     }
   });
 
-  it('allows a Specialist to set a per-session rate and toggle paused', async () => {
+  it('allows a Provider (clinical) to set a per-session rate and toggle paused', async () => {
     const { db, getProfile } = makeDbStub({ provider: PROVIDER_SPECIALIST });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
-      const token = await tokenFor(PROVIDER_SPECIALIST.uid);
+      const token = await tokenFor(PROVIDER_SPECIALIST);
       const res = await app.inject({
         method: 'PATCH',
         url: '/v1/providers/me/profile',
@@ -561,7 +578,7 @@ describe('PATCH /v1/providers/me/profile', () => {
     const { db } = makeDbStub({ provider: PROVIDER_BABYSITTER });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
-      const token = await tokenFor(PROVIDER_BABYSITTER.uid);
+      const token = await tokenFor(PROVIDER_BABYSITTER);
       const res = await app.inject({
         method: 'PATCH',
         url: '/v1/providers/me/profile',

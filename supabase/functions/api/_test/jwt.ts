@@ -14,15 +14,18 @@ export function buildTestEnv(overrides: Record<string, string | undefined> = {})
     DATABASE_URL: 'postgres://test:test@localhost:5432/our_haven_test',
     DATABASE_SSL: 'false',
     JWT_SECRET: TEST_JWT_SECRET,
+    SUPABASE_URL: 'https://test.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
     ...overrides,
   });
 }
 
-/** Deps with a Proxy db that throws if a route actually touches Postgres —
- *  health (liveness) + auth (no step-up) must not. */
+/** Deps with a Proxy db + supabase that throw if a route actually touches them —
+ *  health (liveness) + auth (no step-up / no claim write) must not. Tests that
+ *  exercise Postgres or the admin client pass their own stubs. */
 export function stubDeps(): AppDeps {
   const stub = new Proxy({} as never, { get: () => stub });
-  return { env: buildTestEnv(), db: stub };
+  return { env: buildTestEnv(), db: stub, supabase: stub };
 }
 
 export interface TestTokenInput {

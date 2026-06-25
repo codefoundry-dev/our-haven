@@ -18,7 +18,7 @@ function envForTest() {
 interface ProviderRow {
   id: string;
   uid: string;
-  kind: 'caregiver' | 'specialist';
+  role: 'caregiver' | 'provider';
   state: string;
 }
 
@@ -215,11 +215,11 @@ describe('GET /v1/providers/me/stripe-connect/summary', () => {
 
   it('returns hasAccount=false when no row exists', async () => {
     const stub = makeDbStub({
-      provider: { id: 'p-1', uid: 'u-1', kind: 'caregiver', state: 'NY' },
+      provider: { id: 'p-1', uid: 'u-1', role: 'caregiver', state: 'NY' },
       connect: null,
     });
     const app = await buildAppWithRoutes(makeDeps({ db: stub.db }));
-    const token = await mintAccessToken({ sub: 'u-1', appMetadata: { role: 'provider', kind: 'caregiver' } });
+    const token = await mintAccessToken({ sub: 'u-1', appMetadata: { role: 'caregiver' } });
     try {
       const res = await app.inject({
         method: 'GET',
@@ -236,7 +236,7 @@ describe('GET /v1/providers/me/stripe-connect/summary', () => {
 
   it('returns hasAccount + capability flags when account exists', async () => {
     const stub = makeDbStub({
-      provider: { id: 'p-1', uid: 'u-1', kind: 'caregiver', state: 'NY' },
+      provider: { id: 'p-1', uid: 'u-1', role: 'caregiver', state: 'NY' },
       connect: {
         provider_id: 'p-1',
         stripe_account_id: 'acct_live_1',
@@ -250,7 +250,7 @@ describe('GET /v1/providers/me/stripe-connect/summary', () => {
       },
     });
     const app = await buildAppWithRoutes(makeDeps({ db: stub.db }));
-    const token = await mintAccessToken({ sub: 'u-1', appMetadata: { role: 'provider', kind: 'caregiver' } });
+    const token = await mintAccessToken({ sub: 'u-1', appMetadata: { role: 'caregiver' } });
     try {
       const res = await app.inject({
         method: 'GET',
@@ -292,11 +292,11 @@ describe('POST /v1/providers/me/stripe-connect/onboarding-link', () => {
 
   it('400s when Checkr screening has not cleared', async () => {
     const stub = makeDbStub({
-      provider: { id: 'p-1', uid: 'u-1', kind: 'caregiver', state: 'NY' },
+      provider: { id: 'p-1', uid: 'u-1', role: 'caregiver', state: 'NY' },
       gate: { screening_passed_at: null, rejected_at: null },
     });
     const app = await buildAppWithRoutes(makeDeps({ db: stub.db }));
-    const token = await mintAccessToken({ sub: 'u-1', appMetadata: { role: 'provider', kind: 'caregiver' } });
+    const token = await mintAccessToken({ sub: 'u-1', appMetadata: { role: 'caregiver' } });
     try {
       const res = await app.inject({
         method: 'POST',
@@ -312,13 +312,13 @@ describe('POST /v1/providers/me/stripe-connect/onboarding-link', () => {
 
   it('creates a Stripe account when none exists and returns a hosted onboarding URL', async () => {
     const stub = makeDbStub({
-      provider: { id: 'p-1', uid: 'u-1', kind: 'caregiver', state: 'NY' },
+      provider: { id: 'p-1', uid: 'u-1', role: 'caregiver', state: 'NY' },
       gate: { screening_passed_at: new Date('2026-05-25T00:00:00Z'), rejected_at: null },
       connect: null,
     });
     const stripeStub = makeStripeStub();
     const app = await buildAppWithRoutes(makeDeps({ db: stub.db, stripe: stripeStub }));
-    const token = await mintAccessToken({ sub: 'u-1', appMetadata: { role: 'provider', kind: 'caregiver' } });
+    const token = await mintAccessToken({ sub: 'u-1', appMetadata: { role: 'caregiver' } });
     try {
       const res = await app.inject({
         method: 'POST',
@@ -344,7 +344,7 @@ describe('POST /v1/providers/me/stripe-connect/onboarding-link', () => {
 
   it('reuses an existing Stripe account id', async () => {
     const stub = makeDbStub({
-      provider: { id: 'p-1', uid: 'u-1', kind: 'caregiver', state: 'NY' },
+      provider: { id: 'p-1', uid: 'u-1', role: 'caregiver', state: 'NY' },
       gate: { screening_passed_at: new Date('2026-05-25T00:00:00Z'), rejected_at: null },
       connect: {
         provider_id: 'p-1',
@@ -360,7 +360,7 @@ describe('POST /v1/providers/me/stripe-connect/onboarding-link', () => {
     });
     const stripeStub = makeStripeStub();
     const app = await buildAppWithRoutes(makeDeps({ db: stub.db, stripe: stripeStub }));
-    const token = await mintAccessToken({ sub: 'u-1', appMetadata: { role: 'provider', kind: 'caregiver' } });
+    const token = await mintAccessToken({ sub: 'u-1', appMetadata: { role: 'caregiver' } });
     try {
       const res = await app.inject({
         method: 'POST',
@@ -380,11 +380,11 @@ describe('POST /v1/providers/me/stripe-connect/onboarding-link', () => {
 
   it('409s when the Provider has been rejected', async () => {
     const stub = makeDbStub({
-      provider: { id: 'p-1', uid: 'u-1', kind: 'caregiver', state: 'NY' },
+      provider: { id: 'p-1', uid: 'u-1', role: 'caregiver', state: 'NY' },
       gate: { screening_passed_at: new Date('2026-05-25T00:00:00Z'), rejected_at: new Date('2026-05-27T00:00:00Z') },
     });
     const app = await buildAppWithRoutes(makeDeps({ db: stub.db }));
-    const token = await mintAccessToken({ sub: 'u-1', appMetadata: { role: 'provider', kind: 'caregiver' } });
+    const token = await mintAccessToken({ sub: 'u-1', appMetadata: { role: 'caregiver' } });
     try {
       const res = await app.inject({
         method: 'POST',
@@ -404,7 +404,7 @@ describe('POST /v1/providers/me/stripe-connect/dashboard-link', () => {
 
   it('403s without a step-up MFA grant (OH-110 AC #3 + #4)', async () => {
     const stub = makeDbStub({
-      provider: { id: 'p-1', uid: 'u-1', kind: 'caregiver', state: 'NY' },
+      provider: { id: 'p-1', uid: 'u-1', role: 'caregiver', state: 'NY' },
       stepUpGrant: null,
       connect: {
         provider_id: 'p-1',
@@ -419,7 +419,7 @@ describe('POST /v1/providers/me/stripe-connect/dashboard-link', () => {
       },
     });
     const app = await buildAppWithRoutes(makeDeps({ db: stub.db }));
-    const token = await mintAccessToken({ sub: 'u-1', appMetadata: { role: 'provider', kind: 'caregiver' } });
+    const token = await mintAccessToken({ sub: 'u-1', appMetadata: { role: 'caregiver' } });
     try {
       const res = await app.inject({
         method: 'POST',
@@ -435,12 +435,12 @@ describe('POST /v1/providers/me/stripe-connect/dashboard-link', () => {
 
   it('400s when no Stripe account exists yet', async () => {
     const stub = makeDbStub({
-      provider: { id: 'p-1', uid: 'u-1', kind: 'caregiver', state: 'NY' },
+      provider: { id: 'p-1', uid: 'u-1', role: 'caregiver', state: 'NY' },
       stepUpGrant: { granted_at: new Date() },
       connect: null,
     });
     const app = await buildAppWithRoutes(makeDeps({ db: stub.db }));
-    const token = await mintAccessToken({ sub: 'u-1', appMetadata: { role: 'provider', kind: 'caregiver' } });
+    const token = await mintAccessToken({ sub: 'u-1', appMetadata: { role: 'caregiver' } });
     try {
       const res = await app.inject({
         method: 'POST',
@@ -456,7 +456,7 @@ describe('POST /v1/providers/me/stripe-connect/dashboard-link', () => {
 
   it('returns a Stripe Express login link with a fresh step-up grant', async () => {
     const stub = makeDbStub({
-      provider: { id: 'p-1', uid: 'u-1', kind: 'caregiver', state: 'NY' },
+      provider: { id: 'p-1', uid: 'u-1', role: 'caregiver', state: 'NY' },
       stepUpGrant: { granted_at: new Date() },
       connect: {
         provider_id: 'p-1',
@@ -472,7 +472,7 @@ describe('POST /v1/providers/me/stripe-connect/dashboard-link', () => {
     });
     const stripeStub = makeStripeStub();
     const app = await buildAppWithRoutes(makeDeps({ db: stub.db, stripe: stripeStub }));
-    const token = await mintAccessToken({ sub: 'u-1', appMetadata: { role: 'provider', kind: 'caregiver' } });
+    const token = await mintAccessToken({ sub: 'u-1', appMetadata: { role: 'caregiver' } });
     try {
       const res = await app.inject({
         method: 'POST',

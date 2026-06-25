@@ -56,10 +56,10 @@ function splitCsv(raw: string, max = 40): string[] {
 }
 
 function categoryLabel(p: ProviderProfile): string {
-  if (p.kind === 'caregiver' && p.caregiverCategory) {
-    return p.caregiverCategory.charAt(0).toUpperCase() + p.caregiverCategory.slice(1);
+  if (p.role === 'caregiver' && p.categories && p.categories.length > 0) {
+    return p.categories.map((c) => c.charAt(0).toUpperCase() + c.slice(1)).join(', ');
   }
-  if (p.kind === 'specialist' && p.specialty) {
+  if (p.role === 'provider' && p.specialty) {
     const map: Record<string, string> = {
       slp: 'Speech-Language Pathology',
       ot: 'Occupational Therapy',
@@ -69,7 +69,7 @@ function categoryLabel(p: ProviderProfile): string {
     };
     return map[p.specialty] ?? p.specialty;
   }
-  return p.kind;
+  return p.role;
 }
 
 function rateUnitSuffix(p: ProviderProfile): string {

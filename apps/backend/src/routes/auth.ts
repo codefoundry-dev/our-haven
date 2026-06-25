@@ -1,37 +1,40 @@
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 
+import { CAREGIVER_CATEGORIES, SPECIALTIES } from '@our-haven/shared';
+
+import { SIGNUP_ROLES } from '@/auth/roles.js';
 import { EmailOtpService, LoggingEmailOtpNotifier } from '@/services/email-otp.js';
 
 const STEP_UP_GRANT_TTL_MS = 15 * 60 * 1_000;
 
 const RoleClaimRequest = z
   .object({
-    role: z.enum(['parent', 'provider']),
-    kind: z.enum(['caregiver', 'specialist']).optional(),
-    caregiverCategory: z.string().min(1).max(64).optional(),
-    specialty: z.string().min(1).max(64).optional(),
+    role: z.enum(SIGNUP_ROLES),
+    categories: z.array(z.enum(CAREGIVER_CATEGORIES)).min(1).optional(),
+    specialty: z.enum(SPECIALTIES).optional(),
   })
-  .refine((data) => !(data.role === 'provider' && !data.kind), {
-    message: 'kind is required when role=provider',
-    path: ['kind'],
+  .refine((data) => !(data.role === 'caregiver' && !data.categories), {
+    message: 'categories is required when role=caregiver',
+    path: ['categories'],
   })
-  .refine((data) => !(data.role === 'parent' && data.kind), {
-    message: 'kind must be omitted when role=parent',
-    path: ['kind'],
+  .refine((data) => !(data.role !== 'caregiver' && data.categories), {
+    message: 'categories is only valid when role=caregiver',
+    path: ['categories'],
   })
-  .refine((data) => !(data.kind === 'caregiver' && data.specialty), {
-    message: 'specialty is for kind=specialist',
+  .refine((data) => !(data.role === 'provider' && !data.specialty), {
+    message: 'specialty is required when role=provider',
     path: ['specialty'],
   })
-  .refine((data) => !(data.kind === 'specialist' && data.caregiverCategory), {
-    message: 'caregiverCategory is for kind=caregiver',
-    path: ['caregiverCategory'],
+  .refine((data) => !(data.role !== 'provider' && data.specialty), {
+    message: 'specialty is only valid when role=provider',
+    path: ['specialty'],
   });
 
 const RoleClaimResponse = z.object({
-  role: z.enum(['parent', 'provider']),
-  kind: z.enum(['caregiver', 'specialist']).nullable(),
+  role: z.enum(SIGNUP_ROLES),
+  categories: z.array(z.enum(CAREGIVER_CATEGORIES)).nullable(),
+  specialty: z.enum(SPECIALTIES).nullable(),
 });
 
 const EmailOtpIssueResponse = z.object({
@@ -63,7 +66,7 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
       preHandler: app.requireAuth(),
       schema: {
         tags: ['auth'],
-        summary: 'Set the permanent role + kind on the authenticated Supabase user',
+        summary: 'Set the permanent role on the authenticated Supabase user',
         description:
           'Idempotent. Rejects with 409 if the user already has a role claim that differs from the request. Once set, role is permanent per CONTEXT.md § Authentication. Claims are written to Supabase `app_metadata`; the client must refresh its session to receive an access token carrying the new claims.',
         security: [{ supabaseAccessToken: [] }],
@@ -79,12 +82,15 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
     async (req, reply) => {
       const principal = req.principal!;
       const desired = req.body;
+      const desiredCategories = desired.categories ?? null;
+      const desiredSpecialty = desired.specialty ?? null;
 
       if (principal.role) {
         const sameRole = principal.role === desired.role;
-        const sameKind = (principal.kind ?? null) === (desired.kind ?? null);
-        if (sameRole && sameKind) {
-          return { role: principal.role as 'parent' | 'provider', kind: principal.kind };
+        const sameCategories = sameStringArray(principal.categories, desiredCategories);
+        const sameSpecialty = (principal.specialty ?? null) === desiredSpecialty;
+        if (sameRole && sameCategories && sameSpecialty) {
+          return { role: desired.role, categories: desiredCategories, specialty: desiredSpecialty };
         }
         reply.code(409);
         return { error: 'role_already_claimed', reason: 'role is permanent and cannot be changed' };
@@ -95,9 +101,8 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
         ...existingAppMeta,
         role: desired.role,
       };
-      if (desired.kind) nextAppMeta.kind = desired.kind;
-      if (desired.caregiverCategory) nextAppMeta.caregiver_category = desired.caregiverCategory;
-      if (desired.specialty) nextAppMeta.specialty = desired.specialty;
+      if (desiredCategories) nextAppMeta.categories = desiredCategories;
+      if (desiredSpecialty) nextAppMeta.specialty = desiredSpecialty;
 
       const { error } = await app.deps.supabase.admin.auth.admin.updateUserById(principal.uid, {
         app_metadata: nextAppMeta,
@@ -106,7 +111,7 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
         req.log.error({ err: error }, 'supabase updateUserById failed');
         throw new Error('failed_to_set_role_claim');
       }
-      return { role: desired.role, kind: desired.kind ?? null };
+      return { role: desired.role, categories: desiredCategories, specialty: desiredSpecialty };
     },
   );
 
@@ -202,6 +207,15 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
     },
   );
 };
+
+/** Order-insensitive equality for the caregiver `categories[]` permanence check. */
+function sameStringArray(a: string[] | null, b: string[] | null): boolean {
+  if (a === null || b === null) return a === b;
+  if (a.length !== b.length) return false;
+  const sa = [...a].sort();
+  const sb = [...b].sort();
+  return sa.every((v, i) => v === sb[i]);
+}
 
 async function grantStepUp(
   app: { deps: { db: import('@/db/kysely.js').Db } },

@@ -71,7 +71,7 @@ const ErrorResponse = z.object({
 interface ProviderRow {
   id: string;
   uid: string;
-  kind: 'caregiver' | 'specialist';
+  role: 'caregiver' | 'provider';
   state: string;
 }
 
@@ -102,7 +102,7 @@ export const stripeConnectRoutes: FastifyPluginAsyncZod = async (app) => {
   async function loadProvider(uid: string): Promise<ProviderRow | null> {
     const row = await app.deps.db
       .selectFrom('providers')
-      .select(['id', 'uid', 'kind', 'state'])
+      .select(['id', 'uid', 'role', 'state'])
       .where('uid', '=', uid)
       .executeTakeFirst();
     return row ? (row as ProviderRow) : null;
@@ -174,7 +174,7 @@ export const stripeConnectRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     '/providers/me/stripe-connect/summary',
     {
-      preHandler: app.requireAuth({ roles: ['provider'] }),
+      preHandler: app.requireAuth({ roles: ['caregiver', 'provider'] }),
       schema: {
         tags: ['providers'],
         summary: 'Read the authenticated Provider\'s Stripe Connect Express account summary',
@@ -204,7 +204,7 @@ export const stripeConnectRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
     '/providers/me/stripe-connect/onboarding-link',
     {
-      preHandler: app.requireAuth({ roles: ['provider'] }),
+      preHandler: app.requireAuth({ roles: ['caregiver', 'provider'] }),
       schema: {
         tags: ['providers'],
         summary: 'Create / reuse a Stripe Connect Express account and return a hosted onboarding URL',
@@ -255,7 +255,7 @@ export const stripeConnectRoutes: FastifyPluginAsyncZod = async (app) => {
         const account = await app.deps.stripe.createConnectAccount({
           email,
           providerId: provider.id,
-          metadata: { uid: principal.uid, state: provider.state, kind: provider.kind },
+          metadata: { uid: principal.uid, state: provider.state, role: provider.role },
         });
         stripeAccountId = account.id;
         await app.deps.db
@@ -289,7 +289,7 @@ export const stripeConnectRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
     '/providers/me/stripe-connect/dashboard-link',
     {
-      preHandler: app.requireAuth({ roles: ['provider'], stepUpMaxAgeSec: STEP_UP_MAX_AGE_SEC }),
+      preHandler: app.requireAuth({ roles: ['caregiver', 'provider'], stepUpMaxAgeSec: STEP_UP_MAX_AGE_SEC }),
       schema: {
         tags: ['providers'],
         summary:

@@ -95,8 +95,8 @@ describe('calculatePricing — hourly with per-child surcharge', () => {
   });
 });
 
-describe('calculatePricing — per-session Specialist', () => {
-  it('Specialist $200/session, 20% commission → Parent $200, Commission $40, Payout $160', () => {
+describe('calculatePricing — per-session Provider (clinical tier)', () => {
+  it('Provider $200/session, 20% commission → Parent $200, Commission $40, Payout $160', () => {
     const r = calculatePricing({
       agreedRateCents: 20_000,
       billingModel: 'per-session',
@@ -104,7 +104,7 @@ describe('calculatePricing — per-session Specialist', () => {
       childCount: 1,
       perChildSurchargeCents: 0,
       commissionBp: 2_000,
-      category: 'specialist',
+      category: 'provider',
     });
     expect(r.baseCents).toBe(20_000);
     expect(r.surchargeCents).toBe(0);
@@ -157,7 +157,7 @@ describe('calculatePricing — input validation', () => {
         childCount: 1,
         perChildSurchargeCents: 0,
         commissionBp: 1_500,
-        category: 'specialist',
+        category: 'provider',
       }),
     ).toThrow(/per-session/);
   });
@@ -176,7 +176,7 @@ describe('calculatePricing — input validation', () => {
     ).toThrow(/tutor bookings are single-child/);
   });
 
-  it('rejects Specialist with surcharge', () => {
+  it('rejects Provider with surcharge', () => {
     expect(() =>
       calculatePricing({
         agreedRateCents: 20_000,
@@ -185,12 +185,12 @@ describe('calculatePricing — input validation', () => {
         childCount: 1,
         perChildSurchargeCents: 500,
         commissionBp: 1_500,
-        category: 'specialist',
+        category: 'provider',
       }),
-    ).toThrow(/specialist bookings cannot carry a per-child surcharge/);
+    ).toThrow(/provider bookings cannot carry a per-child surcharge/);
   });
 
-  it('rejects Specialist multi-child', () => {
+  it('rejects Provider multi-child', () => {
     expect(() =>
       calculatePricing({
         agreedRateCents: 20_000,
@@ -199,17 +199,17 @@ describe('calculatePricing — input validation', () => {
         childCount: 2,
         perChildSurchargeCents: 0,
         commissionBp: 1_500,
-        category: 'specialist',
+        category: 'provider',
       }),
-    ).toThrow(/specialist bookings are single-child/);
+    ).toThrow(/provider bookings are single-child/);
   });
 });
 
 describe('pricingCategoryFor', () => {
-  it('maps specialist kind regardless of specialty', () => {
-    expect(pricingCategoryFor('specialist', 'slp')).toBe('specialist');
-    expect(pricingCategoryFor('specialist', 'aba')).toBe('specialist');
-    expect(pricingCategoryFor('specialist', 'other')).toBe('specialist');
+  it('maps provider role regardless of specialty', () => {
+    expect(pricingCategoryFor('provider', 'slp')).toBe('provider');
+    expect(pricingCategoryFor('provider', 'aba')).toBe('provider');
+    expect(pricingCategoryFor('provider', 'other')).toBe('provider');
   });
 
   it('passes Caregiver categories straight through', () => {
@@ -395,7 +395,7 @@ describe('Property-based — calculatePricing', () => {
     );
   });
 
-  it('per-session Specialist invariants hold across the input space', () => {
+  it('per-session Provider invariants hold across the input space', () => {
     const perSessionInputArb: fc.Arbitrary<PricingInput> = fc.record({
       agreedRateCents: agreedRateArb,
       billingModel: fc.constant<'per-session'>('per-session'),
@@ -403,7 +403,7 @@ describe('Property-based — calculatePricing', () => {
       childCount: fc.constant(1),
       perChildSurchargeCents: fc.constant(0),
       commissionBp: commissionBpArb,
-      category: fc.constant<'specialist'>('specialist'),
+      category: fc.constant<'provider'>('provider'),
     });
     fc.assert(
       fc.property(perSessionInputArb, (input) => {

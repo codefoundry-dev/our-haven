@@ -19,7 +19,7 @@ function envForTest(overrides: Record<string, string> = {}) {
 interface ProviderRow {
   id: string;
   uid: string;
-  kind: 'caregiver' | 'specialist';
+  role: 'caregiver' | 'provider';
   state: string;
 }
 
@@ -201,7 +201,7 @@ describe('GET /v1/providers/me/verification', () => {
     const app = await buildAppWithRoutes(makeDeps({ db }));
     const token = await mintAccessToken({
       sub: 'u-1',
-      appMetadata: { role: 'provider', kind: 'caregiver' },
+      appMetadata: { role: 'caregiver' },
     });
     try {
       const res = await app.inject({
@@ -218,12 +218,12 @@ describe('GET /v1/providers/me/verification', () => {
 
   it('returns unverified state for a fresh Provider with no facts', async () => {
     const { db } = makeDbStub({
-      provider: { id: 'p-1', uid: 'u-1', kind: 'caregiver', state: 'NY' },
+      provider: { id: 'p-1', uid: 'u-1', role: 'caregiver', state: 'NY' },
     });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     const token = await mintAccessToken({
       sub: 'u-1',
-      appMetadata: { role: 'provider', kind: 'caregiver' },
+      appMetadata: { role: 'caregiver' },
     });
     try {
       const res = await app.inject({
@@ -234,7 +234,7 @@ describe('GET /v1/providers/me/verification', () => {
       expect(res.statusCode).toBe(200);
       const body = res.json();
       expect(body.state).toBe('unverified');
-      expect(body.kind).toBe('caregiver');
+      expect(body.role).toBe('caregiver');
       expect(body.residentState).toBe('NY');
       expect(body.facts.emailConfirmedAt).toBeNull();
     } finally {
@@ -244,7 +244,7 @@ describe('GET /v1/providers/me/verification', () => {
 
   it('mirrors Supabase email_confirmed_at into facts on read', async () => {
     const { db, getVerification } = makeDbStub({
-      provider: { id: 'p-1', uid: 'u-1', kind: 'caregiver', state: 'NY' },
+      provider: { id: 'p-1', uid: 'u-1', role: 'caregiver', state: 'NY' },
     });
     const getUserById = vi.fn(async () => ({
       data: { user: { email_confirmed_at: '2026-05-20T12:00:00Z', phone_confirmed_at: null } },
@@ -253,7 +253,7 @@ describe('GET /v1/providers/me/verification', () => {
     const app = await buildAppWithRoutes(makeDeps({ db, getUserById }));
     const token = await mintAccessToken({
       sub: 'u-1',
-      appMetadata: { role: 'provider', kind: 'caregiver' },
+      appMetadata: { role: 'caregiver' },
     });
     try {
       const res = await app.inject({
@@ -271,16 +271,16 @@ describe('GET /v1/providers/me/verification', () => {
     }
   });
 
-  it('flags licenseBoardSupported=false for a specialist outside the supported-state slate', async () => {
+  it('flags licenseBoardSupported=false for a provider outside the supported-state slate', async () => {
     const { db } = makeDbStub({
-      provider: { id: 'p-1', uid: 'u-1', kind: 'specialist', state: 'WY' },
+      provider: { id: 'p-1', uid: 'u-1', role: 'provider', state: 'WY' },
     });
     const app = await buildAppWithRoutes(
       makeDeps({ db, envOverrides: { LICENSE_BOARD_SUPPORTED_STATES: 'FL,NY' } }),
     );
     const token = await mintAccessToken({
       sub: 'u-1',
-      appMetadata: { role: 'provider', kind: 'specialist' },
+      appMetadata: { role: 'provider' },
     });
     try {
       const res = await app.inject({
@@ -301,12 +301,12 @@ describe('POST /v1/providers/me/verification/id-doc', () => {
 
   it('400s when objectPath is not scoped to the calling user', async () => {
     const { db } = makeDbStub({
-      provider: { id: 'p-1', uid: 'u-1', kind: 'caregiver', state: 'NY' },
+      provider: { id: 'p-1', uid: 'u-1', role: 'caregiver', state: 'NY' },
     });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     const token = await mintAccessToken({
       sub: 'u-1',
-      appMetadata: { role: 'provider', kind: 'caregiver' },
+      appMetadata: { role: 'caregiver' },
     });
     try {
       const res = await app.inject({
@@ -324,7 +324,7 @@ describe('POST /v1/providers/me/verification/id-doc', () => {
 
   it('records the upload and advances to id-uploaded once email+phone are confirmed', async () => {
     const { db, getVerification } = makeDbStub({
-      provider: { id: 'p-1', uid: 'u-1', kind: 'caregiver', state: 'NY' },
+      provider: { id: 'p-1', uid: 'u-1', role: 'caregiver', state: 'NY' },
       verification: {
         provider_id: 'p-1',
         email_confirmed_at: new Date('2026-05-20T12:00:00Z'),
@@ -345,7 +345,7 @@ describe('POST /v1/providers/me/verification/id-doc', () => {
     const app = await buildAppWithRoutes(makeDeps({ db, getUserById }));
     const token = await mintAccessToken({
       sub: 'u-1',
-      appMetadata: { role: 'provider', kind: 'caregiver' },
+      appMetadata: { role: 'caregiver' },
     });
     try {
       const res = await app.inject({
@@ -370,7 +370,7 @@ describe('POST /v1/providers/me/verification/phone-confirm', () => {
 
   it('400s when supabase user has no phone_confirmed_at', async () => {
     const { db } = makeDbStub({
-      provider: { id: 'p-1', uid: 'u-1', kind: 'caregiver', state: 'NY' },
+      provider: { id: 'p-1', uid: 'u-1', role: 'caregiver', state: 'NY' },
     });
     const getUserById = vi.fn(async () => ({
       data: { user: { email_confirmed_at: '2026-05-20T12:00:00Z', phone_confirmed_at: null } },
@@ -379,7 +379,7 @@ describe('POST /v1/providers/me/verification/phone-confirm', () => {
     const app = await buildAppWithRoutes(makeDeps({ db, getUserById }));
     const token = await mintAccessToken({
       sub: 'u-1',
-      appMetadata: { role: 'provider', kind: 'caregiver' },
+      appMetadata: { role: 'caregiver' },
     });
     try {
       const res = await app.inject({
@@ -396,7 +396,7 @@ describe('POST /v1/providers/me/verification/phone-confirm', () => {
 
   it('records phone_confirmed_at and returns phone-verified', async () => {
     const { db, getVerification } = makeDbStub({
-      provider: { id: 'p-1', uid: 'u-1', kind: 'caregiver', state: 'NY' },
+      provider: { id: 'p-1', uid: 'u-1', role: 'caregiver', state: 'NY' },
       verification: {
         provider_id: 'p-1',
         email_confirmed_at: new Date('2026-05-20T12:00:00Z'),
@@ -417,7 +417,7 @@ describe('POST /v1/providers/me/verification/phone-confirm', () => {
     const app = await buildAppWithRoutes(makeDeps({ db, getUserById }));
     const token = await mintAccessToken({
       sub: 'u-1',
-      appMetadata: { role: 'provider', kind: 'caregiver' },
+      appMetadata: { role: 'caregiver' },
     });
     try {
       const res = await app.inject({

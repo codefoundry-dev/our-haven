@@ -2,6 +2,7 @@ import { OpenAPIHono } from '@hono/zod-openapi';
 
 import type { AppEnv } from './context.ts';
 import type { AppDeps } from './deps.ts';
+import { registerAuthRoutes } from './routes/auth.ts';
 import { registerHealthRoutes } from './routes/health.ts';
 
 export const OPENAPI_DOC_PATH = '/openapi.json';
@@ -29,7 +30,10 @@ export const openApiInfo = {
     },
     { url: 'http://localhost:54321/functions/v1/api', description: 'Local (supabase functions serve)' },
   ],
-  tags: [{ name: 'health', description: 'Liveness and readiness probes' }],
+  tags: [
+    { name: 'health', description: 'Liveness and readiness probes' },
+    { name: 'auth', description: 'Authentication — role-claim, email-OTP, step-up MFA' },
+  ],
 };
 
 /**
@@ -58,7 +62,17 @@ export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   // parent merges their OpenAPI definitions under the /v1 prefix.
   const v1 = new OpenAPIHono<AppEnv>();
   registerHealthRoutes(v1);
+  registerAuthRoutes(v1);
   app.route('/v1', v1);
+
+  // Bearer security scheme for the Supabase access token (ADR-0010 § 62).
+  app.openAPIRegistry.registerComponent('securitySchemes', 'supabaseAccessToken', {
+    type: 'http',
+    scheme: 'bearer',
+    bearerFormat: 'JWT',
+    description:
+      'Supabase Auth access token (HS256). Verified locally with the project JWT secret on every request.',
+  });
 
   // OpenAPI is the load-bearing contract (ADR-0004 § 2).
   app.doc(OPENAPI_DOC_PATH, openApiInfo);
