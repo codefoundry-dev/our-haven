@@ -11,10 +11,13 @@
  * HTTP POST to the function. pg_cron + pg_net are schedule + transport — an
  * explicit plpgsql-canary carve-out (ADR-0019), never a home for domain logic.
  *
- * The function URL + shared secret are environment-specific and read at run
- * time from custom GUCs set per-environment at deploy (see
- * `supabase/functions/worker-tick/README.md`), so this catalog stays free of
- * project refs and the job is a safe no-op until they are configured.
+ * The function URL + shared secret are environment-specific and read at run time
+ * from **Supabase Vault** (`vault.decrypted_secrets`), set per-environment at
+ * deploy (see `supabase/functions/worker-tick/README.md`). Vault — not a custom
+ * GUC — because Supabase's managed `postgres` role is not a superuser and cannot
+ * `ALTER DATABASE … SET` a custom parameter (permission denied). Keeping the
+ * values in Vault also keeps this catalog free of project refs, and the WHERE
+ * guard makes the job a safe no-op until the secrets are created.
  *
  * Intentionally pure (no DB import) so the `enable_pg_cron` migration can import
  * it and it stays unit-testable.
@@ -35,33 +38,32 @@ export interface CronJob {
  *  tolerates ±1 min (ADR-0019 § Consequences). */
 export const WORKER_TICK_SCHEDULE = '* * * * *';
 
-/** Custom GUCs holding the deploy-time function URL + shared secret. Namespaced
- *  (class `app`) so they are settable via `ALTER DATABASE … SET` without prior
- *  definition; `current_setting(_, true)` returns NULL when unset, which the
- *  command's WHERE guard turns into a no-op. */
-export const WORKER_TICK_URL_SETTING = 'app.worker_tick_url';
-export const WORKER_TICK_SECRET_SETTING = 'app.worker_tick_secret';
+/** Supabase Vault secret names holding the deploy-time function URL + shared
+ *  secret. `vault.create_secret(value, name, …)` sets them; the cron command
+ *  reads them via `vault.decrypted_secrets`. */
+export const WORKER_TICK_URL_SECRET_NAME = 'worker_tick_url';
+export const WORKER_TICK_SECRET_SECRET_NAME = 'worker_tick_secret';
 
 /**
- * The minute tick. The WHERE guard means the job is a harmless no-op until
- * `app.worker_tick_url` is set at deploy, so the migration applies cleanly in
- * every environment (local, CI, staging) without a configured function URL.
+ * The minute tick. The WHERE guard means the job is a harmless no-op until both
+ * Vault secrets exist, so the migration applies cleanly in every environment
+ * (local, CI, staging) without a configured function URL.
  */
 export function workerTickJob(): CronJob {
   return {
     name: 'worker_tick',
     schedule: WORKER_TICK_SCHEDULE,
     command: `select net.http_post(
-  url := current_setting('${WORKER_TICK_URL_SETTING}', true),
+  url := (select decrypted_secret from vault.decrypted_secrets where name = '${WORKER_TICK_URL_SECRET_NAME}'),
   headers := jsonb_build_object(
     'Content-Type', 'application/json',
-    'Authorization', 'Bearer ' || coalesce(current_setting('${WORKER_TICK_SECRET_SETTING}', true), '')
+    'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = '${WORKER_TICK_SECRET_SECRET_NAME}')
   ),
   body := '{}'::jsonb,
   timeout_milliseconds := 5000
 )
-where current_setting('${WORKER_TICK_URL_SETTING}', true) is not null
-  and current_setting('${WORKER_TICK_URL_SETTING}', true) <> ''`,
+where exists (select 1 from vault.decrypted_secrets where name = '${WORKER_TICK_URL_SECRET_NAME}')
+  and exists (select 1 from vault.decrypted_secrets where name = '${WORKER_TICK_SECRET_SECRET_NAME}')`,
   };
 }
 

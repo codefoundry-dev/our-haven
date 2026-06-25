@@ -44,20 +44,19 @@ supabase functions deploy worker-tick --no-verify-jwt
 # 2. Set the function secret (also need DATABASE_URL if not already a project secret).
 supabase secrets set WORKER_TICK_SECRET="<long-random-secret>"
 
-# 3. Tell the cron command where to POST and how to authenticate, via DB GUCs.
-#    The enable_pg_cron migration already scheduled the `worker_tick` job; it is
-#    a no-op until app.worker_tick_url is set, so this step "arms" it.
+# 3. Store the function URL + shared secret in Supabase Vault. The cron command
+#    reads them from vault.decrypted_secrets; the enable_pg_cron migration already
+#    scheduled the `worker_tick` job as a no-op until these exist, so this "arms"
+#    it. Vault — not `ALTER DATABASE SET` — because the managed `postgres` role is
+#    not a superuser and cannot set a custom GUC (permission denied).
 ```
 
 ```sql
--- Run once against the project DB (psql or Supabase SQL editor):
-alter database postgres set app.worker_tick_url    = 'https://<project-ref>.supabase.co/functions/v1/worker-tick';
-alter database postgres set app.worker_tick_secret = '<the same WORKER_TICK_SECRET>';
--- New settings apply to new sessions; pg_cron picks them up on its next run.
+-- Run once against the project DB (Supabase SQL editor or psql):
+select vault.create_secret('https://<project-ref>.supabase.co/functions/v1/worker-tick', 'worker_tick_url',    'worker-tick function URL for the pg_cron tick');
+select vault.create_secret('<the same WORKER_TICK_SECRET>',                                'worker_tick_secret', 'shared bearer secret for the worker-tick tick');
+-- pg_cron reads these on its next run. Rotate with vault.update_secret(id, ...).
 ```
-
-> Hardening option: move `app.worker_tick_secret` into Supabase Vault and read
-> it via `vault.decrypted_secrets` in the cron command instead of a GUC.
 
 ### Verify it is firing
 

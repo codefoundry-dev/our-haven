@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   CRON_JOBS,
   WORKER_TICK_SCHEDULE,
-  WORKER_TICK_URL_SETTING,
+  WORKER_TICK_SECRET_SECRET_NAME,
+  WORKER_TICK_URL_SECRET_NAME,
   workerTickJob,
 } from '@/jobs/cron.js';
 
@@ -17,7 +18,12 @@ describe('workerTickJob', () => {
     // pg_cron cannot call app code, so the job is a pg_net HTTP POST (schedule +
     // transport — the plpgsql-canary carve-out, ADR-0019 § Decision 4).
     expect(job.command).toContain('net.http_post');
-    expect(job.command).toContain(WORKER_TICK_URL_SETTING);
+    // URL + secret come from Supabase Vault (managed postgres can't set custom
+    // GUCs), never a custom GUC / current_setting.
+    expect(job.command).toContain('vault.decrypted_secrets');
+    expect(job.command).toContain(WORKER_TICK_URL_SECRET_NAME);
+    expect(job.command).toContain(WORKER_TICK_SECRET_SECRET_NAME);
+    expect(job.command).not.toContain('current_setting');
     // No pgmq anywhere — that layer is gone.
     expect(job.command).not.toContain('pgmq');
 
@@ -26,11 +32,13 @@ describe('workerTickJob', () => {
     expect(cronFields(job.schedule)).toEqual(['*', '*', '*', '*', '*']);
   });
 
-  it('is a no-op until the function URL is configured (safe to apply anywhere)', () => {
-    // The WHERE guard means an unset app.worker_tick_url skips the POST, so the
-    // migration applies cleanly in local/CI/staging without a configured URL.
+  it('is a no-op until the Vault secrets exist (safe to apply anywhere)', () => {
+    // The WHERE guard means a missing worker_tick_url secret skips the POST, so
+    // the migration applies cleanly in local/CI/staging without configured Vault.
     const job = workerTickJob();
-    expect(job.command).toContain(`where current_setting('${WORKER_TICK_URL_SETTING}', true) is not null`);
+    expect(job.command).toContain(
+      `where exists (select 1 from vault.decrypted_secrets where name = '${WORKER_TICK_URL_SECRET_NAME}')`,
+    );
   });
 });
 
