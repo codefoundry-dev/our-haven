@@ -120,14 +120,16 @@ const EnvSchema = z.object({
       'The background-screening fee charged to the applicant, in cents (default 3500 = $35). Platform margin over Checkr’s ~$30 standard-package cost (PRD-0001 story 42).',
     ),
 
-  // ── Supply verification (OH-184) ─────────────────────────────────────────
+  // ── Supply verification (OH-184 / OH-186) ────────────────────────────────
   // Resident-state slate for the Provider license gate. The CANONICAL slate is
-  // `LICENSE_BOARD_LAUNCH_STATES` in @our-haven/domain (license-board), but that
-  // module is not Deno-clean (it has a value import from @our-haven/shared), so
-  // we mirror it here as an ops-overridable CSV default. OH-186 wires the real
-  // per-state adapter; keep this in sync until then. A Provider whose resident
-  // state is outside this set rests in `holding-state-not-supported`. Caregivers
-  // ignore it (Checkr is multi-state).
+  // `LICENSE_BOARD_LAUNCH_STATES` in @our-haven/domain (license-board); OH-186
+  // made that module Deno-clean, so the provider-credentials route now reads the
+  // board slate (name/register-URL/mode) straight from the domain. This CSV
+  // remains the ops-overridable seam that drives ONLY the verification
+  // holding-state branch (verification.ts → computeVerificationState), letting
+  // ops toggle a state without a deploy; it defaults to the same 12 states as the
+  // domain slate. A Provider whose resident state is outside this set rests in
+  // `holding-state-not-supported`. Caregivers ignore it (Checkr is multi-state).
   LICENSE_BOARD_SUPPORTED_STATES: z
     .string()
     .default('CA,FL,TX,NY,IL,GA,NC,PA,OH,AZ,WA,MA')

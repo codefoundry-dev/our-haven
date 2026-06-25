@@ -25,7 +25,13 @@
  *                       the license number in and reads the result back.
  */
 
-import { SPECIALTIES, type Specialty, type UsState } from '@our-haven/shared';
+// Type-only import of @our-haven/shared keeps this module Deno-clean (the bare
+// specifier is fully erased at runtime), so the Hono Edge Function can reach it
+// cross-tree via an explicit `.ts` specifier — the SAME pattern the Verification
+// state machine (verification-workflow) uses. OH-186 relies on this: the Edge
+// provider-credentials route imports `findLicenseBoard` / `boardsForState` /
+// `isLicenseBoardLaunchState` from here instead of mirroring the slate.
+import type { Specialty, UsState } from '@our-haven/shared';
 
 /** The 12 priority states whose adapters ship at launch (PRD-0001, ADR-0009). */
 export const LICENSE_BOARD_LAUNCH_STATES: readonly UsState[] = [
@@ -280,10 +286,15 @@ export function listBoardSlate(): readonly LicenseBoard[] {
 }
 
 /**
- * Re-export for callers that want to iterate specialties when rendering a
- * board picker (mirrors `SPECIALTIES` from @our-haven/shared).
+ * The distinct specialties the slate covers, in slate order — for callers that
+ * want to iterate specialties when rendering a board picker. Derived from the
+ * slate data (rather than re-exporting `SPECIALTIES` from @our-haven/shared) so
+ * this module carries no runtime dependency on @our-haven/shared and stays
+ * Deno-clean for the cross-tree Edge import (see the header import note).
  */
-export const LICENSE_BOARD_SPECIALTIES: readonly Specialty[] = SPECIALTIES;
+export const LICENSE_BOARD_SPECIALTIES: readonly Specialty[] = [
+  ...new Set(BOARDS.map((b) => b.specialty)),
+];
 
 // ===========================================================================
 // Per-state license-board ADAPTER CONTRACT (OH-181)

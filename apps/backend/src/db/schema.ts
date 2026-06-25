@@ -42,6 +42,10 @@ export interface ProviderVerificationsTable {
   screening_initiated_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
   screening_passed_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
   license_verified_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  // Provider-only — proof of liability insurance verified by admin (OH-186).
+  // Stamped alongside license_verified_at by the provider-credentials admin
+  // decision; drives the domain `insurance-pending` gate.
+  insurance_verified_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
   rejected_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
   rejection_reason: string | null;
   created_at: Generated<Date>;

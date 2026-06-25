@@ -788,6 +788,492 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/providers/me/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the authenticated Provider's license + insurance credentials
+         * @description Returns the per-state license-board context (board name, register URL, hint) resolved from the resident state + specialty, plus the current upload + decision state. Caregivers are rejected by the provider-only role guard (403) — they never need a license; Checkr alone suffices.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description License + insurance credential state */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentials"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentialsError"];
+                    };
+                };
+                /** @description Wrong role (caregiver / parent / admin) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentialsError"];
+                    };
+                };
+                /** @description Supply (provider) row not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentialsError"];
+                    };
+                };
+                /** @description Not a clinical Provider */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentialsError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers/me/credentials/license": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record a completed Provider license-document upload
+         * @description Called after the supply portal uploads a license certificate through the signed-URL flow (POST /v1/uploads/signed-url with kind=license-doc). The body carries the returned objectPath (validated to the caller's license-doc namespace) plus optional licenseNumber and licenseBoardState.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ProviderLicenseConfirmRequest"];
+                };
+            };
+            responses: {
+                /** @description License upload recorded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentials"];
+                    };
+                };
+                /** @description objectPath not scoped to this user */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentialsError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentialsError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentialsError"];
+                    };
+                };
+                /** @description Supply (provider) row not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentialsError"];
+                    };
+                };
+                /** @description Not a clinical Provider */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentialsError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers/me/credentials/insurance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record a completed Provider liability-insurance COI upload
+         * @description Called after the supply portal uploads a Certificate of Insurance through the signed-URL flow (POST /v1/uploads/signed-url with kind=insurance-doc). The body carries the returned objectPath, validated to the caller's insurance-doc namespace.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ProviderInsuranceConfirmRequest"];
+                };
+            };
+            responses: {
+                /** @description Insurance upload recorded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentials"];
+                    };
+                };
+                /** @description objectPath not scoped to this user */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentialsError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentialsError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentialsError"];
+                    };
+                };
+                /** @description Supply (provider) row not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentialsError"];
+                    };
+                };
+                /** @description Not a clinical Provider */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentialsError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/providers/{providerId}/license-verification": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Admin — read a Provider's license-board context + uploaded docs + decision
+         * @description Surfaces the per-state license-board metadata (board name + register URL + hint) so the admin can cross-check the uploaded license number on the right portal, plus both uploaded doc paths and the current decision audit fields. Admin role requires aal2+TOTP.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    providerId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Credential context for review */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentials"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentialsError"];
+                    };
+                };
+                /** @description Not an admin / TOTP required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentialsError"];
+                    };
+                };
+                /** @description Provider not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentialsError"];
+                    };
+                };
+                /** @description Not a clinical Provider */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentialsError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Admin — record a license + insurance verification decision (verified | rejected)
+         * @description Admin manual verification flow (CONTEXT § Verification; PRD stories 43, 65; ADR-0009). On `verified`, stamps provider_verifications.license_verified_at AND .insurance_verified_at = now() (the single decision covers both clinical-credential gates), advancing the Provider toward activation. On `rejected`, stamps the terminal rejected_at with the notes mirrored into rejection_reason. The decision (+ actor uid + timestamp + notes) is recorded on specialist_credentials as the audit trail.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    providerId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ProviderLicenseDecisionRequest"];
+                };
+            };
+            responses: {
+                /** @description Decision recorded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentials"];
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentialsError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentialsError"];
+                    };
+                };
+                /** @description Not an admin / TOTP required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentialsError"];
+                    };
+                };
+                /** @description Provider not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentialsError"];
+                    };
+                };
+                /** @description Not a clinical Provider */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderCredentialsError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers/me/verification/screening/initiate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Initiate the $35 Stripe charge + create a background-screening row
+         * @description Creates a `provider_screenings` row in `payment_pending` and a Stripe PaymentIntent for the screening fee. The applicant confirms the intent client-side; on `payment_intent.succeeded` the payments webhook enqueues a durable `screening.invite` job and the worker-tick creates the Checkr invitation (writing screening_initiated_at). Returns the PaymentIntent client_secret so the web portal can mount Stripe Elements. Rejects if the prior verification step (ID upload) is incomplete or a screening is already in flight / cleared.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Charge created + screening row opened */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ScreeningInitiateResponse"];
+                    };
+                };
+                /** @description Prior verification step incomplete (ID upload) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ScreeningError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ScreeningError"];
+                    };
+                };
+                /** @description Wrong role (parent / admin) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ScreeningError"];
+                    };
+                };
+                /** @description Supply (provider) row not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ScreeningError"];
+                    };
+                };
+                /** @description Screening already in flight or cleared */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ScreeningError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/uploads/signed-url": {
         parameters: {
             query?: never;
@@ -799,7 +1285,7 @@ export interface paths {
         put?: never;
         /**
          * Mint a one-time signed URL for a client-direct private Storage upload
-         * @description Returns a signed upload URL + token for a server-chosen, uid-namespaced object key in a private Supabase Storage bucket. The client PUTs the file with supabase.storage.from(bucket).uploadToSignedUrl(objectPath, token, file), then confirms the objectPath to the owning resource (id-doc → POST /v1/providers/me/verification/id-doc). Supply-scoped (caregiver / provider).
+         * @description Returns a signed upload URL + token for a server-chosen, uid-namespaced object key in a private Supabase Storage bucket. The client PUTs the file with supabase.storage.from(bucket).uploadToSignedUrl(objectPath, token, file), then confirms the objectPath to the owning resource (id-doc → POST /v1/providers/me/verification/id-doc; license-doc → POST /v1/providers/me/credentials/license; insurance-doc → POST /v1/providers/me/credentials/insurance). Supply-scoped (caregiver / provider).
          */
         post: {
             parameters: {
@@ -896,6 +1382,102 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["StripeConnectWebhookError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/webhooks/stripe-payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stripe payments webhook — completes the screening charge + enqueues the Checkr invite
+         * @description Receives Stripe payments webhook deliveries (separate endpoint + signing secret from the Connect webhook). Verifies the `Stripe-Signature` header with STRIPE_PAYMENTS_WEBHOOK_SECRET, then on `payment_intent.succeeded` for a screening charge flips the screening row to `payment_succeeded` and enqueues a durable `screening.invite` outbox row (resolving the applicant identity from Supabase Auth). The worker-tick makes the slow Checkr invitation call. Public route — the Stripe signature is the authentication.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Acknowledged */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StripePaymentsWebhookAck"];
+                    };
+                };
+                /** @description Invalid signature or payload */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StripePaymentsWebhookError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/webhooks/checkr": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Checkr (background-check vendor) webhook — drives the Verification state machine
+         * @description Receives Checkr `report.*` deliveries. Verifies the `X-Checkr-Signature` HMAC against CHECKR_WEBHOOK_SECRET, normalizes the payload via the vendor-agnostic adapter, folds the result into the verification facts (screening_passed_at / rejected_at), and stamps the raw payload onto `provider_screenings.raw_payload` for FCRA-windowed retention. Idempotent on `(vendor, vendor_report_id)`. Public route — the Checkr signature is the authentication.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Acknowledged */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CheckrWebhookAck"];
+                    };
+                };
+                /** @description Invalid signature */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CheckrWebhookError"];
                     };
                 };
             };
@@ -1282,6 +1864,8 @@ export interface components {
             /** Format: date-time */
             licenseVerifiedAt: string | null;
             /** Format: date-time */
+            insuranceVerifiedAt: string | null;
+            /** Format: date-time */
             connectAccountReadyAt: string | null;
             /** Format: date-time */
             rejectedAt: string | null;
@@ -1293,6 +1877,74 @@ export interface components {
         };
         IdDocConfirmRequest: {
             objectPath: string;
+        };
+        ProviderCredentials: {
+            providerId: string;
+            /** @enum {string} */
+            role: "caregiver" | "provider";
+            /** @enum {string} */
+            residentState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+            /** @enum {string|null} */
+            specialty: "slp" | "ot" | "aba" | "psychology" | "other" | null;
+            licenseBoardSupported: boolean;
+            defaultBoard: components["schemas"]["LicenseBoard"];
+            altBoardsInState: components["schemas"]["LicenseBoard"][];
+            /** @enum {string|null} */
+            licenseBoardState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY" | null;
+            licenseNumber: string | null;
+            licenseDocObjectPath: string | null;
+            /** Format: date-time */
+            licenseUploadedAt: string | null;
+            insuranceDocObjectPath: string | null;
+            /** Format: date-time */
+            insuranceUploadedAt: string | null;
+            /** @enum {string|null} */
+            decision: "verified" | "rejected" | null;
+            /** Format: date-time */
+            decisionAt: string | null;
+            decisionByAdminUid: string | null;
+            decisionNotes: string | null;
+        };
+        LicenseBoard: {
+            /** @enum {string} */
+            state: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+            /** @enum {string} */
+            specialty: "slp" | "ot" | "aba" | "psychology" | "other";
+            boardName: string;
+            /** Format: uri */
+            registerUrl: string;
+            /** @enum {string} */
+            mode: "api" | "portal-only";
+            hint?: string;
+        } | null;
+        ProviderCredentialsError: {
+            error: string;
+            reason?: string;
+        };
+        ProviderLicenseConfirmRequest: {
+            objectPath: string;
+            licenseNumber?: string | null;
+            /** @enum {string|null} */
+            licenseBoardState?: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY" | null;
+        };
+        ProviderInsuranceConfirmRequest: {
+            objectPath: string;
+        };
+        ProviderLicenseDecisionRequest: {
+            /** @enum {string} */
+            decision: "verified" | "rejected";
+            notes?: string;
+        };
+        ScreeningInitiateResponse: {
+            /** Format: uuid */
+            screeningId: string;
+            clientSecret: string;
+            paymentIntentId: string;
+            amountCents: number;
+        };
+        ScreeningError: {
+            error: string;
+            reason?: string;
         };
         SignedUploadUrl: {
             bucket: string;
@@ -1306,13 +1958,29 @@ export interface components {
         };
         SignedUploadUrlRequest: {
             /** @enum {string} */
-            kind: "id-doc";
+            kind: "id-doc" | "license-doc" | "insurance-doc";
         };
         StripeConnectWebhookAck: {
             /** @enum {boolean} */
             received: true;
         };
         StripeConnectWebhookError: {
+            error: string;
+            reason?: string;
+        };
+        StripePaymentsWebhookAck: {
+            /** @enum {boolean} */
+            received: true;
+        };
+        StripePaymentsWebhookError: {
+            error: string;
+            reason?: string;
+        };
+        CheckrWebhookAck: {
+            /** @enum {boolean} */
+            received: true;
+        };
+        CheckrWebhookError: {
             error: string;
             reason?: string;
         };
