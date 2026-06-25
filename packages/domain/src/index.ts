@@ -26,6 +26,7 @@ export * from './background-check/index.js';
 export * from './license-board/index.js';
 export * from './home-childcare-license-board/index.js';
 export * from './retention-planner/index.js';
+export * from './state-privacy-patchwork/index.js';
 export * from './job-lifecycle/index.js';
 export * from './application-lifecycle/index.js';
 export * from './offer-lifecycle/index.js';
