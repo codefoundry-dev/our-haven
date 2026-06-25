@@ -18,6 +18,8 @@ export * from './cancellation/index.js';
 export * from './disintermediation/index.js';
 export * from './search-ranking/index.js';
 export * from './rating-reveal/index.js';
+export * from './caregiver-availability/index.js';
+export * from './provider-slot-scheduler/index.js';
 export * from './verification-workflow/index.js';
 export * from './background-check/index.js';
 export * from './license-board/index.js';
