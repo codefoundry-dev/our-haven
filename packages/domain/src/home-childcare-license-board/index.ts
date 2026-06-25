@@ -21,9 +21,15 @@
  * Pure-TS deep module per ADR-0004 — no DB, no network. Vendor/portal calls
  * are out-of-band manual steps performed by admins; this module just exposes
  * the metadata they need.
+ *
+ * The `@our-haven/shared` import is **type-only** so the bare specifier is fully
+ * erased at runtime, keeping this module Deno-clean — the Hono Edge Function
+ * (OH-187 `caregiver-badges` route) reaches the slate + badge derivation
+ * cross-tree via an explicit `.ts` specifier, the SAME pattern OH-186 uses for
+ * the professional-license-board slate. No CSV mirror.
  */
 
-import { type UsState } from '@our-haven/shared';
+import type { UsState } from '@our-haven/shared';
 
 /** The 12 priority states whose home-childcare adapters ship at launch. */
 export const HOME_CHILDCARE_LICENSE_BOARD_LAUNCH_STATES: readonly UsState[] = [
@@ -168,4 +174,58 @@ export function isHomeChildcareLicenseBoardLaunchState(state: UsState): boolean 
 /** Every board in the slate, ordered as declared. */
 export function listHomeChildcareLicenseBoardSlate(): readonly HomeChildcareLicenseBoard[] {
   return BOARDS;
+}
+
+// ===========================================================================
+// "State-registered home childcare" badge derivation (OH-187)
+//
+// On admin approval of an uploaded state home-childcare registration, the
+// Caregiver's public profile shows a badge NAMING the specific state agency
+// (CONTEXT § CDCTC-eligibility & state childcare licensure; PRD story 44). This
+// pure helper folds a registration's stored (state-at-upload, admin decision,
+// decision timestamp) into the badge, or `null` when the badge must not show.
+//
+// The state + agency labels come from the UPLOAD-TIME state (not the current
+// resident state) so the badge keeps naming the agency that actually issued the
+// registration even if the Caregiver later moves. Like the W-10 "Tax-credit-
+// friendly" badge (credentials module), it NEVER gates activation — the
+// Verification state machine does not read it.
+// ===========================================================================
+
+export interface StateRegisteredHomeChildcareBadge {
+  /** Two-letter state code captured at upload time. */
+  state: string;
+  /** Issuing agency name, e.g. "Florida Department of Children and Families". */
+  agencyName: string;
+  /** Specific regulatory programme, e.g. "Family Child Care Home (FCCH)". */
+  programName: string;
+  /** ISO-8601 timestamp the admin recorded the `verified` decision. */
+  verifiedAt: string;
+}
+
+/**
+ * Derive the public "State-registered home childcare" badge from a stored
+ * registration's facts. Returns `null` — i.e. show no badge — when:
+ *   - the admin decision is not `verified` (still pending, or rejected),
+ *   - the upload-time state or decision timestamp is missing, or
+ *   - the upload-time state is outside the launch slate (no agency to name).
+ *
+ * Inputs are loose (`string` / `Date | string`) because they come straight off
+ * a nullable DB row; the function narrows internally. Pure + deterministic.
+ */
+export function deriveStateRegisteredHomeChildcareBadge(
+  stateAtUpload: string | null,
+  decision: 'verified' | 'rejected' | null,
+  decisionAt: Date | string | null,
+): StateRegisteredHomeChildcareBadge | null {
+  if (decision !== 'verified' || !stateAtUpload || !decisionAt) return null;
+  const board = findHomeChildcareLicenseBoard(stateAtUpload as UsState);
+  if (!board) return null;
+  const at = decisionAt instanceof Date ? decisionAt : new Date(decisionAt);
+  return {
+    state: stateAtUpload,
+    agencyName: board.agencyName,
+    programName: board.programName,
+    verifiedAt: at.toISOString(),
+  };
 }

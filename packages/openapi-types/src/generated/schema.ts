@@ -1190,6 +1190,433 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/providers/me/home-childcare-registration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the authenticated Caregiver's state home-childcare (FCCH) registration context
+         * @description Returns the per-state home-childcare-licensing-agency context (agency + programme + register URL + admin hint) resolved from the resident state, plus the current upload + admin-decision state and the derived public badge. Eligibility: role=caregiver AND categories includes babysitter or nanny — Tutor-only Caregivers get 409; clinical Providers are rejected by the role guard (403). When the resident state is outside the launch slate, homeChildcareBoardSupported is false and board is null; the upload affordance should be hidden client-side. Never gates activation.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Home-childcare registration state */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HomeChildcareRegistration"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBadgesError"];
+                    };
+                };
+                /** @description Wrong role (provider / parent / admin) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBadgesError"];
+                    };
+                };
+                /** @description Supply (caregiver) row not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBadgesError"];
+                    };
+                };
+                /** @description Not a Babysitter / Nanny Caregiver */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBadgesError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Record a completed state home-childcare-registration certificate upload
+         * @description Called after the supply portal uploads the state registration certificate through the signed-URL flow (POST /v1/uploads/signed-url with kind=state-childcare-registration). The body carries the returned objectPath (validated to the caller's namespace); the server records the upload along with the Caregiver's resident state at upload time so the badge keeps naming the right agency if the Caregiver later moves. A fresh upload retires any prior admin decision (re-review).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["HomeChildcareRegistrationConfirmRequest"];
+                };
+            };
+            responses: {
+                /** @description Certificate upload recorded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HomeChildcareRegistration"];
+                    };
+                };
+                /** @description objectPath not scoped to this user */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBadgesError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBadgesError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBadgesError"];
+                    };
+                };
+                /** @description Supply (caregiver) row not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBadgesError"];
+                    };
+                };
+                /** @description Not a Babysitter / Nanny Caregiver */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBadgesError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/providers/{providerId}/home-childcare-registration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Admin — read a Caregiver's home-childcare-registration context + uploaded cert + decision
+         * @description Surfaces the per-state home-childcare-licensing-agency metadata (agency + register URL + hint) so the admin can cross-check the uploaded certificate on the right state portal, plus the uploaded cert path and the current decision audit fields. Admin role requires aal2+TOTP.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    providerId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Registration context for review */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HomeChildcareRegistration"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBadgesError"];
+                    };
+                };
+                /** @description Not an admin / TOTP required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBadgesError"];
+                    };
+                };
+                /** @description Caregiver not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBadgesError"];
+                    };
+                };
+                /** @description Not a Babysitter / Nanny Caregiver */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBadgesError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Admin — record a home-childcare-registration decision (verified | rejected)
+         * @description Admin manual verification flow per CONTEXT § CDCTC-eligibility & state childcare licensure. On `verified` the Caregiver's public profile gains the "State-registered home childcare" badge naming the specific state agency (returned in `badge`). On `rejected` the badge stays off. This decision is decoupled from the Verification state machine — it lands only on provider_home_childcare_registrations and never blocks activation.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    providerId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["HomeChildcareRegistrationDecisionRequest"];
+                };
+            };
+            responses: {
+                /** @description Decision recorded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HomeChildcareRegistration"];
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBadgesError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBadgesError"];
+                    };
+                };
+                /** @description Not an admin / TOTP required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBadgesError"];
+                    };
+                };
+                /** @description Caregiver not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBadgesError"];
+                    };
+                };
+                /** @description Not a Babysitter / Nanny Caregiver */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBadgesError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers/me/tax-credit-attestation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the authenticated Caregiver's W-10 "Tax-credit-friendly" self-attestation
+         * @description Returns the W-10 eligibility (Babysitter / Nanny), the stored self-attestation flag, and the effective `taxCreditFriendly` facet (eligible AND self-attested) that the unified-search filter reads. Self-attestation only — no upload, no admin review; never gates activation (CONTEXT § CDCTC).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Attestation state */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TaxCreditAttestation"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBadgesError"];
+                    };
+                };
+                /** @description Wrong role (provider / parent / admin) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBadgesError"];
+                    };
+                };
+                /** @description Supply (caregiver) row not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBadgesError"];
+                    };
+                };
+            };
+        };
+        /**
+         * Set the W-10 "Tax-credit-friendly" self-attestation toggle
+         * @description Sets provider_profiles.w10_tax_credit_friendly. The Caregiver attests they will issue IRS Form W-10 on request. Self-attesting `true` is rejected with 400 unless the account is a Babysitter or Nanny; `false` is always allowed (clearing the badge). No upload, no admin review; never gates activation.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["TaxCreditAttestationRequest"];
+                };
+            };
+            responses: {
+                /** @description Attestation updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TaxCreditAttestation"];
+                    };
+                };
+                /** @description Not eligible to self-attest */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBadgesError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBadgesError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBadgesError"];
+                    };
+                };
+                /** @description Supply (caregiver) row not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBadgesError"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/providers/me/verification/screening/initiate": {
         parameters: {
             query?: never;
@@ -1285,7 +1712,7 @@ export interface paths {
         put?: never;
         /**
          * Mint a one-time signed URL for a client-direct private Storage upload
-         * @description Returns a signed upload URL + token for a server-chosen, uid-namespaced object key in a private Supabase Storage bucket. The client PUTs the file with supabase.storage.from(bucket).uploadToSignedUrl(objectPath, token, file), then confirms the objectPath to the owning resource (id-doc → POST /v1/providers/me/verification/id-doc; license-doc → POST /v1/providers/me/credentials/license; insurance-doc → POST /v1/providers/me/credentials/insurance). Supply-scoped (caregiver / provider).
+         * @description Returns a signed upload URL + token for a server-chosen, uid-namespaced object key in a private Supabase Storage bucket. The client PUTs the file with supabase.storage.from(bucket).uploadToSignedUrl(objectPath, token, file), then confirms the objectPath to the owning resource (id-doc → POST /v1/providers/me/verification/id-doc; license-doc → POST /v1/providers/me/credentials/license; insurance-doc → POST /v1/providers/me/credentials/insurance; state-childcare-registration → POST /v1/providers/me/home-childcare-registration). Supply-scoped (caregiver / provider).
          */
         post: {
             parameters: {
@@ -1935,6 +2362,69 @@ export interface components {
             decision: "verified" | "rejected";
             notes?: string;
         };
+        HomeChildcareRegistration: {
+            providerId: string;
+            /** @enum {string} */
+            role: "caregiver" | "provider";
+            categories: ("babysitter" | "tutor" | "nanny")[] | null;
+            /** @enum {string} */
+            residentState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+            homeChildcareBoardSupported: boolean;
+            board: components["schemas"]["HomeChildcareBoard"];
+            /** @enum {string|null} */
+            stateAtUpload: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY" | null;
+            certificateDocObjectPath: string | null;
+            /** Format: date-time */
+            certificateUploadedAt: string | null;
+            /** @enum {string|null} */
+            decision: "verified" | "rejected" | null;
+            /** Format: date-time */
+            decisionAt: string | null;
+            decisionByAdminUid: string | null;
+            decisionNotes: string | null;
+            badge: components["schemas"]["StateRegisteredHomeChildcareBadge"];
+        };
+        HomeChildcareBoard: {
+            /** @enum {string} */
+            state: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+            agencyName: string;
+            programName: string;
+            /** Format: uri */
+            registerUrl: string;
+            hint: string;
+        } | null;
+        StateRegisteredHomeChildcareBadge: {
+            /** @enum {string} */
+            state: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+            agencyName: string;
+            programName: string;
+            /** Format: date-time */
+            verifiedAt: string;
+        } | null;
+        CaregiverBadgesError: {
+            error: string;
+            reason?: string;
+        };
+        HomeChildcareRegistrationConfirmRequest: {
+            objectPath: string;
+        };
+        HomeChildcareRegistrationDecisionRequest: {
+            /** @enum {string} */
+            decision: "verified" | "rejected";
+            notes?: string;
+        };
+        TaxCreditAttestation: {
+            providerId: string;
+            /** @enum {string} */
+            role: "caregiver" | "provider";
+            categories: ("babysitter" | "tutor" | "nanny")[] | null;
+            w10Eligible: boolean;
+            selfAttested: boolean;
+            taxCreditFriendly: boolean;
+        };
+        TaxCreditAttestationRequest: {
+            selfAttested: boolean;
+        };
         ScreeningInitiateResponse: {
             /** Format: uuid */
             screeningId: string;
@@ -1958,7 +2448,7 @@ export interface components {
         };
         SignedUploadUrlRequest: {
             /** @enum {string} */
-            kind: "id-doc" | "license-doc" | "insurance-doc";
+            kind: "id-doc" | "license-doc" | "insurance-doc" | "state-childcare-registration";
         };
         StripeConnectWebhookAck: {
             /** @enum {boolean} */
