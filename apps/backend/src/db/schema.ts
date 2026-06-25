@@ -168,6 +168,27 @@ export interface MessagesTable {
   created_at: Generated<Date>;
 }
 
+/**
+ * Transactional notification outbox (ADR-0019 § Decision 4; OH-237). A row is
+ * written in the same transaction as the domain change that triggers a
+ * notification (see jobs/outbox.ts `enqueueNotification`) and drained by the
+ * worker-tick Edge Function. OH-194 supplies the concrete channel dispatcher.
+ */
+export interface NotificationOutboxTable {
+  id: Generated<string>;
+  recipient_uid: string;
+  event_type: string;
+  payload: ColumnType<Record<string, unknown>, Record<string, unknown> | undefined, Record<string, unknown>>;
+  dedupe_key: string | null;
+  attempts: ColumnType<number, number | undefined, number>;
+  max_attempts: ColumnType<number, number | undefined, number>;
+  next_attempt_at: ColumnType<Date, Date | string | undefined, Date | string>;
+  sent_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  failed_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  last_error: string | null;
+  created_at: Generated<Date>;
+}
+
 export interface Database {
   auth_email_otps: AuthEmailOtpsTable;
   auth_step_up_grants: AuthStepUpGrantsTable;
@@ -180,4 +201,5 @@ export interface Database {
   provider_connect_accounts: ProviderConnectAccountsTable;
   stripe_tax_calculations: StripeTaxCalculationsTable;
   messages: MessagesTable;
+  notification_outbox: NotificationOutboxTable;
 }

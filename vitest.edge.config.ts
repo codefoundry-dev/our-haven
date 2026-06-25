@@ -9,7 +9,11 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['supabase/functions/api/**/*.test.ts', 'scripts/**/*.test.ts'],
+    include: [
+      'supabase/functions/api/**/*.test.ts',
+      'supabase/functions/worker-tick/**/*.test.ts',
+      'scripts/**/*.test.ts',
+    ],
     reporters: ['verbose'],
   },
 });

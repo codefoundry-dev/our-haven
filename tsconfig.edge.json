@@ -1,11 +1,19 @@
 {
-  "//": "Node-side typecheck for the Deno `api` Edge Function tree (ADR-0019). Bundler resolution + allowImportingTsExtensions so the explicit-.ts Deno source typechecks on Node. index.ts is excluded because it references the Deno global (validated by `supabase functions serve`/deploy, and by `deno check` in CI later). Deps + this config are owned at the repo root because supabase/ is a root-level dir, not part of the apps/backend workspace.",
+  "//": "Node-side typecheck for the Deno Edge Function trees (`api`, `worker-tick`) (ADR-0019). Bundler resolution + allowImportingTsExtensions so the explicit-.ts Deno source typechecks on Node. Each function's index.ts is excluded because it references the Deno global (validated by `supabase functions serve`/deploy, and by `deno check` in CI later). Deps + this config are owned at the repo root because supabase/ is a root-level dir, not part of the apps/backend workspace.",
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "types": ["node"],
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "include": ["supabase/functions/api/**/*.ts", "scripts/**/*.ts"],
-  "exclude": ["supabase/functions/api/index.ts", "node_modules"]
+  "include": [
+    "supabase/functions/api/**/*.ts",
+    "supabase/functions/worker-tick/**/*.ts",
+    "scripts/**/*.ts"
+  ],
+  "exclude": [
+    "supabase/functions/api/index.ts",
+    "supabase/functions/worker-tick/index.ts",
+    "node_modules"
+  ]
 }

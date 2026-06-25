@@ -146,7 +146,6 @@ function makeDeps(opts: {
       } as never,
     },
     storage: passThrough,
-    queue: passThrough,
     stripe: passThrough,
     backgroundCheck: passThrough,
   };

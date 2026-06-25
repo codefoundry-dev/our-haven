@@ -1,16 +1,26 @@
 /**
- * pg_cron periodic-job catalog (OH-174 skeleton; ADR-0010).
+ * pg_cron periodic-job catalog (OH-237; ADR-0019 § Decision 4).
  *
- * Periodic work runs in the database via pg_cron — NOT in-process timers,
- * because Fly.io may stop/restart/relocate instances at will. pg_cron is
- * SQL-only and cannot call application code, so each job enqueues a pgmq
- * message that the Node worker drains (see src/jobs/queue.ts + the
- * retention-planner module). The enable_pg_cron migration installs the
- * extension and schedules every job in this catalog, keeping a single tested
- * source of truth for the schedule + command.
+ * The model is "due work is rows; a tick processes them". A single `worker-tick`
+ * Edge Function runs every minute, drains the `notification_outbox`, and runs
+ * every due-row sweep — FCRA screening disposal today, plus Booking 24h-expiry,
+ * Session auto-confirm, Offer 72h-expiry and retention as their owning tickets
+ * (OH-177 / OH-179 / OH-182) add the deadline columns those sweeps scan.
  *
- * This module is intentionally pure (no DB import) so it can be unit-tested and
- * imported by the migration without dragging in a connection.
+ * pg_cron cannot call application code, so each job's `command` is a `pg_net`
+ * HTTP POST to the function. pg_cron + pg_net are schedule + transport — an
+ * explicit plpgsql-canary carve-out (ADR-0019), never a home for domain logic.
+ *
+ * The function URL + shared secret are environment-specific and read at run time
+ * from **Supabase Vault** (`vault.decrypted_secrets`), set per-environment at
+ * deploy (see `supabase/functions/worker-tick/README.md`). Vault — not a custom
+ * GUC — because Supabase's managed `postgres` role is not a superuser and cannot
+ * `ALTER DATABASE … SET` a custom parameter (permission denied). Keeping the
+ * values in Vault also keeps this catalog free of project refs, and the WHERE
+ * guard makes the job a safe no-op until the secrets are created.
+ *
+ * Intentionally pure (no DB import) so the `enable_pg_cron` migration can import
+ * it and it stays unit-testable.
  */
 
 export interface CronJob {
@@ -19,29 +29,44 @@ export interface CronJob {
   name: string;
   /** Standard 5-field cron expression, evaluated in UTC. */
   schedule: string;
-  /** SQL the scheduler runs in-database. For Our Haven this enqueues a pgmq
-   *  message the Node worker drains. */
+  /** SQL the scheduler runs in-database. For Our Haven this is a pg_net POST to
+   *  the worker-tick function. */
   command: string;
 }
 
-/** Default pgmq queue for retention/erasure work — matches QUEUE_RETENTION
- *  (config/env.ts) and the queue created in the enable_pgmq migration. */
-export const RETENTION_QUEUE = 'retention_planner';
+/** Every-minute tick. pg_cron is 1-minute granularity and all scheduled work
+ *  tolerates ±1 min (ADR-0019 § Consequences). */
+export const WORKER_TICK_SCHEDULE = '* * * * *';
+
+/** Supabase Vault secret names holding the deploy-time function URL + shared
+ *  secret. `vault.create_secret(value, name, …)` sets them; the cron command
+ *  reads them via `vault.decrypted_secrets`. */
+export const WORKER_TICK_URL_SECRET_NAME = 'worker_tick_url';
+export const WORKER_TICK_SECRET_SECRET_NAME = 'worker_tick_secret';
 
 /**
- * Daily retention/erasure sweep. Enqueues a `daily_sweep` message that the
- * retention worker drains to run the soft-delete / pseudonymization / FCRA
- * disposal sweeps (OH-2.14). 08:17 UTC — off the top of the hour to avoid the
- * cron thundering herd.
+ * The minute tick. The WHERE guard means the job is a harmless no-op until both
+ * Vault secrets exist, so the migration applies cleanly in every environment
+ * (local, CI, staging) without a configured function URL.
  */
-export function retentionSweepJob(queue: string = RETENTION_QUEUE): CronJob {
+export function workerTickJob(): CronJob {
   return {
-    name: 'retention_planner_daily_sweep',
-    schedule: '17 8 * * *',
-    command: `select pgmq.send('${queue}', '{"kind":"daily_sweep"}'::jsonb)`,
+    name: 'worker_tick',
+    schedule: WORKER_TICK_SCHEDULE,
+    command: `select net.http_post(
+  url := (select decrypted_secret from vault.decrypted_secrets where name = '${WORKER_TICK_URL_SECRET_NAME}'),
+  headers := jsonb_build_object(
+    'Content-Type', 'application/json',
+    'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = '${WORKER_TICK_SECRET_SECRET_NAME}')
+  ),
+  body := '{}'::jsonb,
+  timeout_milliseconds := 5000
+)
+where exists (select 1 from vault.decrypted_secrets where name = '${WORKER_TICK_URL_SECRET_NAME}')
+  and exists (select 1 from vault.decrypted_secrets where name = '${WORKER_TICK_SECRET_SECRET_NAME}')`,
   };
 }
 
 /** Every periodic job the platform installs. The enable_pg_cron migration
  *  schedules each of these. */
-export const CRON_JOBS: readonly CronJob[] = [retentionSweepJob()];
+export const CRON_JOBS: readonly CronJob[] = [workerTickJob()];

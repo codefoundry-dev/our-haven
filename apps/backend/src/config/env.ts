@@ -35,17 +35,6 @@ const EnvSchema = z.object({
     .describe('Supabase Storage bucket name for signed-URL uploads (ID docs, license docs, etc.).'),
   SUPABASE_SIGNED_URL_TTL_SECONDS: z.coerce.number().int().positive().max(3600).default(300),
 
-  QUEUE_BOOKING: z
-    .string()
-    .min(1)
-    .default('booking_lifecycle')
-    .describe('pgmq queue for booking 24h expiry + session 24h auto-confirm.'),
-  QUEUE_RETENTION: z
-    .string()
-    .min(1)
-    .default('retention_planner')
-    .describe('pgmq queue for retention/erasure jobs.'),
-
   LICENSE_BOARD_SUPPORTED_STATES: z
     .string()
     .default('')

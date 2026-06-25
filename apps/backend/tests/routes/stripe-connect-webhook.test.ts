@@ -87,7 +87,6 @@ function makeDeps(opts: { db: unknown; stripe: unknown }): AppDeps {
     db: opts.db as never,
     supabase: { admin: passThrough },
     storage: passThrough,
-    queue: passThrough,
     stripe: opts.stripe as never,
     backgroundCheck: passThrough,
   };

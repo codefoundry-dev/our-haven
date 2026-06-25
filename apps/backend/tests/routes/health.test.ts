@@ -17,7 +17,6 @@ const stubCollaborators = () => {
     db: stub,
     supabase: { admin: stub },
     storage: stub,
-    queue: stub,
     stripe: stub,
     backgroundCheck: stub,
   };

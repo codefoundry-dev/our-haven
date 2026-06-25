@@ -20,7 +20,6 @@ function makeDeps(): AppDeps {
     db: passThrough,
     supabase: { admin: passThrough },
     storage: passThrough,
-    queue: passThrough,
     stripe: passThrough,
     backgroundCheck: passThrough,
   };

@@ -15,7 +15,6 @@ import type { BackgroundCheckAdapter } from '@our-haven/domain';
 
 import type { Env } from '@/config/env.js';
 import type { Db } from '@/db/kysely.js';
-import type { QueueHandles } from '@/jobs/queue.js';
 import { authPlugin } from '@/plugins/auth.js';
 import { authRoutes } from '@/routes/auth.js';
 import { healthRoutes } from '@/routes/health.js';
@@ -40,7 +39,6 @@ export interface AppDeps {
   db: Db;
   supabase: SupabaseHandles;
   storage: StorageHandles;
-  queue: QueueHandles;
   stripe: StripeAdapter;
   backgroundCheck: BackgroundCheckAdapter;
 }
