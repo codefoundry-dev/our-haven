@@ -19,6 +19,7 @@ export * from './disintermediation/index.js';
 export * from './search-ranking/index.js';
 export * from './rating-reveal/index.js';
 export * from './caregiver-availability/index.js';
+export * from './caregiver-profile/index.js';
 export * from './provider-slot-scheduler/index.js';
 export * from './verification-workflow/index.js';
 export * from './credentials/index.js';

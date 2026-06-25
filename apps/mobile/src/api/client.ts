@@ -24,6 +24,13 @@ export type UploadKind = paths['/v1/uploads/signed-url']['post']['requestBody'][
 export type SignedUploadUrl = paths['/v1/uploads/signed-url']['post']['responses'][200]['content']['application/json'];
 type IdDocBody = paths['/v1/providers/me/verification/id-doc']['post']['requestBody']['content']['application/json'];
 
+// Caregiver profile builder (OH-188).
+export type CaregiverProfile = paths['/v1/providers/me/profile']['get']['responses'][200]['content']['application/json'];
+export type CaregiverProfilePatch = paths['/v1/providers/me/profile']['patch']['requestBody']['content']['application/json'];
+export type CaregiverCategoryRate = CaregiverProfile['categoryRates'][number];
+export type CaregiverCredential = CaregiverProfile['credentials'][number];
+export type CredentialCreateBody = paths['/v1/providers/me/credentials']['post']['requestBody']['content']['application/json'];
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -41,7 +48,7 @@ async function authHeaders(): Promise<Record<string, string>> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+async function request<T>(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<T> {
   if (!API_URL) {
     throw new ApiError(0, 'EXPO_PUBLIC_API_URL is not set — cannot reach the backend.');
   }
@@ -63,6 +70,8 @@ async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown):
 
 const get = <T>(path: string): Promise<T> => request<T>('GET', path);
 const post = <T>(path: string, body: unknown): Promise<T> => request<T>('POST', path, body);
+const patchJson = <T>(path: string, body: unknown): Promise<T> => request<T>('PATCH', path, body);
+const del = <T>(path: string): Promise<T> => request<T>('DELETE', path);
 
 /**
  * Set the permanent role on the authenticated user (M2.2 — POST /v1/auth/role-claim).
@@ -97,4 +106,26 @@ export function recordIdDoc(objectPath: string): Promise<Verification> {
 /** Mirror a completed Supabase phone OTP into the verification facts (hard activation gate). */
 export function confirmPhone(): Promise<Verification> {
   return post<Verification>('/v1/providers/me/verification/phone-confirm', {});
+}
+
+/**
+ * Caregiver profile builder (OH-188). Read the editable profile, save a partial
+ * update (per-category rates, availability, negotiable, ages/behaviour), and
+ * add/remove Credentials (admin-reviewed, hidden until approved).
+ */
+
+export function getCaregiverProfile(): Promise<CaregiverProfile> {
+  return get<CaregiverProfile>('/v1/providers/me/profile');
+}
+
+export function patchCaregiverProfile(patch: CaregiverProfilePatch): Promise<CaregiverProfile> {
+  return patchJson<CaregiverProfile>('/v1/providers/me/profile', patch);
+}
+
+export function addCaregiverCredential(body: CredentialCreateBody): Promise<{ credential: CaregiverCredential }> {
+  return post<{ credential: CaregiverCredential }>('/v1/providers/me/credentials', body);
+}
+
+export function deleteCaregiverCredential(credentialId: string): Promise<{ deleted: true }> {
+  return del<{ deleted: true }>(`/v1/providers/me/credentials/${credentialId}`);
 }
