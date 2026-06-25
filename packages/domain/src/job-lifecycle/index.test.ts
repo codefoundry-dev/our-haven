@@ -84,12 +84,12 @@ describe('canAcceptApplication', () => {
 });
 
 describe('Posted-Job happy path', () => {
-  it('draft → open (publish) — schedules 14d expiry + notifies category Providers', () => {
+  it('draft → open (publish) — schedules 14d expiry + notifies category Caregivers', () => {
     const r = transitionJob(jobAt(POSTED, 'draft'), { type: 'publish' });
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.next).toBe('open');
-      expect(r.sideEffects).toContainEqual({ type: 'notify-providers-in-category' });
+      expect(r.sideEffects).toContainEqual({ type: 'notify-caregivers-in-category' });
       expect(r.sideEffects).toContainEqual({ type: 'schedule-job-expiry-14d' });
     }
   });

@@ -1,54 +1,95 @@
 /**
- * Offer state machine (OH-113).
+ * Offer state machine — deep module (OH-179, deepens OH-113).
  *
- * Pure-TS deep module per ADR-0004. Encodes the v1 Offer state graph from
- * CONTEXT.md § Offer + ADR-0006 § Decision 5.
+ * Pure-TS per ADR-0004 (no DB / Stripe / Supabase imports; collaborators are
+ * injected at the handler layer). Encodes the v1 Offer state graph from
+ * CONTEXT.md § Offer + § negotiable + ADR-0006 § Decision 5 (narrowed by
+ * ADR-0011 to Caregiver-only), ADR-0014 (multi-day `slots[]` → one Booking per
+ * slot, no Series), ADR-0017 (`negotiable` gate), ADR-0018 (Tip lives on the
+ * Booking receipt, never on the Offer).
  *
- *   pending → accepted    (counterparty Accept; creates a Booking)
- *           → countered   (counterparty Counter; previous Offer is sealed,
- *                          a new Offer is sent back — handler creates the
- *                          successor Offer with `supersedes_offer_id` set
- *                          to this Offer's id)
+ *   pending → accepted    (counterparty Accept; materialises Booking(s))
+ *           → countered   (counterparty Counter — GATED by `negotiable`; the
+ *                          previous Offer is sealed, the handler opens a
+ *                          successor with `supersedes_offer_id` set to this id)
  *           → declined    (counterparty Decline)
  *           → expired     (valid_until passed without action)
+ *           → withdrawn   (SENDER-initiated, from `pending` OR `accepted`)
  *
- *   Direct-Message materialisation:
- *     At the moment the recipient hits Accept on a Direct-Message Offer
- *     whose anchor is `thread_id`, the Offer transitions `pending → accepted`
- *     AND the handler rebinds the Offer's anchor from `thread_id` to the
- *     freshly materialised `job_id` (see direct-message-materialisation
- *     module). The same transition occurs for Posted-Job Offers; the only
- *     difference is the anchor was a `job_id` from the start.
+ *   accepted → withdrawn  (sender withdraws an already-accepted Offer →
+ *                          cascade-cancels every Booking/Series it materialised
+ *                          via `offerId`; ADR-0014 amended). `accepted` is
+ *                          therefore NOT terminal — withdraw is its one exit.
  *
- *   Per-child surcharge snapshot is immutable across the Offer's lifetime
- *   — the value is captured at send time and never re-derived from the
- *   Provider's profile. This module enforces that invariant statically by
- *   exposing the snapshot only on construction; transitions cannot mutate it.
+ * ── Caregiver-only (ADR-0011) ──────────────────────────────────────────────
+ *   Offers exist only on the Caregiver rail. Provider consultations are
+ *   fixed-price slot-picks with no Offer (CONTEXT.md § Offer). Engagement is
+ *   hourly — the `per_session` scope variant retired with the off-platform
+ *   Provider tier, so `scope_type` is `hourly` only.
  *
- * Pure + deterministic. No I/O.
+ * ── Direct-Message materialisation ─────────────────────────────────────────
+ *   At Accept on a Direct-Message Offer (anchor `thread`), the Offer goes
+ *   `pending → accepted` AND the handler rebinds its anchor from `thread_id` to
+ *   the freshly-materialised `job_id` (see direct-message-materialisation). A
+ *   Posted-Job Offer (anchor `job`) takes the same transition without the
+ *   materialisation/rebind — its anchor was a `job_id` from the start.
+ *
+ * ── Immutable snapshot ─────────────────────────────────────────────────────
+ *   The pricing-snapshot fields (`proposedRate`, `scopeType`, `scopeQuantity`,
+ *   `childCount`, `category`, `perChildSurchargeSnapshot`, `computedTotal`,
+ *   `schedule`) are captured at send time and never re-derived from the
+ *   Caregiver's profile; transitions never overwrite them.
+ *
+ * Pure + deterministic. No I/O. No clock is read — `now` is supplied on the
+ * event so timer-driven transitions (`auto-expire`) stay deterministic.
  */
 
-export const OFFER_STATES = ['pending', 'accepted', 'countered', 'declined', 'expired'] as const;
-export type OfferState = (typeof OFFER_STATES)[number];
+import type { CaregiverCategory } from '@our-haven/shared';
 
-export const OFFER_TERMINAL_STATES = [
+import type { BookingSlot, RecurrenceRule } from '../booking-lifecycle/index.js';
+import { calculatePricing } from '../pricing/index.js';
+
+export const OFFER_STATES = [
+  'pending',
   'accepted',
   'countered',
   'declined',
   'expired',
+  'withdrawn',
+] as const;
+export type OfferState = (typeof OFFER_STATES)[number];
+
+/**
+ * States from which no further transition is valid.
+ *
+ * `accepted` is intentionally NOT terminal: a sender may still withdraw an
+ * accepted Offer (CONTEXT.md § Offer — "Withdraw is sender-initiated from
+ * `pending` or `accepted`"), which cascade-cancels the Booking(s) it
+ * materialised. Its sole legal exit is `sender-withdraw`.
+ */
+export const OFFER_TERMINAL_STATES = [
+  'countered',
+  'declined',
+  'expired',
+  'withdrawn',
 ] as const;
 export type OfferTerminalState = (typeof OFFER_TERMINAL_STATES)[number];
 
-export const OFFER_SENDERS = ['parent', 'provider'] as const;
+export const OFFER_SENDERS = ['parent', 'caregiver'] as const;
 export type OfferSender = (typeof OFFER_SENDERS)[number];
 
-export const OFFER_SCOPE_TYPES = ['hourly', 'per_session'] as const;
+/**
+ * The only scope type in v1. Caregiver engagement is hourly; the `per_session`
+ * variant retired with the off-platform Provider tier (CONTEXT.md § Offer).
+ * Kept as a one-member enum for schema fidelity + forward-compat.
+ */
+export const OFFER_SCOPE_TYPES = ['hourly'] as const;
 export type OfferScopeType = (typeof OFFER_SCOPE_TYPES)[number];
 
 /**
  * The Offer's anchor — either a Job (`job_id`) or, pre-acceptance in the
  * Direct-Message flow, a chat thread (`thread_id`). At Direct-Message
- * acceptance, the handler flips the anchor from `thread_id` to the freshly
+ * acceptance the handler flips the anchor from `thread_id` to the freshly
  * materialised `job_id`.
  */
 export type OfferAnchor =
@@ -56,31 +97,59 @@ export type OfferAnchor =
   | { kind: 'thread'; threadId: string };
 
 /**
- * Default Offer time-to-live in hours (ADR-0006 §5 default 72h).
+ * The proposed concrete schedule (ADR-0014). One of:
+ *   - `one-off`    — a single date + start–end window → one Booking.
+ *   - `multi-day`  — several hand-picked dates → one INDEPENDENT Booking per
+ *                    slot, NO Series (a multi-day one-off is not a recurrence).
+ *   - `recurring`  — an anchored weekly rule → a Booking Series whose
+ *                    occurrences are materialised up front.
+ * Reuses the booking-lifecycle slot/rule shapes so the materialisation handler
+ * can feed them straight into `materialiseMultiDayOneOff` / `materialiseSeries`.
+ */
+export type OfferSchedule =
+  | { kind: 'one-off'; slot: BookingSlot }
+  | { kind: 'multi-day'; slots: readonly BookingSlot[] }
+  | { kind: 'recurring'; rule: RecurrenceRule };
+
+/**
+ * Default Offer time-to-live in hours (CONTEXT.md § Offer — `valid_until`
+ * default 72h).
  */
 export const OFFER_VALID_UNTIL_DEFAULT_HOURS = 72;
 
-/**
- * Maximum length of the free-text `scope_note`. ADR-0006 §5.
- */
+/** Maximum length of the free-text `scope_note` (CONTEXT.md § Offer). */
 export const OFFER_SCOPE_NOTE_MAX_CHARS = 280;
 
 /**
- * Structural shape of an Offer at send time. The five "snapshot" fields
- * (proposed_rate, scope_type, scope_quantity, perChildSurchargeSnapshot,
- * computedTotal) are immutable for the Offer's life; later transitions
- * never overwrite them.
+ * Structural shape of an Offer at send time. The pricing-snapshot fields are
+ * immutable for the Offer's life; transitions never overwrite them. All money
+ * is integer cents; `scopeQuantity` is billable hours (the sum across slots for
+ * a multi-day / recurring schedule).
  */
 export interface OfferShape {
+  /** Hourly Agreed-Rate proposal. Integer cents ≥ 0. */
   proposedRate: number;
   scopeType: OfferScopeType;
+  /** Billable hours the `computedTotal` covers (sum across slots if multi-day). */
   scopeQuantity: number;
   scopeNote: string;
+  /** Number of Children on the engagement. ≥ 1; Tutor must be 1. */
+  childCount: number;
+  /** The single service category this Offer is pinned to. */
+  category: CaregiverCategory;
+  /** Babysitter / Nanny per-child surcharge, cents-PER-HOUR, snapshotted from
+   *  the Caregiver's profile at send time. Tutor must be 0. */
   perChildSurchargeSnapshot: number;
+  /** Snapshot of the parent charge (`proposedRate × scopeQuantity` + surcharge)
+   *  at send time. Integer cents. See `computeOfferTotal`. */
   computedTotal: number;
   validUntil: Date;
   sender: OfferSender;
+  /** The involved Caregiver's `negotiable` flag (ADR-0017). When false the
+   *  `counterparty-counter` transition is refused — only Accept/Decline. */
+  negotiable: boolean;
   anchor: OfferAnchor;
+  schedule: OfferSchedule;
 }
 
 export interface Offer extends OfferShape {
@@ -91,13 +160,14 @@ export const OFFER_EVENT_TYPES = [
   'counterparty-accept',
   'counterparty-counter',
   'counterparty-decline',
+  'sender-withdraw',
   'auto-expire',
 ] as const;
 export type OfferEventType = (typeof OFFER_EVENT_TYPES)[number];
 
 export interface OfferEvent {
   type: OfferEventType;
-  /** Current time, supplied by the handler. Pure module never reads a clock. */
+  /** Current time, supplied by the handler. The pure module never reads a clock. */
   now: Date;
 }
 
@@ -107,6 +177,7 @@ export const OFFER_SIDE_EFFECT_TYPES = [
   'open-successor-offer',
   'rebind-anchor-to-job',
   'materialise-direct-message-job',
+  'cascade-cancel-materialised-bookings',
 ] as const;
 export type OfferSideEffectType = (typeof OFFER_SIDE_EFFECT_TYPES)[number];
 
@@ -119,26 +190,56 @@ export type OfferTransitionResult =
   | { ok: false; reason: string };
 
 /**
- * Compute the canonical `computed_total` for an Offer at send time.
- * `proposed_rate × scope_quantity + per_child_surcharge_snapshot`.
+ * Compute the canonical `computed_total` for an Offer — the parent charge over
+ * `scopeQuantity` hours, delegated to the OH-178 Pricing calculator so the
+ * Offer's quoted total and the eventual Booking receipt share ONE source of
+ * truth (no drift). The per-child surcharge is the cents-per-hour snapshot,
+ * applied as `surcharge × hours × max(0, childCount − 1)` (the Pricing model).
  *
- * The per-child surcharge snapshot is already the *total* surcharge value
- * for the Offer (handler computes `surcharge_per_child × (childCount - 1)`
- * before passing it in); this function does not multiply it again. This
- * keeps the pure module agnostic to per-Provider surcharge structure.
+ * `commissionBp` is irrelevant here — `computed_total` is the pre-commission
+ * parent charge — so it is passed as 0 and only `parentChargeCents` is read.
+ *
+ * Throws (via the Pricing calculator) on caller-bug inputs — e.g. a Tutor with
+ * `childCount > 1` or a non-zero surcharge, or non-integer cents.
  */
 export function computeOfferTotal(args: {
   proposedRate: number;
   scopeQuantity: number;
+  childCount: number;
   perChildSurchargeSnapshot: number;
+  category: CaregiverCategory;
 }): number {
-  return args.proposedRate * args.scopeQuantity + args.perChildSurchargeSnapshot;
+  return calculatePricing({
+    agreedRateCents: args.proposedRate,
+    hours: args.scopeQuantity,
+    childCount: args.childCount,
+    perChildSurchargeCents: args.perChildSurchargeSnapshot,
+    commissionBp: 0,
+    category: args.category,
+  }).parentChargeCents;
 }
 
 /**
- * Default `valid_until` for a newly-sent Offer. 72h ahead of `sentAt`.
- * Exposed as a helper for the handler; the pure module does not call it
- * itself.
+ * Whether the Offer's stored `computedTotal` matches the canonical recompute.
+ * A construction-time invariant the composer/handler can assert; not enforced
+ * inside `transitionOffer` (the snapshot is trusted once captured).
+ */
+export function offerTotalIsConsistent(offer: OfferShape): boolean {
+  return (
+    offer.computedTotal ===
+    computeOfferTotal({
+      proposedRate: offer.proposedRate,
+      scopeQuantity: offer.scopeQuantity,
+      childCount: offer.childCount,
+      perChildSurchargeSnapshot: offer.perChildSurchargeSnapshot,
+      category: offer.category,
+    })
+  );
+}
+
+/**
+ * Default `valid_until` for a newly-sent Offer — 72h ahead of `sentAt`. A
+ * helper for the handler; the pure module never calls it itself.
  */
 export function defaultValidUntil(sentAt: Date): Date {
   return new Date(sentAt.getTime() + OFFER_VALID_UNTIL_DEFAULT_HOURS * 60 * 60 * 1000);
@@ -148,16 +249,21 @@ export function isOfferTerminal(state: OfferState): boolean {
   return (OFFER_TERMINAL_STATES as readonly string[]).includes(state);
 }
 
-/**
- * Whether the Offer's `valid_until` has elapsed relative to `now`.
- */
-export function isExpiredAt(offer: Offer, now: Date): boolean {
+/** Whether the Offer's `valid_until` has elapsed relative to `now`. */
+export function isExpiredAt(offer: Pick<Offer, 'validUntil'>, now: Date): boolean {
   return now.getTime() >= offer.validUntil.getTime();
 }
 
 /**
- * The state a newly-sent Offer is born in. Always `pending`.
+ * Whether a counter-Offer is allowed: only on a `pending` Offer whose involved
+ * Caregiver has `negotiable` on (ADR-0017). A pure predicate the UI uses to
+ * show/hide the Counter pill and `transitionOffer` enforces on the transition.
  */
+export function canCounter(offer: Offer): boolean {
+  return offer.state === 'pending' && offer.negotiable;
+}
+
+/** The state a newly-sent Offer is born in. Always `pending`. */
 export function initialOfferState(): OfferState {
   return 'pending';
 }
@@ -166,7 +272,7 @@ export function initialOfferState(): OfferState {
  * Apply an event to an Offer. Pure + deterministic.
  *
  * Anchor-sensitive: an Offer anchored to a thread (`kind: 'thread'`)
- * transitioning to `accepted` triggers Direct-Message materialisation
+ * transitioning to `accepted` emits the Direct-Message materialisation
  * side-effects; an Offer anchored to a Job (`kind: 'job'`) does not.
  */
 export function transitionOffer(offer: Offer, event: OfferEvent): OfferTransitionResult {
@@ -185,7 +291,7 @@ export function transitionOffer(offer: Offer, event: OfferEvent): OfferTransitio
       }
       const sideEffects: OfferSideEffect[] = [{ type: 'notify-counterparty' }];
       if (anchor.kind === 'thread') {
-        // Direct-Message flow: materialise Job + Application + Booking
+        // Direct-Message flow: materialise Job + Application + Booking(s)
         // atomically, then rebind this Offer's anchor from thread to job.
         sideEffects.push(
           { type: 'materialise-direct-message-job' },
@@ -203,19 +309,24 @@ export function transitionOffer(offer: Offer, event: OfferEvent): OfferTransitio
       if (state !== 'pending') {
         return { ok: false, reason: `counterparty-counter invalid from ${state}` };
       }
-      if (isExpiredAt(offer, event.now)) {
+      if (!offer.negotiable) {
+        // ADR-0017: when the involved Caregiver has `negotiable` off, Counter
+        // is hidden on both sides — only Accept/Decline are valid.
         return {
           ok: false,
-          reason: 'counterparty-counter invalid — offer has already expired',
+          reason:
+            'counterparty-counter invalid — the caregiver has negotiable off (only accept/decline are valid; ADR-0017)',
         };
+      }
+      if (isExpiredAt(offer, event.now)) {
+        return { ok: false, reason: 'counterparty-counter invalid — offer has already expired' };
       }
       return {
         ok: true,
         next: 'countered',
         sideEffects: [
-          // The handler creates the new successor Offer with `supersedes_offer_id`
-          // set to this Offer's id (FK back-reference); this side-effect tag
-          // is the signal to do that.
+          // The handler creates the successor Offer with `supersedes_offer_id`
+          // set to this Offer's id (FK back-reference).
           { type: 'open-successor-offer' },
           { type: 'notify-counterparty' },
         ],
@@ -226,13 +337,33 @@ export function transitionOffer(offer: Offer, event: OfferEvent): OfferTransitio
       if (state !== 'pending') {
         return { ok: false, reason: `counterparty-decline invalid from ${state}` };
       }
-      // Decline is valid even if the Offer is past valid_until, but in
-      // practice the auto-expire timer will already have fired. We allow it
-      // as a no-op-equivalent — both terminate the Offer with no Booking.
+      // Decline is valid even past valid_until — both terminate the Offer with
+      // no Booking; in practice the auto-expire timer will already have fired.
+      return { ok: true, next: 'declined', sideEffects: [{ type: 'notify-counterparty' }] };
+    }
+
+    case 'sender-withdraw': {
+      // Sender-initiated (CONTEXT.md § Offer). Asymmetric by source state:
+      //   - from `pending`:  no Booking exists yet — just seal the Offer.
+      //   - from `accepted`: cascade-cancel every Booking/Series this Offer
+      //                      materialised (the handler resolves them by offerId,
+      //                      ADR-0014 amended).
+      if (state === 'pending') {
+        return { ok: true, next: 'withdrawn', sideEffects: [{ type: 'notify-counterparty' }] };
+      }
+      if (state === 'accepted') {
+        return {
+          ok: true,
+          next: 'withdrawn',
+          sideEffects: [
+            { type: 'cascade-cancel-materialised-bookings' },
+            { type: 'notify-counterparty' },
+          ],
+        };
+      }
       return {
-        ok: true,
-        next: 'declined',
-        sideEffects: [{ type: 'notify-counterparty' }],
+        ok: false,
+        reason: `sender-withdraw invalid from ${state} — only a pending or accepted offer can be withdrawn`,
       };
     }
 
@@ -241,55 +372,39 @@ export function transitionOffer(offer: Offer, event: OfferEvent): OfferTransitio
         return { ok: false, reason: `auto-expire invalid from ${state}` };
       }
       if (!isExpiredAt(offer, event.now)) {
-        return {
-          ok: false,
-          reason: 'auto-expire invalid — offer is still within valid_until',
-        };
+        return { ok: false, reason: 'auto-expire invalid — offer is still within valid_until' };
       }
-      return {
-        ok: true,
-        next: 'expired',
-        sideEffects: [{ type: 'notify-counterparty' }],
-      };
+      return { ok: true, next: 'expired', sideEffects: [{ type: 'notify-counterparty' }] };
     }
   }
 }
 
 /**
  * Validate that a successor Offer (sent in response to `counterparty-counter`)
- * preserves the immutable per-child surcharge snapshot anchor of the original
- * Direct-Message Offer chain.
+ * preserves the immutable per-child surcharge snapshot of its predecessor.
  *
- * ADR-0006 §5: "per_child_surcharge_snapshot immutable across Offer lifetime."
- * In a counter chain, the snapshot is recomputed against the sender-side
- * Provider profile *at the time the counter is sent*; the rule that "in-flight
- * Offers don't drift" applies *within* one Offer, not across the chain. This
- * helper exists to document the invariant explicitly and to flag the inverse
- * case (a successor that tries to re-use the predecessor's snapshot when its
- * own send-time profile has a different value — a likely caller bug).
- *
- * For the same-sender case (both Offers in the chain sent by the Provider
- * with no profile change in between) the snapshot must be byte-identical.
+ * CONTEXT.md § Offer: "per_child_surcharge_snapshot immutable across Offer
+ * lifetime." The rule that "in-flight Offers don't drift" applies WITHIN one
+ * Offer; a counter chain may legitimately recompute the snapshot against the
+ * sender-side profile at the time the counter is sent. This helper documents
+ * the invariant explicitly and flags the inverse case (a same-sender successor
+ * whose snapshot drifted with no profile change — a likely caller bug).
  */
 export function snapshotInvariantsHold(
   predecessor: OfferShape,
   successor: OfferShape,
-  providerProfileSurchargeUnchanged: boolean,
+  caregiverProfileSurchargeUnchanged: boolean,
 ): boolean {
   if (predecessor.sender !== successor.sender) {
-    // Different sender — successor uses its own sender's profile, predecessor
-    // ratchet does not apply.
+    // Different sender — successor uses its own sender's profile.
     return true;
   }
-  if (!providerProfileSurchargeUnchanged) {
+  if (!caregiverProfileSurchargeUnchanged) {
     // Same sender but profile changed — successor must reflect the new value.
-    // Caller's responsibility; the invariant says we cannot *check* the value
-    // here, only that whatever is captured at send time is honoured for the
-    // rest of that Offer's lifetime.
     return true;
   }
   // Same sender, profile unchanged → snapshot must be byte-identical.
   return predecessor.perChildSurchargeSnapshot === successor.perChildSurchargeSnapshot;
 }
 
-export const OFFER_LIFECYCLE_MODULE_VERSION = '0.1.0-OH-113';
+export const OFFER_LIFECYCLE_MODULE_VERSION = '0.2.0-OH-179';
