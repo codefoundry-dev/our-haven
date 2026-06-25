@@ -66,6 +66,7 @@ const VerificationFactsSchema = z
     screeningInitiatedAt: z.string().datetime().nullable(),
     screeningPassedAt: z.string().datetime().nullable(),
     licenseVerifiedAt: z.string().datetime().nullable(),
+    insuranceVerifiedAt: z.string().datetime().nullable(),
     connectAccountReadyAt: z.string().datetime().nullable(),
     rejectedAt: z.string().datetime().nullable(),
     rejectionReason: z.string().nullable(),
@@ -111,6 +112,7 @@ interface VerificationRow {
   screening_initiated_at: Date | string | null;
   screening_passed_at: Date | string | null;
   license_verified_at: Date | string | null;
+  insurance_verified_at: Date | string | null;
   rejected_at: Date | string | null;
   rejection_reason: string | null;
 }
@@ -241,11 +243,10 @@ function buildResponse(
     screeningInitiatedAt: asDate(row.screening_initiated_at),
     screeningPassedAt: asDate(row.screening_passed_at),
     licenseVerifiedAt: asDate(row.license_verified_at),
-    // Liability-insurance proof is a Provider activation gate (OH-181), but its
-    // upload + admin-verify column lands with OH-186. Until then it is null, so a
-    // Provider correctly rests at `insurance-pending` after the license clears.
+    // Liability-insurance proof is a Provider activation gate (OH-181), stamped by
+    // the admin license-verification decision (OH-186, provider-credentials route).
     // Caregivers ignore it.
-    insuranceVerifiedAt: null,
+    insuranceVerifiedAt: asDate(row.insurance_verified_at),
     connectAccountReadyAt: asDate(connect?.account_ready_at ?? null),
     rejectedAt: asDate(row.rejected_at),
   };
@@ -268,6 +269,7 @@ function buildResponse(
       screeningInitiatedAt: toIso(facts.screeningInitiatedAt),
       screeningPassedAt: toIso(facts.screeningPassedAt),
       licenseVerifiedAt: toIso(facts.licenseVerifiedAt),
+      insuranceVerifiedAt: toIso(facts.insuranceVerifiedAt),
       connectAccountReadyAt: toIso(facts.connectAccountReadyAt),
       rejectedAt: toIso(facts.rejectedAt),
       rejectionReason: row.rejection_reason,

@@ -29,6 +29,7 @@ function vrow(over: Record<string, unknown> = {}): Record<string, unknown> {
     screening_initiated_at: null,
     screening_passed_at: null,
     license_verified_at: null,
+    insurance_verified_at: null,
     rejected_at: null,
     rejection_reason: null,
     created_at: new Date('2026-06-01T00:00:00.000Z'),
@@ -215,6 +216,46 @@ describe('GET /v1/providers/me/verification', () => {
     const res = await app.request('/v1/providers/me/verification', get(await providerToken()));
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ state: 'license-pending', role: 'provider', licenseBoardSupported: true });
+  });
+
+  it('rests a Provider with a verified license but no insurance at insurance-pending', async () => {
+    const db = makeDb({
+      provider: PROVIDER_CLINICAL,
+      verification: vrow({
+        provider_id: 'prov-2',
+        email_confirmed_at: new Date(EMAIL_AT),
+        id_doc_uploaded_at: new Date(),
+        screening_initiated_at: new Date(),
+        screening_passed_at: new Date(),
+        license_verified_at: new Date(),
+      }),
+    }).db;
+    const app = buildApp(makeDeps({ db, supabase: supabaseWithUser({ email_confirmed_at: EMAIL_AT }) }));
+    const res = await app.request('/v1/providers/me/verification', get(await providerToken()));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { state: string; facts: Record<string, unknown> };
+    expect(body.state).toBe('insurance-pending');
+    expect(body.facts.insuranceVerifiedAt).toBeNull();
+  });
+
+  it('advances a Provider with license + insurance verified past both clinical gates', async () => {
+    const db = makeDb({
+      provider: PROVIDER_CLINICAL,
+      verification: vrow({
+        provider_id: 'prov-2',
+        email_confirmed_at: new Date(EMAIL_AT),
+        id_doc_uploaded_at: new Date(),
+        screening_initiated_at: new Date(),
+        screening_passed_at: new Date(),
+        license_verified_at: new Date(),
+        insurance_verified_at: new Date(),
+      }),
+    }).db;
+    const app = buildApp(makeDeps({ db, supabase: supabaseWithUser({ email_confirmed_at: EMAIL_AT }) }));
+    const res = await app.request('/v1/providers/me/verification', get(await providerToken()));
+    expect(res.status).toBe(200);
+    // Both clinical gates cleared; only phone remains.
+    expect(await res.json()).toMatchObject({ state: 'awaiting-phone-verification' });
   });
 
   it('routes a Provider in an out-of-slate state to holding-state-not-supported', async () => {

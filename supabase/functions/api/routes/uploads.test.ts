@@ -85,6 +85,30 @@ describe('POST /v1/uploads/signed-url', () => {
     expect(calledPath.startsWith('id-doc/uid-1/')).toBe(true);
   });
 
+  it('mints a license-doc upload, uid-namespaced under license-doc/', async () => {
+    const { supabase, from, createSignedUploadUrl } = makeStorage({
+      data: { signedUrl: 'https://storage/sign/lic', token: 'lic-token', path: 'license-doc/uid-1/generated' },
+    });
+    const app = buildApp(makeDeps({ supabase }));
+    const res = await app.request('/v1/uploads/signed-url', post(await caregiverToken(), { kind: 'license-doc' }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ bucket: 'id-docs', objectPath: 'license-doc/uid-1/generated' });
+    expect(from).toHaveBeenCalledWith('id-docs');
+    const calledPath = createSignedUploadUrl.mock.calls[0]?.[0] as string;
+    expect(calledPath.startsWith('license-doc/uid-1/')).toBe(true);
+  });
+
+  it('mints an insurance-doc upload, uid-namespaced under insurance-doc/', async () => {
+    const { supabase, createSignedUploadUrl } = makeStorage({
+      data: { signedUrl: 'https://storage/sign/ins', token: 'ins-token', path: 'insurance-doc/uid-1/generated' },
+    });
+    const app = buildApp(makeDeps({ supabase }));
+    const res = await app.request('/v1/uploads/signed-url', post(await caregiverToken(), { kind: 'insurance-doc' }));
+    expect(res.status).toBe(200);
+    const calledPath = createSignedUploadUrl.mock.calls[0]?.[0] as string;
+    expect(calledPath.startsWith('insurance-doc/uid-1/')).toBe(true);
+  });
+
   it('502 when Storage returns an error', async () => {
     const { supabase } = makeStorage({ data: null, error: { message: 'bucket missing' } });
     const app = buildApp(makeDeps({ supabase }));

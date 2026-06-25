@@ -409,6 +409,10 @@ components:
           type: string
           nullable: true
           format: date-time
+        insuranceVerifiedAt:
+          type: string
+          nullable: true
+          format: date-time
         connectAccountReadyAt:
           type: string
           nullable: true
@@ -428,6 +432,7 @@ components:
         - screeningInitiatedAt
         - screeningPassedAt
         - licenseVerifiedAt
+        - insuranceVerifiedAt
         - connectAccountReadyAt
         - rejectedAt
         - rejectionReason
@@ -449,6 +454,381 @@ components:
           maxLength: 512
       required:
         - objectPath
+    ProviderCredentials:
+      type: object
+      properties:
+        providerId:
+          type: string
+        role:
+          type: string
+          enum:
+            - caregiver
+            - provider
+        residentState:
+          type: string
+          enum:
+            - AL
+            - AK
+            - AZ
+            - AR
+            - CA
+            - CO
+            - CT
+            - DE
+            - DC
+            - FL
+            - GA
+            - HI
+            - ID
+            - IL
+            - IN
+            - IA
+            - KS
+            - KY
+            - LA
+            - ME
+            - MD
+            - MA
+            - MI
+            - MN
+            - MS
+            - MO
+            - MT
+            - NE
+            - NV
+            - NH
+            - NJ
+            - NM
+            - NY
+            - NC
+            - ND
+            - OH
+            - OK
+            - OR
+            - PA
+            - RI
+            - SC
+            - SD
+            - TN
+            - TX
+            - UT
+            - VT
+            - VA
+            - WA
+            - WV
+            - WI
+            - WY
+        specialty:
+          type: string
+          nullable: true
+          enum:
+            - slp
+            - ot
+            - aba
+            - psychology
+            - other
+            - null
+        licenseBoardSupported:
+          type: boolean
+        defaultBoard:
+          $ref: "#/components/schemas/LicenseBoard"
+        altBoardsInState:
+          type: array
+          items:
+            $ref: "#/components/schemas/LicenseBoard"
+        licenseBoardState:
+          type: string
+          nullable: true
+          enum:
+            - AL
+            - AK
+            - AZ
+            - AR
+            - CA
+            - CO
+            - CT
+            - DE
+            - DC
+            - FL
+            - GA
+            - HI
+            - ID
+            - IL
+            - IN
+            - IA
+            - KS
+            - KY
+            - LA
+            - ME
+            - MD
+            - MA
+            - MI
+            - MN
+            - MS
+            - MO
+            - MT
+            - NE
+            - NV
+            - NH
+            - NJ
+            - NM
+            - NY
+            - NC
+            - ND
+            - OH
+            - OK
+            - OR
+            - PA
+            - RI
+            - SC
+            - SD
+            - TN
+            - TX
+            - UT
+            - VT
+            - VA
+            - WA
+            - WV
+            - WI
+            - WY
+            - null
+        licenseNumber:
+          type: string
+          nullable: true
+        licenseDocObjectPath:
+          type: string
+          nullable: true
+        licenseUploadedAt:
+          type: string
+          nullable: true
+          format: date-time
+        insuranceDocObjectPath:
+          type: string
+          nullable: true
+        insuranceUploadedAt:
+          type: string
+          nullable: true
+          format: date-time
+        decision:
+          type: string
+          nullable: true
+          enum:
+            - verified
+            - rejected
+            - null
+        decisionAt:
+          type: string
+          nullable: true
+          format: date-time
+        decisionByAdminUid:
+          type: string
+          nullable: true
+        decisionNotes:
+          type: string
+          nullable: true
+      required:
+        - providerId
+        - role
+        - residentState
+        - specialty
+        - licenseBoardSupported
+        - defaultBoard
+        - altBoardsInState
+        - licenseBoardState
+        - licenseNumber
+        - licenseDocObjectPath
+        - licenseUploadedAt
+        - insuranceDocObjectPath
+        - insuranceUploadedAt
+        - decision
+        - decisionAt
+        - decisionByAdminUid
+        - decisionNotes
+    LicenseBoard:
+      type: object
+      nullable: true
+      properties:
+        state:
+          type: string
+          enum:
+            - AL
+            - AK
+            - AZ
+            - AR
+            - CA
+            - CO
+            - CT
+            - DE
+            - DC
+            - FL
+            - GA
+            - HI
+            - ID
+            - IL
+            - IN
+            - IA
+            - KS
+            - KY
+            - LA
+            - ME
+            - MD
+            - MA
+            - MI
+            - MN
+            - MS
+            - MO
+            - MT
+            - NE
+            - NV
+            - NH
+            - NJ
+            - NM
+            - NY
+            - NC
+            - ND
+            - OH
+            - OK
+            - OR
+            - PA
+            - RI
+            - SC
+            - SD
+            - TN
+            - TX
+            - UT
+            - VT
+            - VA
+            - WA
+            - WV
+            - WI
+            - WY
+        specialty:
+          type: string
+          enum:
+            - slp
+            - ot
+            - aba
+            - psychology
+            - other
+        boardName:
+          type: string
+        registerUrl:
+          type: string
+          format: uri
+        mode:
+          type: string
+          enum:
+            - api
+            - portal-only
+        hint:
+          type: string
+      required:
+        - state
+        - specialty
+        - boardName
+        - registerUrl
+        - mode
+    ProviderCredentialsError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
+    ProviderLicenseConfirmRequest:
+      type: object
+      properties:
+        objectPath:
+          type: string
+          minLength: 1
+          maxLength: 512
+        licenseNumber:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 64
+        licenseBoardState:
+          type: string
+          nullable: true
+          enum:
+            - AL
+            - AK
+            - AZ
+            - AR
+            - CA
+            - CO
+            - CT
+            - DE
+            - DC
+            - FL
+            - GA
+            - HI
+            - ID
+            - IL
+            - IN
+            - IA
+            - KS
+            - KY
+            - LA
+            - ME
+            - MD
+            - MA
+            - MI
+            - MN
+            - MS
+            - MO
+            - MT
+            - NE
+            - NV
+            - NH
+            - NJ
+            - NM
+            - NY
+            - NC
+            - ND
+            - OH
+            - OK
+            - OR
+            - PA
+            - RI
+            - SC
+            - SD
+            - TN
+            - TX
+            - UT
+            - VT
+            - VA
+            - WA
+            - WV
+            - WI
+            - WY
+            - null
+      required:
+        - objectPath
+    ProviderInsuranceConfirmRequest:
+      type: object
+      properties:
+        objectPath:
+          type: string
+          minLength: 1
+          maxLength: 512
+      required:
+        - objectPath
+    ProviderLicenseDecisionRequest:
+      type: object
+      properties:
+        decision:
+          type: string
+          enum:
+            - verified
+            - rejected
+        notes:
+          type: string
+          maxLength: 2000
+      required:
+        - decision
     ScreeningInitiateResponse:
       type: object
       properties:
@@ -509,6 +889,8 @@ components:
           type: string
           enum:
             - id-doc
+            - license-doc
+            - insurance-doc
       required:
         - kind
     StripeConnectWebhookAck:
@@ -1284,6 +1666,275 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/VerificationError"
+  /v1/providers/me/credentials:
+    get:
+      tags:
+        - verification
+      summary: Read the authenticated Provider's license + insurance credentials
+      description: Returns the per-state license-board context (board name, register
+        URL, hint) resolved from the resident state + specialty, plus the
+        current upload + decision state. Caregivers are rejected by the
+        provider-only role guard (403) — they never need a license; Checkr alone
+        suffices.
+      security:
+        - supabaseAccessToken: []
+      responses:
+        "200":
+          description: License + insurance credential state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentials"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentialsError"
+        "403":
+          description: Wrong role (caregiver / parent / admin)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentialsError"
+        "404":
+          description: Supply (provider) row not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentialsError"
+        "409":
+          description: Not a clinical Provider
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentialsError"
+  /v1/providers/me/credentials/license:
+    post:
+      tags:
+        - verification
+      summary: Record a completed Provider license-document upload
+      description: Called after the supply portal uploads a license certificate
+        through the signed-URL flow (POST /v1/uploads/signed-url with
+        kind=license-doc). The body carries the returned objectPath (validated
+        to the caller's license-doc namespace) plus optional licenseNumber and
+        licenseBoardState.
+      security:
+        - supabaseAccessToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderLicenseConfirmRequest"
+      responses:
+        "200":
+          description: License upload recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentials"
+        "400":
+          description: objectPath not scoped to this user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentialsError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentialsError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentialsError"
+        "404":
+          description: Supply (provider) row not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentialsError"
+        "409":
+          description: Not a clinical Provider
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentialsError"
+  /v1/providers/me/credentials/insurance:
+    post:
+      tags:
+        - verification
+      summary: Record a completed Provider liability-insurance COI upload
+      description: Called after the supply portal uploads a Certificate of Insurance
+        through the signed-URL flow (POST /v1/uploads/signed-url with
+        kind=insurance-doc). The body carries the returned objectPath, validated
+        to the caller's insurance-doc namespace.
+      security:
+        - supabaseAccessToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderInsuranceConfirmRequest"
+      responses:
+        "200":
+          description: Insurance upload recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentials"
+        "400":
+          description: objectPath not scoped to this user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentialsError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentialsError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentialsError"
+        "404":
+          description: Supply (provider) row not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentialsError"
+        "409":
+          description: Not a clinical Provider
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentialsError"
+  /v1/admin/providers/{providerId}/license-verification:
+    get:
+      tags:
+        - admin
+        - verification
+      summary: Admin — read a Provider's license-board context + uploaded docs +
+        decision
+      description: Surfaces the per-state license-board metadata (board name +
+        register URL + hint) so the admin can cross-check the uploaded license
+        number on the right portal, plus both uploaded doc paths and the current
+        decision audit fields. Admin role requires aal2+TOTP.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: providerId
+          in: path
+      responses:
+        "200":
+          description: Credential context for review
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentials"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentialsError"
+        "403":
+          description: Not an admin / TOTP required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentialsError"
+        "404":
+          description: Provider not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentialsError"
+        "409":
+          description: Not a clinical Provider
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentialsError"
+    post:
+      tags:
+        - admin
+        - verification
+      summary: Admin — record a license + insurance verification decision (verified |
+        rejected)
+      description: Admin manual verification flow (CONTEXT § Verification; PRD stories
+        43, 65; ADR-0009). On `verified`, stamps
+        provider_verifications.license_verified_at AND .insurance_verified_at =
+        now() (the single decision covers both clinical-credential gates),
+        advancing the Provider toward activation. On `rejected`, stamps the
+        terminal rejected_at with the notes mirrored into rejection_reason. The
+        decision (+ actor uid + timestamp + notes) is recorded on
+        specialist_credentials as the audit trail.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: providerId
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderLicenseDecisionRequest"
+      responses:
+        "200":
+          description: Decision recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentials"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentialsError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentialsError"
+        "403":
+          description: Not an admin / TOTP required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentialsError"
+        "404":
+          description: Provider not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentialsError"
+        "409":
+          description: Not a clinical Provider
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentialsError"
   /v1/providers/me/verification/screening/initiate:
     post:
       tags:
@@ -1346,7 +1997,9 @@ paths:
         client PUTs the file with
         supabase.storage.from(bucket).uploadToSignedUrl(objectPath, token,
         file), then confirms the objectPath to the owning resource (id-doc →
-        POST /v1/providers/me/verification/id-doc). Supply-scoped (caregiver /
+        POST /v1/providers/me/verification/id-doc; license-doc → POST
+        /v1/providers/me/credentials/license; insurance-doc → POST
+        /v1/providers/me/credentials/insurance). Supply-scoped (caregiver /
         provider).
       security:
         - supabaseAccessToken: []

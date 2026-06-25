@@ -6,6 +6,7 @@ import { registerAdminStripeTaxRoutes } from './routes/admin/stripe-tax.ts';
 import { registerAuthRoutes } from './routes/auth.ts';
 import { registerCaregiverConnectRoutes } from './routes/caregiver-connect.ts';
 import { registerHealthRoutes } from './routes/health.ts';
+import { registerProviderCredentialsRoutes } from './routes/provider-credentials.ts';
 import { registerScreeningRoutes } from './routes/screening.ts';
 import { registerUploadRoutes } from './routes/uploads.ts';
 import { registerVerificationRoutes } from './routes/verification.ts';
@@ -91,6 +92,7 @@ export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerAuthRoutes(v1);
   registerCaregiverConnectRoutes(v1);
   registerVerificationRoutes(v1);
+  registerProviderCredentialsRoutes(v1);
   registerScreeningRoutes(v1);
   registerUploadRoutes(v1);
   registerStripeConnectWebhookRoutes(v1);
