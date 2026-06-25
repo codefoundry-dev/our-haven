@@ -9,9 +9,9 @@ import {
 } from '@our-haven/domain';
 import {
   isUsState,
-  PROVIDER_KINDS,
+  SUPPLY_ROLES,
   US_STATES_50_PLUS_DC,
-  type ProviderKind,
+  type SupplyRole,
   type UsState,
 } from '@our-haven/shared';
 
@@ -19,7 +19,7 @@ const VerificationStateEnum = z.enum(VERIFICATION_STATES);
 
 const VerificationResponse = z.object({
   state: VerificationStateEnum,
-  kind: z.enum(PROVIDER_KINDS),
+  role: z.enum(SUPPLY_ROLES),
   residentState: z.enum(US_STATES_50_PLUS_DC),
   licenseBoardSupported: z.boolean(),
   facts: z.object({
@@ -50,7 +50,7 @@ const ErrorResponse = z.object({
 interface ProviderRow {
   id: string;
   uid: string;
-  kind: 'caregiver' | 'specialist';
+  role: 'caregiver' | 'provider';
   state: string;
 }
 
@@ -104,7 +104,7 @@ function buildResponse(
   supportedStates: ReadonlySet<UsState>,
   connect: ConnectAccountSnapshot | null,
 ) {
-  const kind = provider.kind as ProviderKind;
+  const role = provider.role as SupplyRole;
   const residentState = provider.state as UsState;
   const facts: VerificationFacts = {
     emailConfirmedAt: asDate(row.email_confirmed_at),
@@ -117,16 +117,16 @@ function buildResponse(
     rejectedAt: asDate(row.rejected_at),
   };
   const state = computeVerificationState({
-    kind,
+    role,
     state: residentState,
     supportedStates,
     facts,
   });
   return {
     state,
-    kind,
+    role,
     residentState,
-    licenseBoardSupported: kind === 'caregiver' ? true : supportedStates.has(residentState),
+    licenseBoardSupported: role === 'caregiver' ? true : supportedStates.has(residentState),
     facts: {
       emailConfirmedAt: toIso(facts.emailConfirmedAt),
       phoneConfirmedAt: toIso(facts.phoneConfirmedAt),
@@ -150,7 +150,7 @@ export const verificationRoutes: FastifyPluginAsyncZod = async (app) => {
   async function loadProvider(uid: string): Promise<ProviderRow | null> {
     const row = await app.deps.db
       .selectFrom('providers')
-      .select(['id', 'uid', 'kind', 'state'])
+      .select(['id', 'uid', 'role', 'state'])
       .where('uid', '=', uid)
       .executeTakeFirst();
     return row ? (row as ProviderRow) : null;
@@ -184,7 +184,7 @@ export const verificationRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     '/providers/me/verification',
     {
-      preHandler: app.requireAuth({ roles: ['provider'] }),
+      preHandler: app.requireAuth({ roles: ['caregiver', 'provider'] }),
       schema: {
         tags: ['providers'],
         summary: 'Read the authenticated Provider\'s verification state + checklist facts',
@@ -218,7 +218,7 @@ export const verificationRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
     '/providers/me/verification/phone-confirm',
     {
-      preHandler: app.requireAuth({ roles: ['provider'] }),
+      preHandler: app.requireAuth({ roles: ['caregiver', 'provider'] }),
       schema: {
         tags: ['providers'],
         summary: 'Mirror Supabase phone confirmation into the verification facts',
@@ -269,7 +269,7 @@ export const verificationRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
     '/providers/me/verification/id-doc',
     {
-      preHandler: app.requireAuth({ roles: ['provider'] }),
+      preHandler: app.requireAuth({ roles: ['caregiver', 'provider'] }),
       schema: {
         tags: ['providers'],
         summary: 'Record a completed ID-document upload',

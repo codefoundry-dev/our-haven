@@ -10,6 +10,7 @@ import { buildApp } from './app.ts';
 import { loadEnv } from './config/env.ts';
 import { createDb } from './db/kysely.ts';
 import { mountUnderSlug } from './edge.ts';
+import { initSupabase } from './supabase/admin.ts';
 
 // Build the handler once at module scope (warm-isolate reuse). Supabase keeps
 // the function slug (`api`) in the request path, so mount the app under `/api`
@@ -17,7 +18,8 @@ import { mountUnderSlug } from './edge.ts';
 function boot(): (req: Request) => Response | Promise<Response> {
   const env = loadEnv(Deno.env.toObject());
   const db = createDb(env);
-  return mountUnderSlug(buildApp({ env, db }), 'api').fetch;
+  const supabase = initSupabase(env);
+  return mountUnderSlug(buildApp({ env, db, supabase }), 'api').fetch;
 }
 
 // A boot failure is almost always a missing/invalid secret (DATABASE_URL,

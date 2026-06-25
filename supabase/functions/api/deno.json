@@ -3,6 +3,7 @@
     "hono": "npm:hono@4",
     "hono/": "npm:/hono@4/",
     "@hono/zod-openapi": "npm:@hono/zod-openapi@1",
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@2",
     "zod": "npm:zod@4",
     "jose": "npm:jose@5",
     "kysely": "npm:kysely@0.29",

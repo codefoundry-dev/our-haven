@@ -43,7 +43,7 @@ const ErrorResponse = z.object({
 interface ProviderRow {
   id: string;
   uid: string;
-  kind: 'caregiver' | 'specialist';
+  role: 'caregiver' | 'provider';
   state: string;
 }
 
@@ -51,7 +51,7 @@ export const screeningRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
     '/providers/me/verification/screening/initiate',
     {
-      preHandler: app.requireAuth({ roles: ['provider'] }),
+      preHandler: app.requireAuth({ roles: ['caregiver', 'provider'] }),
       schema: {
         tags: ['screening'],
         summary: 'Initiate the $35 Stripe charge + create a background-screening row',
@@ -73,7 +73,7 @@ export const screeningRoutes: FastifyPluginAsyncZod = async (app) => {
 
       const provider = (await app.deps.db
         .selectFrom('providers')
-        .select(['id', 'uid', 'kind', 'state'])
+        .select(['id', 'uid', 'role', 'state'])
         .where('uid', '=', principal.uid)
         .executeTakeFirst()) as ProviderRow | undefined;
       if (!provider) {

@@ -198,7 +198,16 @@ async function buildAppWithRoutes(deps: AppDeps) {
 }
 
 async function adminToken(): Promise<string> {
-  return mintAccessToken({ sub: 'admin-1', appMetadata: { role: 'admin' } });
+  // Admin sessions are always aal2 + TOTP (OH-175 — admin TOTP is mandatory
+  // server-side on every request). A plain admin token is rejected at the auth
+  // layer with `admin_totp_required`.
+  const now = Math.floor(Date.now() / 1000);
+  return mintAccessToken({
+    sub: 'admin-1',
+    appMetadata: { role: 'admin' },
+    aal: 'aal2',
+    amr: [{ method: 'mfa/totp', timestamp: now }],
+  });
 }
 
 describe('POST /v1/admin/stripe-tax/preview-calculation', () => {

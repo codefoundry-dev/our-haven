@@ -6,26 +6,29 @@ import {
   AVAILABILITY_BANDS,
   AVAILABILITY_DAYS,
   AVAILABILITY_NOTE_MAX_CHARS,
+  CAREGIVER_CATEGORIES,
   normaliseAvailabilityGrid,
+  SUPPLY_ROLES,
   US_STATES_50_PLUS_DC,
   type AvailabilityBand,
   type AvailabilityDay,
   type AvailabilityGrid,
   type CaregiverCategory,
+  type SupplyRole,
   type UsState,
 } from '@our-haven/shared';
 
 /**
- * Provider profile editor surface (OH-109) — backs the web portal's
- * profile + availability pages.
+ * Provider profile editor surface (OH-109) — backs the supply onboarding +
+ * profile + availability pages (any supply role: caregiver | provider).
  *
  * Conditional fields:
  *   - per_child_surcharge_cents → Babysitter / Nanny only (PRD story 47).
  *   - w10_tax_credit_friendly   → Babysitter / Nanny only (PRD § CDCTC).
  *
- * Tutor / Specialist Bookings are single-child, so a multi-child surcharge is
- * not meaningful. Specialists publish a per-session rate; Caregivers an
- * hourly rate — the unit is implied by `kind` and rendered on the client.
+ * Tutor + Provider (clinical) Bookings are single-child, so a multi-child
+ * surcharge is not meaningful. Providers publish a per-session rate; Caregivers
+ * an hourly rate — the unit is implied by `role` and rendered on the client.
  */
 
 const AvailabilityBandFlags = z
@@ -57,8 +60,8 @@ const StateRegisteredHomeChildcareBadgeSchema = z.object({
 
 const ProfileResponse = z.object({
   providerId: z.uuid(),
-  kind: z.enum(['caregiver', 'specialist']),
-  caregiverCategory: z.enum(['babysitter', 'tutor', 'nanny']).nullable(),
+  role: z.enum(SUPPLY_ROLES),
+  categories: z.array(z.enum(CAREGIVER_CATEGORIES)).nullable(),
   specialty: z.enum(['slp', 'ot', 'aba', 'psychology', 'other']).nullable(),
   displayName: z.string().nullable(),
   headline: z.string().nullable(),
@@ -110,8 +113,8 @@ const ErrorResponse = z.object({
 interface ProviderRow {
   id: string;
   uid: string;
-  kind: 'caregiver' | 'specialist';
-  caregiver_category: string | null;
+  role: 'caregiver' | 'provider';
+  categories: string[] | null;
   specialty: string | null;
 }
 
@@ -158,12 +161,14 @@ interface ProfileRow {
   w10_tax_credit_friendly: boolean;
 }
 
-function isMultiChildCategory(category: string | null): boolean {
-  return category === 'babysitter' || category === 'nanny';
+/** Babysitter / Nanny Caregivers are the only multi-child (per-child surcharge + W-10) eligible supply. */
+function isMultiChildCaregiver(provider: ProviderRow): boolean {
+  const cats = provider.categories ?? [];
+  return provider.role === 'caregiver' && (cats.includes('babysitter') || cats.includes('nanny'));
 }
 
-function rateUnitFor(kind: 'caregiver' | 'specialist'): 'hour' | 'session' {
-  return kind === 'specialist' ? 'session' : 'hour';
+function rateUnitFor(role: 'caregiver' | 'provider'): 'hour' | 'session' {
+  return role === 'provider' ? 'session' : 'hour';
 }
 
 function toResponse(
@@ -171,18 +176,12 @@ function toResponse(
   row: ProfileRow,
   registration: HomeChildcareRegistrationRow | null,
 ) {
-  const eligible = provider.kind === 'caregiver' && isMultiChildCategory(provider.caregiver_category);
+  const eligible = isMultiChildCaregiver(provider);
   return {
     providerId: provider.id,
-    kind: provider.kind,
-    caregiverCategory: provider.caregiver_category as CaregiverCategory | null,
-    specialty: provider.specialty as
-      | 'slp'
-      | 'ot'
-      | 'aba'
-      | 'psychology'
-      | 'other'
-      | null,
+    role: provider.role as SupplyRole,
+    categories: provider.categories as CaregiverCategory[] | null,
+    specialty: provider.specialty as 'slp' | 'ot' | 'aba' | 'psychology' | 'other' | null,
     displayName: row.display_name,
     headline: row.headline,
     bio: row.bio,
@@ -195,7 +194,7 @@ function toResponse(
     availabilityNote: row.availability_note,
     paused: row.paused,
     w10TaxCreditFriendly: row.w10_tax_credit_friendly,
-    rateUnit: rateUnitFor(provider.kind),
+    rateUnit: rateUnitFor(provider.role),
     multiChildSurchargeEligible: eligible,
     w10Eligible: eligible,
     stateRegisteredHomeChildcareBadge: eligible ? badgeFromRegistration(registration) : null,
@@ -210,7 +209,7 @@ interface CategoryGateError {
 }
 
 function checkCategoryGates(provider: ProviderRow, body: PatchBody): CategoryGateError | null {
-  const eligible = provider.kind === 'caregiver' && isMultiChildCategory(provider.caregiver_category);
+  const eligible = isMultiChildCaregiver(provider);
   if (!eligible) {
     if (body.perChildSurchargeCents !== undefined && body.perChildSurchargeCents !== null) {
       return {
@@ -254,7 +253,7 @@ export const providerProfileRoutes: FastifyPluginAsyncZod = async (app) => {
   async function loadProvider(uid: string): Promise<ProviderRow | null> {
     const row = await app.deps.db
       .selectFrom('providers')
-      .select(['id', 'uid', 'kind', 'caregiver_category', 'specialty'])
+      .select(['id', 'uid', 'role', 'categories', 'specialty'])
       .where('uid', '=', uid)
       .executeTakeFirst();
     return row ? (row as ProviderRow) : null;
@@ -290,12 +289,12 @@ export const providerProfileRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     '/providers/me/profile',
     {
-      preHandler: app.requireAuth({ roles: ['provider'] }),
+      preHandler: app.requireAuth({ roles: ['caregiver', 'provider'] }),
       schema: {
         tags: ['providers'],
-        summary: "Read the authenticated Provider's public-profile editor state",
+        summary: "Read the authenticated supply account's public-profile editor state",
         description:
-          'Returns the Provider profile fields edited on the web portal — published rate, optional per-child surcharge (Babysitter/Nanny only), availability summary grid + note + paused flag, W-10 self-attestation toggle, bio, languages, specialty tags, photo. Creates an empty row on first read so the editor always has a target.',
+          'Returns the profile fields edited on the supply onboarding surface — published rate, optional per-child surcharge (Babysitter/Nanny only), availability summary grid + note + paused flag, W-10 self-attestation toggle, bio, languages, specialty tags, photo. Creates an empty row on first read so the editor always has a target.',
         security: [{ supabaseAccessToken: [] }],
         response: {
           200: ProfileResponse,
@@ -310,7 +309,7 @@ export const providerProfileRoutes: FastifyPluginAsyncZod = async (app) => {
       const provider = await loadProvider(principal.uid);
       if (!provider) {
         reply.code(404);
-        return { error: 'provider_not_found', reason: 'create a Provider row first (POST /v1/providers)' };
+        return { error: 'provider_not_found', reason: 'create a supply row first (POST /v1/providers)' };
       }
       const row = await loadOrCreateProfile(provider.id);
       const registration = await loadHomeChildcareRegistration(provider.id);
@@ -321,12 +320,12 @@ export const providerProfileRoutes: FastifyPluginAsyncZod = async (app) => {
   app.patch(
     '/providers/me/profile',
     {
-      preHandler: app.requireAuth({ roles: ['provider'] }),
+      preHandler: app.requireAuth({ roles: ['caregiver', 'provider'] }),
       schema: {
         tags: ['providers'],
-        summary: 'Update the authenticated Provider\'s public-profile editor state',
+        summary: "Update the authenticated supply account's public-profile editor state",
         description:
-          'Partial update — any field omitted is left untouched. Per-child surcharge and W-10 toggle are rejected with 400 unless the Provider is a Babysitter or Nanny (kind=caregiver + caregiver_category in [babysitter,nanny]). Availability grid is normalised: only true cells are persisted.',
+          'Partial update — any field omitted is left untouched. Per-child surcharge and W-10 toggle are rejected with 400 unless the account is a Babysitter or Nanny (role=caregiver + categories includes babysitter|nanny). Availability grid is normalised: only true cells are persisted.',
         security: [{ supabaseAccessToken: [] }],
         body: ProfilePatchRequest,
         response: {
@@ -343,7 +342,7 @@ export const providerProfileRoutes: FastifyPluginAsyncZod = async (app) => {
       const provider = await loadProvider(principal.uid);
       if (!provider) {
         reply.code(404);
-        return { error: 'provider_not_found', reason: 'create a Provider row first (POST /v1/providers)' };
+        return { error: 'provider_not_found', reason: 'create a supply row first (POST /v1/providers)' };
       }
 
       const body = req.body;

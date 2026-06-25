@@ -34,6 +34,7 @@
   },
   "devDependencies": {
     "@hono/zod-openapi": "^1.4.0",
+    "@supabase/supabase-js": "^2.45.0",
     "@types/node": "^22.10.0",
     "hono": "^4.10.0",
     "jose": "^5.9.0",

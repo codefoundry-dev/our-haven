@@ -6,7 +6,13 @@ import {
   isHomeChildcareLicenseBoardLaunchState,
   type HomeChildcareLicenseBoard,
 } from '@our-haven/domain';
-import { US_STATES_50_PLUS_DC, type UsState } from '@our-haven/shared';
+import {
+  CAREGIVER_CATEGORIES,
+  SUPPLY_ROLES,
+  US_STATES_50_PLUS_DC,
+  type CaregiverCategory,
+  type UsState,
+} from '@our-haven/shared';
 
 /**
  * Optional "State-registered home childcare" credential surface (OH-108).
@@ -22,17 +28,17 @@ import { US_STATES_50_PLUS_DC, type UsState } from '@our-haven/shared';
  * public profile shows the "State-registered home childcare" badge naming the
  * specific state agency.
  *
- * Unlike the Specialist license flow (OH-107), this credential is **purely
- * optional** — it never updates `provider_verifications` and never gates
- * activation. The Verification state machine ignores the decision entirely.
+ * Unlike the clinical Provider license flow (OH-107), this credential is
+ * **purely optional** — it never updates `provider_verifications` and never
+ * gates activation. The Verification state machine ignores the decision.
  *
- * Eligibility:
- *   - kind=caregiver AND caregiver_category IN ('babysitter','nanny')  → allowed
- *   - anything else (Tutor, Specialist)                                → 409
+ * Eligibility (enforced by the `caregiver` role guard + a categories check):
+ *   - role=caregiver AND categories includes 'babysitter' or 'nanny'  → allowed
+ *   - Tutor-only Caregivers                                           → 409
+ *   - Providers (clinical tier)                                       → 403 (role guard)
  *
- * Both endpoint pairs return 409 for ineligible Providers because exposing
- * upload affordances to Tutors/Specialists would mis-signal that the badge is
- * applicable to them.
+ * Caregivers who are Tutor-only get 409 because exposing the upload affordance
+ * to them would mis-signal that the badge is applicable.
  */
 
 const StateEnum = z.enum(US_STATES_50_PLUS_DC);
@@ -47,8 +53,8 @@ const HomeChildcareBoardSchema = z.object({
 
 const RegistrationResponse = z.object({
   providerId: z.uuid(),
-  kind: z.enum(['caregiver', 'specialist']),
-  caregiverCategory: z.enum(['babysitter', 'tutor', 'nanny']).nullable(),
+  role: z.enum(SUPPLY_ROLES),
+  categories: z.array(z.enum(CAREGIVER_CATEGORIES)).nullable(),
   residentState: StateEnum,
   /** Whether the slate covers the Provider's resident state. */
   homeChildcareBoardSupported: z.boolean(),
@@ -87,8 +93,8 @@ const ErrorResponse = z.object({
 interface ProviderRow {
   id: string;
   uid: string;
-  kind: 'caregiver' | 'specialist';
-  caregiver_category: string | null;
+  role: 'caregiver' | 'provider';
+  categories: string[] | null;
   specialty: string | null;
   state: string;
 }
@@ -115,10 +121,8 @@ function toIso(value: Date | null): string | null {
 }
 
 function isEligible(provider: ProviderRow): boolean {
-  return (
-    provider.kind === 'caregiver' &&
-    (provider.caregiver_category === 'babysitter' || provider.caregiver_category === 'nanny')
-  );
+  const cats = provider.categories ?? [];
+  return provider.role === 'caregiver' && (cats.includes('babysitter') || cats.includes('nanny'));
 }
 
 function buildResponse(provider: ProviderRow, row: RegistrationRow) {
@@ -126,8 +130,8 @@ function buildResponse(provider: ProviderRow, row: RegistrationRow) {
   const board: HomeChildcareLicenseBoard | null = findHomeChildcareLicenseBoard(residentState);
   return {
     providerId: provider.id,
-    kind: provider.kind,
-    caregiverCategory: provider.caregiver_category as 'babysitter' | 'tutor' | 'nanny' | null,
+    role: provider.role,
+    categories: provider.categories as CaregiverCategory[] | null,
     residentState,
     homeChildcareBoardSupported: isHomeChildcareLicenseBoardLaunchState(residentState),
     board,
@@ -145,7 +149,7 @@ export const homeChildcareRegistrationRoutes: FastifyPluginAsyncZod = async (app
   async function loadProviderByUid(uid: string): Promise<ProviderRow | null> {
     const row = await app.deps.db
       .selectFrom('providers')
-      .select(['id', 'uid', 'kind', 'caregiver_category', 'specialty', 'state'])
+      .select(['id', 'uid', 'role', 'categories', 'specialty', 'state'])
       .where('uid', '=', uid)
       .executeTakeFirst();
     return row ? (row as ProviderRow) : null;
@@ -154,7 +158,7 @@ export const homeChildcareRegistrationRoutes: FastifyPluginAsyncZod = async (app
   async function loadProviderById(providerId: string): Promise<ProviderRow | null> {
     const row = await app.deps.db
       .selectFrom('providers')
-      .select(['id', 'uid', 'kind', 'caregiver_category', 'specialty', 'state'])
+      .select(['id', 'uid', 'role', 'categories', 'specialty', 'state'])
       .where('id', '=', providerId)
       .executeTakeFirst();
     return row ? (row as ProviderRow) : null;
@@ -180,12 +184,12 @@ export const homeChildcareRegistrationRoutes: FastifyPluginAsyncZod = async (app
   app.get(
     '/providers/me/home-childcare-registration',
     {
-      preHandler: app.requireAuth({ roles: ['provider'] }),
+      preHandler: app.requireAuth({ roles: ['caregiver'] }),
       schema: {
         tags: ['providers'],
         summary: "Read the authenticated Caregiver's state home-childcare registration context",
         description:
-          'Returns the per-state home-childcare-licensing-agency context (agency name, programme name, register URL, admin hint) plus the current upload + admin-decision state. Eligibility: kind=caregiver AND caregiver_category in [babysitter, nanny] — Tutors and Specialists get 409. When the Provider\'s state is outside the launch slate, `homeChildcareBoardSupported` is false and `board` is null; the upload affordance should be hidden client-side.',
+          "Returns the per-state home-childcare-licensing-agency context (agency name, programme name, register URL, admin hint) plus the current upload + admin-decision state. Eligibility: role=caregiver AND categories includes babysitter or nanny — Tutor-only Caregivers get 409; Providers (clinical) are rejected by the role guard (403). When the resident state is outside the launch slate, `homeChildcareBoardSupported` is false and `board` is null; the upload affordance should be hidden client-side.",
         security: [{ supabaseAccessToken: [] }],
         response: {
           200: RegistrationResponse,
@@ -218,12 +222,12 @@ export const homeChildcareRegistrationRoutes: FastifyPluginAsyncZod = async (app
   app.post(
     '/providers/me/home-childcare-registration',
     {
-      preHandler: app.requireAuth({ roles: ['provider'] }),
+      preHandler: app.requireAuth({ roles: ['caregiver'] }),
       schema: {
         tags: ['providers'],
         summary: 'Record a completed state home-childcare-registration certificate upload',
         description:
-          'Called after the Provider portal uploads the state registration certificate through the signed-URL flow (POST /v1/uploads/signed-url with kind=state-childcare-registration). The body carries the returned objectPath; the server validates the objectPath is scoped to the caller and records the upload along with the Provider\'s resident state at upload time (so the badge keeps naming the correct agency if the Provider later moves).',
+          "Called after the supply portal uploads the state registration certificate through the signed-URL flow (POST /v1/uploads/signed-url with kind=state-childcare-registration). The body carries the returned objectPath; the server validates the objectPath is scoped to the caller and records the upload along with the Caregiver's resident state at upload time (so the badge keeps naming the correct agency if the Caregiver later moves).",
         security: [{ supabaseAccessToken: [] }],
         body: RegistrationConfirmRequest,
         response: {
@@ -283,7 +287,7 @@ export const homeChildcareRegistrationRoutes: FastifyPluginAsyncZod = async (app
       preHandler: app.requireAuth({ roles: ['admin'] }),
       schema: {
         tags: ['providers'],
-        summary: 'Admin — read a Caregiver Provider\'s home-childcare-registration context + uploaded cert + decision',
+        summary: "Admin — read a Caregiver's home-childcare-registration context + uploaded cert + decision",
         description:
           'Surfaces the per-state home-childcare-licensing-agency metadata (agency name + register URL + hint) so the admin can cross-check the uploaded certificate on the right state portal. Same response shape as the Provider-side endpoint.',
         security: [{ supabaseAccessToken: [] }],
@@ -320,7 +324,7 @@ export const homeChildcareRegistrationRoutes: FastifyPluginAsyncZod = async (app
         tags: ['providers'],
         summary: 'Admin — record a home-childcare-registration decision (verified | rejected)',
         description:
-          'Admin manual verification flow per CONTEXT.md § CDCTC-eligibility & state childcare licensure. On `verified` the Provider\'s public profile gains the "State-registered home childcare" badge naming the specific state agency. On `rejected` the badge stays off. This decision is decoupled from the Verification state machine — it never blocks activation.',
+          'Admin manual verification flow per CONTEXT.md § CDCTC-eligibility & state childcare licensure. On `verified` the Caregiver\'s public profile gains the "State-registered home childcare" badge naming the specific state agency. On `rejected` the badge stays off. This decision is decoupled from the Verification state machine — it never blocks activation.',
         security: [{ supabaseAccessToken: [] }],
         params: ProviderIdParam,
         body: AdminDecisionRequest,

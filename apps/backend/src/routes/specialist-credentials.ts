@@ -7,12 +7,18 @@ import {
   isLicenseBoardLaunchState,
   type LicenseBoard,
 } from '@our-haven/domain';
-import { SPECIALTIES, US_STATES_50_PLUS_DC, type Specialty, type UsState } from '@our-haven/shared';
+import {
+  SPECIALTIES,
+  SUPPLY_ROLES,
+  US_STATES_50_PLUS_DC,
+  type Specialty,
+  type UsState,
+} from '@our-haven/shared';
 
 /**
- * Specialist license + insurance credential surface (OH-107).
+ * Provider (clinical tier) license + insurance credential surface (OH-107).
  *
- * Provider-side endpoints let a Specialist see their issuing state board
+ * Provider-side endpoints let a clinical Provider see their issuing state board
  * (boards-by-(state, specialty) come from `@our-haven/domain`'s license-board
  * slate) and upload the license certificate + insurance COI.
  *
@@ -22,11 +28,10 @@ import { SPECIALTIES, US_STATES_50_PLUS_DC, type Specialty, type UsState } from 
  * `provider_verifications.license_verified_at` timestamp is updated, which the
  * pure-TS Verification state machine reads to advance the Provider.
  *
- * Caregivers (kind=caregiver) get HTTP 409 from these endpoints — they never
- * need a license; Checkr alone is sufficient.
+ * Caregivers (role=caregiver) are rejected by the provider-only role guard
+ * (403) — they never need a license; Checkr alone is sufficient.
  */
 
-const Kind = z.enum(['caregiver', 'specialist']);
 const SpecialtyEnum = z.enum(SPECIALTIES);
 const StateEnum = z.enum(US_STATES_50_PLUS_DC);
 
@@ -41,13 +46,13 @@ const LicenseBoardSchema = z.object({
 
 const CredentialsResponse = z.object({
   providerId: z.uuid(),
-  kind: Kind,
+  role: z.enum(SUPPLY_ROLES),
   residentState: StateEnum,
   specialty: SpecialtyEnum.nullable(),
   licenseBoardSupported: z.boolean(),
   defaultBoard: LicenseBoardSchema.nullable(),
   /** Alternate boards in the resident state (one per specialty) — useful when
-   *  a Specialist with `specialty=other` needs to pick which board issued them. */
+   *  a Provider with `specialty=other` needs to pick which board issued them. */
   altBoardsInState: z.array(LicenseBoardSchema),
   licenseBoardState: StateEnum.nullable(),
   licenseNumber: z.string().nullable(),
@@ -92,8 +97,7 @@ const ErrorResponse = z.object({
 interface ProviderRow {
   id: string;
   uid: string;
-  kind: 'caregiver' | 'specialist';
-  caregiver_category: string | null;
+  role: 'caregiver' | 'provider';
   specialty: string | null;
   state: string;
 }
@@ -130,7 +134,7 @@ function buildResponse(provider: ProviderRow, row: CredentialsRow) {
   const altBoards = [...boardsForState(residentState)];
   return {
     providerId: provider.id,
-    kind: provider.kind,
+    role: provider.role,
     residentState,
     specialty,
     licenseBoardSupported: isLicenseBoardLaunchState(residentState),
@@ -153,7 +157,7 @@ export const specialistCredentialsRoutes: FastifyPluginAsyncZod = async (app) =>
   async function loadProviderByUid(uid: string): Promise<ProviderRow | null> {
     const row = await app.deps.db
       .selectFrom('providers')
-      .select(['id', 'uid', 'kind', 'caregiver_category', 'specialty', 'state'])
+      .select(['id', 'uid', 'role', 'specialty', 'state'])
       .where('uid', '=', uid)
       .executeTakeFirst();
     return row ? (row as ProviderRow) : null;
@@ -162,7 +166,7 @@ export const specialistCredentialsRoutes: FastifyPluginAsyncZod = async (app) =>
   async function loadProviderById(providerId: string): Promise<ProviderRow | null> {
     const row = await app.deps.db
       .selectFrom('providers')
-      .select(['id', 'uid', 'kind', 'caregiver_category', 'specialty', 'state'])
+      .select(['id', 'uid', 'role', 'specialty', 'state'])
       .where('id', '=', providerId)
       .executeTakeFirst();
     return row ? (row as ProviderRow) : null;
@@ -191,9 +195,9 @@ export const specialistCredentialsRoutes: FastifyPluginAsyncZod = async (app) =>
       preHandler: app.requireAuth({ roles: ['provider'] }),
       schema: {
         tags: ['providers'],
-        summary: "Read the authenticated Specialist's license + insurance credentials",
+        summary: "Read the authenticated Provider's license + insurance credentials",
         description:
-          'Returns the per-state license-board context (board name, register URL, hint) plus the current upload + decision state for the Specialist. Caregivers (kind=caregiver) get 409 — they never need a license.',
+          'Returns the per-state license-board context (board name, register URL, hint) plus the current upload + decision state for the clinical Provider. Caregivers are rejected by the provider-only role guard (403) — they never need a license.',
         security: [{ supabaseAccessToken: [] }],
         response: {
           200: CredentialsResponse,
@@ -211,11 +215,11 @@ export const specialistCredentialsRoutes: FastifyPluginAsyncZod = async (app) =>
         reply.code(404);
         return { error: 'provider_not_found' };
       }
-      if (provider.kind !== 'specialist') {
+      if (provider.role !== 'provider') {
         reply.code(409);
         return {
           error: 'license_not_applicable',
-          reason: 'license verification is only required for Specialists',
+          reason: 'license verification is only required for clinical Providers',
         };
       }
       const row = await loadOrCreateCredentials(provider.id);
@@ -229,9 +233,9 @@ export const specialistCredentialsRoutes: FastifyPluginAsyncZod = async (app) =>
       preHandler: app.requireAuth({ roles: ['provider'] }),
       schema: {
         tags: ['providers'],
-        summary: 'Record a completed Specialist license-document upload',
+        summary: 'Record a completed Provider license-document upload',
         description:
-          'Called after the Provider portal uploads a license certificate through the signed-URL flow (POST /v1/uploads/signed-url with kind=license-doc). The body carries the returned objectPath plus optional licenseNumber and licenseBoardState. The server validates the objectPath is scoped to the caller and records the upload + metadata.',
+          'Called after the supply portal uploads a license certificate through the signed-URL flow (POST /v1/uploads/signed-url with kind=license-doc). The body carries the returned objectPath plus optional licenseNumber and licenseBoardState. The server validates the objectPath is scoped to the caller and records the upload + metadata.',
         security: [{ supabaseAccessToken: [] }],
         body: LicenseConfirmRequest,
         response: {
@@ -251,7 +255,7 @@ export const specialistCredentialsRoutes: FastifyPluginAsyncZod = async (app) =>
         reply.code(404);
         return { error: 'provider_not_found' };
       }
-      if (provider.kind !== 'specialist') {
+      if (provider.role !== 'provider') {
         reply.code(409);
         return { error: 'license_not_applicable' };
       }
@@ -288,9 +292,9 @@ export const specialistCredentialsRoutes: FastifyPluginAsyncZod = async (app) =>
       preHandler: app.requireAuth({ roles: ['provider'] }),
       schema: {
         tags: ['providers'],
-        summary: 'Record a completed Specialist liability-insurance COI upload',
+        summary: 'Record a completed Provider liability-insurance COI upload',
         description:
-          'Called after the Provider portal uploads a Certificate of Insurance through the signed-URL flow (POST /v1/uploads/signed-url with kind=insurance-doc). Optional — encouraged but not required for activation.',
+          'Called after the supply portal uploads a Certificate of Insurance through the signed-URL flow (POST /v1/uploads/signed-url with kind=insurance-doc). Optional — encouraged but not required for activation.',
         security: [{ supabaseAccessToken: [] }],
         body: InsuranceConfirmRequest,
         response: {
@@ -310,7 +314,7 @@ export const specialistCredentialsRoutes: FastifyPluginAsyncZod = async (app) =>
         reply.code(404);
         return { error: 'provider_not_found' };
       }
-      if (provider.kind !== 'specialist') {
+      if (provider.role !== 'provider') {
         reply.code(409);
         return { error: 'license_not_applicable' };
       }
@@ -344,7 +348,7 @@ export const specialistCredentialsRoutes: FastifyPluginAsyncZod = async (app) =>
       preHandler: app.requireAuth({ roles: ['admin'] }),
       schema: {
         tags: ['providers'],
-        summary: 'Admin — read a Specialist Provider\'s license-board context + uploaded docs + decision',
+        summary: "Admin — read a clinical Provider's license-board context + uploaded docs + decision",
         description:
           'Surfaces the per-state license-board metadata (board name + register URL + hint) so the admin can cross-check the uploaded license number on the right portal. Returns the same shape as the Provider-side endpoint plus the admin decision audit fields.',
         security: [{ supabaseAccessToken: [] }],
@@ -364,7 +368,7 @@ export const specialistCredentialsRoutes: FastifyPluginAsyncZod = async (app) =>
         reply.code(404);
         return { error: 'provider_not_found' };
       }
-      if (provider.kind !== 'specialist') {
+      if (provider.role !== 'provider') {
         reply.code(409);
         return { error: 'license_not_applicable' };
       }
@@ -381,7 +385,7 @@ export const specialistCredentialsRoutes: FastifyPluginAsyncZod = async (app) =>
         tags: ['providers'],
         summary: 'Admin — record a license-verification decision (verified | rejected)',
         description:
-          'Admin manual verification flow per CONTEXT.md § Verification + ADR-0007 / OH-107. On `verified`, sets `provider_verifications.license_verified_at = now()`, which the Verification state machine reads to advance the Specialist toward `activated`. On `rejected`, sets `provider_verifications.rejected_at = now()` with the decision notes mirrored into rejection_reason.',
+          'Admin manual verification flow per CONTEXT.md § Verification + ADR-0007 / OH-107. On `verified`, sets `provider_verifications.license_verified_at = now()`, which the Verification state machine reads to advance the Provider toward `activated`. On `rejected`, sets `provider_verifications.rejected_at = now()` with the decision notes mirrored into rejection_reason.',
         security: [{ supabaseAccessToken: [] }],
         params: ProviderIdParam,
         body: AdminDecisionRequest,
@@ -401,7 +405,7 @@ export const specialistCredentialsRoutes: FastifyPluginAsyncZod = async (app) =>
         reply.code(404);
         return { error: 'provider_not_found' };
       }
-      if (provider.kind !== 'specialist') {
+      if (provider.role !== 'provider') {
         reply.code(409);
         return { error: 'license_not_applicable' };
       }
@@ -423,7 +427,7 @@ export const specialistCredentialsRoutes: FastifyPluginAsyncZod = async (app) =>
         .executeTakeFirstOrThrow();
 
       // Mirror into provider_verifications so the state machine advances.
-      // The verification row may not yet exist if the Specialist hasn't hit
+      // The verification row may not yet exist if the Provider hasn't hit
       // the verification GET; create it on demand.
       const existingVerif = await app.deps.db
         .selectFrom('provider_verifications')

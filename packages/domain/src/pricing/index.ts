@@ -13,8 +13,8 @@
  *     commission = round(subtotal × commissionBp / 10_000)
  *     payout     = subtotal - commission       ← Provider's payout
  *
- *   Per-session bookings (Specialists):
- *     subtotal   = agreedRateCents             ← Specialists are single-child;
+ *   Per-session bookings (Providers — clinical tier):
+ *     subtotal   = agreedRateCents             ← Providers are single-child;
  *                                                no per-child surcharge applies
  *     commission = round(subtotal × commissionBp / 10_000)
  *     payout     = subtotal - commission
@@ -31,7 +31,7 @@
  *   - parentChargeCents = baseCents + surchargeCents (hourly) or = agreedRateCents (per-session)
  *   - parentChargeCents = providerPayoutCents + platformCommissionCents
  *   - parentChargeCents ≥ providerPayoutCents (i.e. commissionCents ≥ 0)
- *   - Tutor and Specialist callers must pass childCount=1 + perChildSurchargeCents=0
+ *   - Tutor and Provider callers must pass childCount=1 + perChildSurchargeCents=0
  */
 
 import type { CaregiverCategory, Specialty } from '@our-haven/shared';
@@ -41,20 +41,20 @@ export type PricingBillingModel = (typeof PRICING_BILLING_MODELS)[number];
 
 /**
  * Caller-supplied category context, used only to gate `single-child` semantics
- * (Tutor and Specialist) without the calculator having to know the full
- * provider-kind discriminant.
+ * (Tutor and Provider) without the calculator having to know the full
+ * supply-role discriminant.
  */
 export const PRICING_CATEGORIES = [
   'babysitter',
   'tutor',
   'nanny',
-  'specialist',
+  'provider',
 ] as const;
 export type PricingCategory = (typeof PRICING_CATEGORIES)[number];
 
 const SINGLE_CHILD_CATEGORIES: ReadonlySet<PricingCategory> = new Set([
   'tutor',
-  'specialist',
+  'provider',
 ]);
 
 export const COMMISSION_BP_MAX = 10_000; // = 100%
@@ -96,16 +96,16 @@ export interface PricingResult {
 }
 
 /**
- * Convenience derivation for the Provider category from the canonical
- * `kind + (caregiver_category | specialty)` discriminant on the Provider
- * record. Handlers should call this rather than picking categories by hand.
+ * Convenience derivation for the pricing category from the flat supply role +
+ * (categories | specialty) discriminant on the Provider record (ADR-0011).
+ * Handlers should call this rather than picking categories by hand.
  */
 export function pricingCategoryFor(
-  kind: 'caregiver' | 'specialist',
+  role: 'caregiver' | 'provider',
   caregiverCategoryOrSpecialty: CaregiverCategory | Specialty,
 ): PricingCategory {
-  if (kind === 'specialist') return 'specialist';
-  // kind === 'caregiver' → caregiverCategoryOrSpecialty is a CaregiverCategory
+  if (role === 'provider') return 'provider';
+  // role === 'caregiver' → caregiverCategoryOrSpecialty is a CaregiverCategory
   return caregiverCategoryOrSpecialty as PricingCategory;
 }
 

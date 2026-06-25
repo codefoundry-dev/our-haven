@@ -22,7 +22,7 @@ function envForTest() {
 interface ProviderRow {
   id: string;
   uid: string;
-  kind: 'caregiver' | 'specialist';
+  role: 'caregiver' | 'provider';
   state: string;
 }
 
@@ -311,11 +311,11 @@ describe('POST /v1/providers/me/verification/screening/initiate', () => {
 
   it('400s when ID doc has not been uploaded', async () => {
     const stub = makeDbStub({
-      provider: { id: 'p-1', uid: 'u-1', kind: 'caregiver', state: 'NY' },
+      provider: { id: 'p-1', uid: 'u-1', role: 'caregiver', state: 'NY' },
       verification: { id_doc_uploaded_at: null },
     });
     const app = await buildAppWithScreening(makeDeps({ db: stub.db }));
-    const token = await mintAccessToken({ sub: 'u-1', appMetadata: { role: 'provider', kind: 'caregiver' } });
+    const token = await mintAccessToken({ sub: 'u-1', appMetadata: { role: 'caregiver' } });
     try {
       const res = await app.inject({
         method: 'POST',
@@ -331,14 +331,14 @@ describe('POST /v1/providers/me/verification/screening/initiate', () => {
 
   it('409s when screening already cleared', async () => {
     const stub = makeDbStub({
-      provider: { id: 'p-1', uid: 'u-1', kind: 'caregiver', state: 'NY' },
+      provider: { id: 'p-1', uid: 'u-1', role: 'caregiver', state: 'NY' },
       verification: {
         id_doc_uploaded_at: new Date('2026-05-25T00:00:00Z'),
         screening_passed_at: new Date('2026-05-26T00:00:00Z'),
       },
     });
     const app = await buildAppWithScreening(makeDeps({ db: stub.db }));
-    const token = await mintAccessToken({ sub: 'u-1', appMetadata: { role: 'provider', kind: 'caregiver' } });
+    const token = await mintAccessToken({ sub: 'u-1', appMetadata: { role: 'caregiver' } });
     try {
       const res = await app.inject({
         method: 'POST',
@@ -369,13 +369,13 @@ describe('POST /v1/providers/me/verification/screening/initiate', () => {
       raw_payload: {},
     };
     const stub = makeDbStub({
-      provider: { id: 'p-1', uid: 'u-1', kind: 'caregiver', state: 'NY' },
+      provider: { id: 'p-1', uid: 'u-1', role: 'caregiver', state: 'NY' },
       verification: { id_doc_uploaded_at: new Date('2026-05-25T00:00:00Z') },
       screening: existing,
       screeningsByProvider: [existing],
     });
     const app = await buildAppWithScreening(makeDeps({ db: stub.db }));
-    const token = await mintAccessToken({ sub: 'u-1', appMetadata: { role: 'provider', kind: 'caregiver' } });
+    const token = await mintAccessToken({ sub: 'u-1', appMetadata: { role: 'caregiver' } });
     try {
       const res = await app.inject({
         method: 'POST',
@@ -391,12 +391,12 @@ describe('POST /v1/providers/me/verification/screening/initiate', () => {
 
   it('creates a screening row + Stripe PaymentIntent and returns the client_secret', async () => {
     const stub = makeDbStub({
-      provider: { id: 'p-1', uid: 'u-1', kind: 'caregiver', state: 'NY' },
+      provider: { id: 'p-1', uid: 'u-1', role: 'caregiver', state: 'NY' },
       verification: { id_doc_uploaded_at: new Date('2026-05-25T00:00:00Z') },
     });
     const stripeStub = makeStripeStub({ paymentIntentId: 'pi_test_1' });
     const app = await buildAppWithScreening(makeDeps({ db: stub.db, stripe: stripeStub }));
-    const token = await mintAccessToken({ sub: 'u-1', appMetadata: { role: 'provider', kind: 'caregiver' } });
+    const token = await mintAccessToken({ sub: 'u-1', appMetadata: { role: 'caregiver' } });
     try {
       const res = await app.inject({
         method: 'POST',
@@ -461,7 +461,7 @@ describe('POST /v1/webhooks/stripe', () => {
       raw_payload: {},
     };
     const stub = makeDbStub({
-      provider: { id: 'p-1', uid: 'u-1', kind: 'caregiver', state: 'NY' },
+      provider: { id: 'p-1', uid: 'u-1', role: 'caregiver', state: 'NY' },
       verification: { id_doc_uploaded_at: new Date('2026-05-25T00:00:00Z') },
       screening: screeningRow,
     });
@@ -531,7 +531,7 @@ describe('POST /v1/webhooks/stripe', () => {
       raw_payload: {},
     };
     const stub = makeDbStub({
-      provider: { id: 'p-1', uid: 'u-1', kind: 'caregiver', state: 'NY' },
+      provider: { id: 'p-1', uid: 'u-1', role: 'caregiver', state: 'NY' },
       screening: screeningRow,
     });
     const stripeStub = makeStripeStub({
@@ -599,7 +599,7 @@ describe('POST /v1/webhooks/checkr', () => {
       raw_payload: {},
     };
     const stub = makeDbStub({
-      provider: { id: 'p-1', uid: 'u-1', kind: 'caregiver', state: 'NY' },
+      provider: { id: 'p-1', uid: 'u-1', role: 'caregiver', state: 'NY' },
       verification: { id_doc_uploaded_at: new Date('2026-05-25T00:00:00Z') },
       screening: screeningRow,
     });
@@ -650,7 +650,7 @@ describe('POST /v1/webhooks/checkr', () => {
       raw_payload: {},
     };
     const stub = makeDbStub({
-      provider: { id: 'p-1', uid: 'u-1', kind: 'caregiver', state: 'NY' },
+      provider: { id: 'p-1', uid: 'u-1', role: 'caregiver', state: 'NY' },
       verification: { id_doc_uploaded_at: new Date('2026-05-25T00:00:00Z') },
       screening: screeningRow,
     });

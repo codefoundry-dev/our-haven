@@ -36,7 +36,8 @@ async function buildTestApp(deps: AppDeps, opts?: RequireAuthOptions) {
   app.get('/probe', { preHandler: app.requireAuth(opts) }, async (req) => ({
     uid: req.principal!.uid,
     role: req.principal!.role,
-    kind: req.principal!.kind,
+    categories: req.principal!.categories,
+    specialty: req.principal!.specialty,
     secondFactor: req.principal!.secondFactor,
   }));
 
@@ -102,7 +103,12 @@ describe('auth plugin — requireAuth()', () => {
         headers: { authorization: `Bearer ${token}` },
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json()).toMatchObject({ uid: 'supabase-uid-123', role: 'parent', kind: null });
+      expect(res.json()).toMatchObject({
+        uid: 'supabase-uid-123',
+        role: 'parent',
+        categories: null,
+        specialty: null,
+      });
     } finally {
       await app.close();
     }
@@ -125,7 +131,7 @@ describe('auth plugin — requireAuth()', () => {
   });
 
   it('returns 403 when role mismatches', async () => {
-    const app = await buildTestApp(makeDeps(), { roles: ['admin'] });
+    const app = await buildTestApp(makeDeps(), { roles: ['caregiver'] });
     const token = await mintAccessToken({
       sub: 'supabase-uid-123',
       appMetadata: { role: 'parent' },
@@ -142,11 +148,11 @@ describe('auth plugin — requireAuth()', () => {
     }
   });
 
-  it('honors provider kind from app_metadata', async () => {
+  it('honors provider specialty from app_metadata', async () => {
     const app = await buildTestApp(makeDeps(), { roles: ['provider'] });
     const token = await mintAccessToken({
       sub: 'supabase-uid-123',
-      appMetadata: { role: 'provider', kind: 'specialist' },
+      appMetadata: { role: 'provider', specialty: 'slp' },
     });
     try {
       const res = await app.inject({
@@ -155,17 +161,17 @@ describe('auth plugin — requireAuth()', () => {
         headers: { authorization: `Bearer ${token}` },
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json()).toMatchObject({ role: 'provider', kind: 'specialist' });
+      expect(res.json()).toMatchObject({ role: 'provider', specialty: 'slp', categories: null });
     } finally {
       await app.close();
     }
   });
 
-  it('strips kind for non-provider roles', async () => {
-    const app = await buildTestApp(makeDeps());
+  it('honors caregiver categories from app_metadata', async () => {
+    const app = await buildTestApp(makeDeps(), { roles: ['caregiver'] });
     const token = await mintAccessToken({
       sub: 'supabase-uid-123',
-      appMetadata: { role: 'parent', kind: 'specialist' },
+      appMetadata: { role: 'caregiver', categories: ['babysitter', 'nanny'] },
     });
     try {
       const res = await app.inject({
@@ -174,7 +180,30 @@ describe('auth plugin — requireAuth()', () => {
         headers: { authorization: `Bearer ${token}` },
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json()).toMatchObject({ role: 'parent', kind: null });
+      expect(res.json()).toMatchObject({
+        role: 'caregiver',
+        categories: ['babysitter', 'nanny'],
+        specialty: null,
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('strips categories/specialty for roles that do not carry them', async () => {
+    const app = await buildTestApp(makeDeps());
+    const token = await mintAccessToken({
+      sub: 'supabase-uid-123',
+      appMetadata: { role: 'parent', categories: ['babysitter'], specialty: 'slp' },
+    });
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/probe',
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ role: 'parent', categories: null, specialty: null });
     } finally {
       await app.close();
     }
@@ -184,7 +213,7 @@ describe('auth plugin — requireAuth()', () => {
     const app = await buildTestApp(makeDeps());
     const token = await mintAccessToken({
       sub: 'supabase-uid-123',
-      appMetadata: { role: 'provider', kind: 'caregiver' },
+      appMetadata: { role: 'caregiver', categories: ['babysitter'] },
       aal: 'aal2',
       amr: [
         { method: 'password', timestamp: Math.floor(Date.now() / 1000) - 60 },
@@ -208,7 +237,7 @@ describe('auth plugin — requireAuth()', () => {
     const app = await buildTestApp(makeDeps());
     const token = await mintAccessToken({
       sub: 'supabase-uid-123',
-      appMetadata: { role: 'provider', kind: 'caregiver' },
+      appMetadata: { role: 'caregiver', categories: ['babysitter'] },
     });
     try {
       const res = await app.inject({
@@ -221,5 +250,46 @@ describe('auth plugin — requireAuth()', () => {
     } finally {
       await app.close();
     }
+  });
+
+  // Admin TOTP is mandatory server-side on every request (OH-175 — CONTEXT § MFA posture).
+  describe('admin TOTP enforcement', () => {
+    it('403 admin_totp_required when an admin token is aal1 (no TOTP)', async () => {
+      const app = await buildTestApp(makeDeps());
+      const token = await mintAccessToken({ sub: 'admin-1', appMetadata: { role: 'admin' } });
+      try {
+        const res = await app.inject({
+          method: 'GET',
+          url: '/probe',
+          headers: { authorization: `Bearer ${token}` },
+        });
+        expect(res.statusCode).toBe(403);
+        expect(res.json()).toEqual({ error: 'admin_totp_required' });
+      } finally {
+        await app.close();
+      }
+    });
+
+    it('passes an admin token with aal2 + TOTP', async () => {
+      const app = await buildTestApp(makeDeps(), { roles: ['admin'] });
+      const now = Math.floor(Date.now() / 1000);
+      const token = await mintAccessToken({
+        sub: 'admin-1',
+        appMetadata: { role: 'admin' },
+        aal: 'aal2',
+        amr: [{ method: 'mfa/totp', timestamp: now }],
+      });
+      try {
+        const res = await app.inject({
+          method: 'GET',
+          url: '/probe',
+          headers: { authorization: `Bearer ${token}` },
+        });
+        expect(res.statusCode).toBe(200);
+        expect(res.json()).toMatchObject({ role: 'admin', secondFactor: 'totp' });
+      } finally {
+        await app.close();
+      }
+    });
   });
 });

@@ -1,22 +1,22 @@
 import type {
   AvailabilityGrid,
   CaregiverCategory,
-  ProviderKind,
   Specialty,
+  SupplyRole,
   UsState,
 } from '@our-haven/shared';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8080';
 
 export type ProviderSignupRequest =
-  | { kind: 'caregiver'; caregiverCategory: CaregiverCategory; state: UsState }
-  | { kind: 'specialist'; specialty: Specialty; state: UsState };
+  | { role: 'caregiver'; categories: CaregiverCategory[]; state: UsState }
+  | { role: 'provider'; specialty: Specialty; state: UsState };
 
 export interface ProviderSignupResponse {
   id: string;
   uid: string;
-  kind: 'caregiver' | 'specialist';
-  caregiverCategory: CaregiverCategory | null;
+  role: SupplyRole;
+  categories: CaregiverCategory[] | null;
   specialty: Specialty | null;
   state: UsState;
   createdAt: string;
@@ -80,7 +80,7 @@ export type VerificationState =
 
 export interface VerificationResponse {
   state: VerificationState;
-  kind: ProviderKind;
+  role: SupplyRole;
   residentState: UsState;
   licenseBoardSupported: boolean;
   facts: {
@@ -212,7 +212,7 @@ export interface LicenseBoardInfo {
 
 export interface SpecialistCredentials {
   providerId: string;
-  kind: 'caregiver' | 'specialist';
+  role: SupplyRole;
   residentState: UsState;
   specialty: Specialty | null;
   licenseBoardSupported: boolean;
@@ -258,8 +258,8 @@ export async function confirmInsuranceDocUpload(
 
 export interface ProviderProfile {
   providerId: string;
-  kind: 'caregiver' | 'specialist';
-  caregiverCategory: CaregiverCategory | null;
+  role: SupplyRole;
+  categories: CaregiverCategory[] | null;
   specialty: Specialty | null;
   displayName: string | null;
   headline: string | null;

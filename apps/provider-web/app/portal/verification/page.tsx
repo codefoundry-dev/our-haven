@@ -90,8 +90,8 @@ export default function VerificationPage() {
       setAccessToken(token);
       const next = await getVerification(token);
       setData(next);
-      // Credentials endpoint is Specialist-only; 409 for Caregivers is fine to ignore.
-      if (next.kind === 'specialist') {
+      // Credentials endpoint is Provider-only (clinical); 409 for Caregivers is fine to ignore.
+      if (next.role === 'provider') {
         try {
           const creds = await getSpecialistCredentials(token);
           setCredentials(creds);
@@ -445,7 +445,7 @@ export default function VerificationPage() {
 
         <RightRail
           state={data?.state ?? 'unverified'}
-          kind={data?.kind ?? 'caregiver'}
+          kind={data?.role === 'provider' ? 'specialist' : 'caregiver'}
           connect={connect}
           dashboardBusy={dashboardBusy}
           onOpenDashboard={() => void handleDashboardClick()}
@@ -618,7 +618,7 @@ function UploadRow(props: {
 
 function buildSteps(data: VerificationResponse | null, connect: StripeConnectSummary | null): Step[] {
   const facts = data?.facts;
-  const kind = data?.kind ?? 'caregiver';
+  const kind = data?.role === 'provider' ? 'specialist' : 'caregiver';
 
   const emailDone = !!facts?.emailConfirmedAt;
   const phoneDone = !!facts?.phoneConfirmedAt;

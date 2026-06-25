@@ -87,13 +87,13 @@ export default function SignupPage() {
     try {
       const payload: ProviderSignupRequest =
         tab === 'caregiver'
-          ? { kind: 'caregiver', caregiverCategory, state }
-          : { kind: 'specialist', specialty, state };
+          ? { role: 'caregiver', categories: [caregiverCategory], state }
+          : { role: 'provider', specialty, state };
       const { session } = await signUpWithEmailPassword(email, password);
       const created = await postProviderSignup(session.access_token, payload);
       setSuccess(
-        created.kind === 'caregiver'
-          ? `Account created — ${created.caregiverCategory} in ${created.state}.`
+        created.role === 'caregiver'
+          ? `Account created — ${created.categories?.join(', ')} in ${created.state}.`
           : `Account created — ${created.specialty} in ${created.state}.`,
       );
     } catch (err) {

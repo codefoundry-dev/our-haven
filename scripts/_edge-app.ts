@@ -14,8 +14,10 @@ function fakeDeps(): AppDeps {
     DATABASE_URL: 'postgres://localhost/our_haven_unused',
     DATABASE_SSL: 'false',
     JWT_SECRET: 'unused-edge-openapi-jwt-secret',
+    SUPABASE_URL: 'https://unused.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'unused-service-role-key',
   });
-  return { env, db: stub };
+  return { env, db: stub, supabase: stub };
 }
 
 export async function edgeOpenApiDocument(): Promise<unknown> {

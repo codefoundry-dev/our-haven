@@ -120,7 +120,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Set the permanent role + kind on the authenticated Supabase user
+         * Set the permanent role on the authenticated Supabase user
          * @description Idempotent. Rejects with 409 if the user already has a role claim that differs from the request. Once set, role is permanent per CONTEXT.md § Authentication. Claims are written to Supabase `app_metadata`; the client must refresh its session to receive an access token carrying the new claims.
          */
         post: {
@@ -134,11 +134,10 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        role: "parent" | "provider";
+                        role: "parent" | "caregiver" | "provider";
+                        categories?: ("babysitter" | "tutor" | "nanny")[];
                         /** @enum {string} */
-                        kind?: "caregiver" | "specialist";
-                        caregiverCategory?: string;
-                        specialty?: string;
+                        specialty?: "slp" | "ot" | "aba" | "psychology" | "other";
                     };
                 };
             };
@@ -151,8 +150,9 @@ export interface paths {
                     content: {
                         "application/json": {
                             /** @enum {string} */
-                            role: "parent" | "provider";
-                            kind: ("caregiver" | "specialist") | null;
+                            role: "parent" | "caregiver" | "provider";
+                            categories: ("babysitter" | "tutor" | "nanny")[] | null;
+                            specialty: ("slp" | "ot" | "aba" | "psychology" | "other") | null;
                         };
                     };
                 };
@@ -501,8 +501,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Provider sign-up — persist Provider row + set role/kind/state claims
-         * @description Creates a Provider row keyed by Supabase user id and writes custom claims to Supabase `app_metadata` (role=provider, kind, state, caregiver_category | specialty). Idempotent: re-posting identical attributes returns 200 with the existing row; mismatched kind / category / specialty / state returns 409 (role + kind + state are permanent per CONTEXT.md § Authentication / Account roles). A user already bound to role=parent or role=admin cannot sign up as provider — they must create a second account.
+         * Supply sign-up — persist the supply row + set role/state claims
+         * @description Creates a supply row keyed by Supabase user id and writes custom claims to Supabase `app_metadata` (role ∈ {caregiver, provider}, state, categories | specialty per ADR-0011). Idempotent: re-posting identical attributes returns 200 with the existing row; a mismatched role / categories / specialty / state returns 409 (role + sub-type + state are permanent per CONTEXT.md § Authentication). A user already bound to role=parent or role=admin cannot sign up as supply — they must create a second account.
          */
         post: {
             parameters: {
@@ -515,14 +515,13 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        kind: "caregiver";
-                        /** @enum {string} */
-                        caregiverCategory: "babysitter" | "tutor" | "nanny";
+                        role: "caregiver";
+                        categories: ("babysitter" | "tutor" | "nanny")[];
                         /** @enum {string} */
                         state: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
                     } | {
                         /** @enum {string} */
-                        kind: "specialist";
+                        role: "provider";
                         /** @enum {string} */
                         specialty: "slp" | "ot" | "aba" | "psychology" | "other";
                         /** @enum {string} */
@@ -542,8 +541,8 @@ export interface paths {
                             id: string;
                             uid: string;
                             /** @enum {string} */
-                            kind: "caregiver" | "specialist";
-                            caregiverCategory: ("babysitter" | "tutor" | "nanny") | null;
+                            role: "caregiver" | "provider";
+                            categories: ("babysitter" | "tutor" | "nanny")[] | null;
                             specialty: ("slp" | "ot" | "aba" | "psychology" | "other") | null;
                             /** @enum {string} */
                             state: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
@@ -563,8 +562,8 @@ export interface paths {
                             id: string;
                             uid: string;
                             /** @enum {string} */
-                            kind: "caregiver" | "specialist";
-                            caregiverCategory: ("babysitter" | "tutor" | "nanny") | null;
+                            role: "caregiver" | "provider";
+                            categories: ("babysitter" | "tutor" | "nanny")[] | null;
                             specialty: ("slp" | "ot" | "aba" | "psychology" | "other") | null;
                             /** @enum {string} */
                             state: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
@@ -625,8 +624,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Read the authenticated Provider's public-profile editor state
-         * @description Returns the Provider profile fields edited on the web portal — published rate, optional per-child surcharge (Babysitter/Nanny only), availability summary grid + note + paused flag, W-10 self-attestation toggle, bio, languages, specialty tags, photo. Creates an empty row on first read so the editor always has a target.
+         * Read the authenticated supply account's public-profile editor state
+         * @description Returns the profile fields edited on the supply onboarding surface — published rate, optional per-child surcharge (Babysitter/Nanny only), availability summary grid + note + paused flag, W-10 self-attestation toggle, bio, languages, specialty tags, photo. Creates an empty row on first read so the editor always has a target.
          */
         get: {
             parameters: {
@@ -647,8 +646,8 @@ export interface paths {
                             /** Format: uuid */
                             providerId: string;
                             /** @enum {string} */
-                            kind: "caregiver" | "specialist";
-                            caregiverCategory: ("babysitter" | "tutor" | "nanny") | null;
+                            role: "caregiver" | "provider";
+                            categories: ("babysitter" | "tutor" | "nanny")[] | null;
                             specialty: ("slp" | "ot" | "aba" | "psychology" | "other") | null;
                             displayName: string | null;
                             headline: string | null;
@@ -757,8 +756,8 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Update the authenticated Provider's public-profile editor state
-         * @description Partial update — any field omitted is left untouched. Per-child surcharge and W-10 toggle are rejected with 400 unless the Provider is a Babysitter or Nanny (kind=caregiver + caregiver_category in [babysitter,nanny]). Availability grid is normalised: only true cells are persisted.
+         * Update the authenticated supply account's public-profile editor state
+         * @description Partial update — any field omitted is left untouched. Per-child surcharge and W-10 toggle are rejected with 400 unless the account is a Babysitter or Nanny (role=caregiver + categories includes babysitter|nanny). Availability grid is normalised: only true cells are persisted.
          */
         patch: {
             parameters: {
@@ -832,8 +831,8 @@ export interface paths {
                             /** Format: uuid */
                             providerId: string;
                             /** @enum {string} */
-                            kind: "caregiver" | "specialist";
-                            caregiverCategory: ("babysitter" | "tutor" | "nanny") | null;
+                            role: "caregiver" | "provider";
+                            categories: ("babysitter" | "tutor" | "nanny")[] | null;
                             specialty: ("slp" | "ot" | "aba" | "psychology" | "other") | null;
                             displayName: string | null;
                             headline: string | null;
@@ -980,7 +979,7 @@ export interface paths {
                             /** @enum {string} */
                             state: "unverified" | "email-verified" | "phone-verified" | "id-uploaded" | "screening-initiated" | "screening-passed" | "license-pending" | "license-verified" | "connect-pending" | "activated" | "rejected" | "holding-state-not-supported";
                             /** @enum {string} */
-                            kind: "caregiver" | "specialist";
+                            role: "caregiver" | "provider";
                             /** @enum {string} */
                             residentState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
                             licenseBoardSupported: boolean;
@@ -1079,7 +1078,7 @@ export interface paths {
                             /** @enum {string} */
                             state: "unverified" | "email-verified" | "phone-verified" | "id-uploaded" | "screening-initiated" | "screening-passed" | "license-pending" | "license-verified" | "connect-pending" | "activated" | "rejected" | "holding-state-not-supported";
                             /** @enum {string} */
-                            kind: "caregiver" | "specialist";
+                            role: "caregiver" | "provider";
                             /** @enum {string} */
                             residentState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
                             licenseBoardSupported: boolean;
@@ -1194,7 +1193,7 @@ export interface paths {
                             /** @enum {string} */
                             state: "unverified" | "email-verified" | "phone-verified" | "id-uploaded" | "screening-initiated" | "screening-passed" | "license-pending" | "license-verified" | "connect-pending" | "activated" | "rejected" | "holding-state-not-supported";
                             /** @enum {string} */
-                            kind: "caregiver" | "specialist";
+                            role: "caregiver" | "provider";
                             /** @enum {string} */
                             residentState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
                             licenseBoardSupported: boolean;
@@ -1279,8 +1278,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Read the authenticated Specialist's license + insurance credentials
-         * @description Returns the per-state license-board context (board name, register URL, hint) plus the current upload + decision state for the Specialist. Caregivers (kind=caregiver) get 409 — they never need a license.
+         * Read the authenticated Provider's license + insurance credentials
+         * @description Returns the per-state license-board context (board name, register URL, hint) plus the current upload + decision state for the clinical Provider. Caregivers are rejected by the provider-only role guard (403) — they never need a license.
          */
         get: {
             parameters: {
@@ -1301,7 +1300,7 @@ export interface paths {
                             /** Format: uuid */
                             providerId: string;
                             /** @enum {string} */
-                            kind: "caregiver" | "specialist";
+                            role: "caregiver" | "provider";
                             /** @enum {string} */
                             residentState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
                             specialty: ("slp" | "ot" | "aba" | "psychology" | "other") | null;
@@ -1411,8 +1410,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Record a completed Specialist license-document upload
-         * @description Called after the Provider portal uploads a license certificate through the signed-URL flow (POST /v1/uploads/signed-url with kind=license-doc). The body carries the returned objectPath plus optional licenseNumber and licenseBoardState. The server validates the objectPath is scoped to the caller and records the upload + metadata.
+         * Record a completed Provider license-document upload
+         * @description Called after the supply portal uploads a license certificate through the signed-URL flow (POST /v1/uploads/signed-url with kind=license-doc). The body carries the returned objectPath plus optional licenseNumber and licenseBoardState. The server validates the objectPath is scoped to the caller and records the upload + metadata.
          */
         post: {
             parameters: {
@@ -1441,7 +1440,7 @@ export interface paths {
                             /** Format: uuid */
                             providerId: string;
                             /** @enum {string} */
-                            kind: "caregiver" | "specialist";
+                            role: "caregiver" | "provider";
                             /** @enum {string} */
                             residentState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
                             specialty: ("slp" | "ot" | "aba" | "psychology" | "other") | null;
@@ -1561,8 +1560,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Record a completed Specialist liability-insurance COI upload
-         * @description Called after the Provider portal uploads a Certificate of Insurance through the signed-URL flow (POST /v1/uploads/signed-url with kind=insurance-doc). Optional — encouraged but not required for activation.
+         * Record a completed Provider liability-insurance COI upload
+         * @description Called after the supply portal uploads a Certificate of Insurance through the signed-URL flow (POST /v1/uploads/signed-url with kind=insurance-doc). Optional — encouraged but not required for activation.
          */
         post: {
             parameters: {
@@ -1589,7 +1588,7 @@ export interface paths {
                             /** Format: uuid */
                             providerId: string;
                             /** @enum {string} */
-                            kind: "caregiver" | "specialist";
+                            role: "caregiver" | "provider";
                             /** @enum {string} */
                             residentState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
                             specialty: ("slp" | "ot" | "aba" | "psychology" | "other") | null;
@@ -1707,7 +1706,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Admin — read a Specialist Provider's license-board context + uploaded docs + decision
+         * Admin — read a clinical Provider's license-board context + uploaded docs + decision
          * @description Surfaces the per-state license-board metadata (board name + register URL + hint) so the admin can cross-check the uploaded license number on the right portal. Returns the same shape as the Provider-side endpoint plus the admin decision audit fields.
          */
         get: {
@@ -1731,7 +1730,7 @@ export interface paths {
                             /** Format: uuid */
                             providerId: string;
                             /** @enum {string} */
-                            kind: "caregiver" | "specialist";
+                            role: "caregiver" | "provider";
                             /** @enum {string} */
                             residentState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
                             specialty: ("slp" | "ot" | "aba" | "psychology" | "other") | null;
@@ -1826,7 +1825,7 @@ export interface paths {
         put?: never;
         /**
          * Admin — record a license-verification decision (verified | rejected)
-         * @description Admin manual verification flow per CONTEXT.md § Verification + ADR-0007 / OH-107. On `verified`, sets `provider_verifications.license_verified_at = now()`, which the Verification state machine reads to advance the Specialist toward `activated`. On `rejected`, sets `provider_verifications.rejected_at = now()` with the decision notes mirrored into rejection_reason.
+         * @description Admin manual verification flow per CONTEXT.md § Verification + ADR-0007 / OH-107. On `verified`, sets `provider_verifications.license_verified_at = now()`, which the Verification state machine reads to advance the Provider toward `activated`. On `rejected`, sets `provider_verifications.rejected_at = now()` with the decision notes mirrored into rejection_reason.
          */
         post: {
             parameters: {
@@ -1857,7 +1856,7 @@ export interface paths {
                             /** Format: uuid */
                             providerId: string;
                             /** @enum {string} */
-                            kind: "caregiver" | "specialist";
+                            role: "caregiver" | "provider";
                             /** @enum {string} */
                             residentState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
                             specialty: ("slp" | "ot" | "aba" | "psychology" | "other") | null;
@@ -1964,7 +1963,7 @@ export interface paths {
         };
         /**
          * Read the authenticated Caregiver's state home-childcare registration context
-         * @description Returns the per-state home-childcare-licensing-agency context (agency name, programme name, register URL, admin hint) plus the current upload + admin-decision state. Eligibility: kind=caregiver AND caregiver_category in [babysitter, nanny] — Tutors and Specialists get 409. When the Provider's state is outside the launch slate, `homeChildcareBoardSupported` is false and `board` is null; the upload affordance should be hidden client-side.
+         * @description Returns the per-state home-childcare-licensing-agency context (agency name, programme name, register URL, admin hint) plus the current upload + admin-decision state. Eligibility: role=caregiver AND categories includes babysitter or nanny — Tutor-only Caregivers get 409; Providers (clinical) are rejected by the role guard (403). When the resident state is outside the launch slate, `homeChildcareBoardSupported` is false and `board` is null; the upload affordance should be hidden client-side.
          */
         get: {
             parameters: {
@@ -1985,8 +1984,8 @@ export interface paths {
                             /** Format: uuid */
                             providerId: string;
                             /** @enum {string} */
-                            kind: "caregiver" | "specialist";
-                            caregiverCategory: ("babysitter" | "tutor" | "nanny") | null;
+                            role: "caregiver" | "provider";
+                            categories: ("babysitter" | "tutor" | "nanny")[] | null;
                             /** @enum {string} */
                             residentState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
                             homeChildcareBoardSupported: boolean;
@@ -2062,7 +2061,7 @@ export interface paths {
         put?: never;
         /**
          * Record a completed state home-childcare-registration certificate upload
-         * @description Called after the Provider portal uploads the state registration certificate through the signed-URL flow (POST /v1/uploads/signed-url with kind=state-childcare-registration). The body carries the returned objectPath; the server validates the objectPath is scoped to the caller and records the upload along with the Provider's resident state at upload time (so the badge keeps naming the correct agency if the Provider later moves).
+         * @description Called after the supply portal uploads the state registration certificate through the signed-URL flow (POST /v1/uploads/signed-url with kind=state-childcare-registration). The body carries the returned objectPath; the server validates the objectPath is scoped to the caller and records the upload along with the Caregiver's resident state at upload time (so the badge keeps naming the correct agency if the Caregiver later moves).
          */
         post: {
             parameters: {
@@ -2089,8 +2088,8 @@ export interface paths {
                             /** Format: uuid */
                             providerId: string;
                             /** @enum {string} */
-                            kind: "caregiver" | "specialist";
-                            caregiverCategory: ("babysitter" | "tutor" | "nanny") | null;
+                            role: "caregiver" | "provider";
+                            categories: ("babysitter" | "tutor" | "nanny")[] | null;
                             /** @enum {string} */
                             residentState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
                             homeChildcareBoardSupported: boolean;
@@ -2189,7 +2188,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Admin — read a Caregiver Provider's home-childcare-registration context + uploaded cert + decision
+         * Admin — read a Caregiver's home-childcare-registration context + uploaded cert + decision
          * @description Surfaces the per-state home-childcare-licensing-agency metadata (agency name + register URL + hint) so the admin can cross-check the uploaded certificate on the right state portal. Same response shape as the Provider-side endpoint.
          */
         get: {
@@ -2213,8 +2212,8 @@ export interface paths {
                             /** Format: uuid */
                             providerId: string;
                             /** @enum {string} */
-                            kind: "caregiver" | "specialist";
-                            caregiverCategory: ("babysitter" | "tutor" | "nanny") | null;
+                            role: "caregiver" | "provider";
+                            categories: ("babysitter" | "tutor" | "nanny")[] | null;
                             /** @enum {string} */
                             residentState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
                             homeChildcareBoardSupported: boolean;
@@ -2290,7 +2289,7 @@ export interface paths {
         put?: never;
         /**
          * Admin — record a home-childcare-registration decision (verified | rejected)
-         * @description Admin manual verification flow per CONTEXT.md § CDCTC-eligibility & state childcare licensure. On `verified` the Provider's public profile gains the "State-registered home childcare" badge naming the specific state agency. On `rejected` the badge stays off. This decision is decoupled from the Verification state machine — it never blocks activation.
+         * @description Admin manual verification flow per CONTEXT.md § CDCTC-eligibility & state childcare licensure. On `verified` the Caregiver's public profile gains the "State-registered home childcare" badge naming the specific state agency. On `rejected` the badge stays off. This decision is decoupled from the Verification state machine — it never blocks activation.
          */
         post: {
             parameters: {
@@ -2321,8 +2320,8 @@ export interface paths {
                             /** Format: uuid */
                             providerId: string;
                             /** @enum {string} */
-                            kind: "caregiver" | "specialist";
-                            caregiverCategory: ("babysitter" | "tutor" | "nanny") | null;
+                            role: "caregiver" | "provider";
+                            categories: ("babysitter" | "tutor" | "nanny")[] | null;
                             /** @enum {string} */
                             residentState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
                             homeChildcareBoardSupported: boolean;
@@ -2773,6 +2772,402 @@ export interface paths {
                 };
                 /** @description Default Response */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/stripe-tax/preview-calculation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Compute a Stripe Tax preview for a given purpose + US state + amount. Persists an audit row.
+         * @description Calls Stripe Tax `POST /v1/tax/calculations` for either `subscription` (state = subscriber's resident state) or `commission` (state = Provider's resident state). Persists the result to `stripe_tax_calculations`. Used during launch verification to sample tax outcomes across multiple states (OH-111 ACs #1 + #2) and at runtime as a preview before the Subscription/Commission flow actually charges. The purpose enum deliberately excludes Bookings — Our Haven does not collect sales tax on Bookings (CONTEXT.md § Sales tax model).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        purpose: "subscription" | "commission";
+                        amountCents: number;
+                        state: string;
+                        postalCode?: string;
+                        city?: string;
+                        reference: string;
+                        /** Format: uuid */
+                        subjectUid?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            calculationId: string;
+                            stripeCalculationId: string;
+                            /** @enum {string} */
+                            purpose: "subscription" | "commission";
+                            customerState: string;
+                            customerPostalCode: string | null;
+                            amountCents: number;
+                            taxAmountCents: number;
+                            amountTotalCents: number;
+                            /** @enum {string} */
+                            taxBehavior: "inclusive" | "exclusive";
+                            taxCode: string;
+                            taxBreakdown: {
+                                amount: number;
+                                inclusive: boolean;
+                                taxabilityReason: string | null;
+                                taxableAmount: number | null;
+                                state: string | null;
+                                taxType: string | null;
+                                percentageDecimal: string | null;
+                            }[];
+                            /** Format: date-time */
+                            expiresAt: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/stripe-tax/calculations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List recent Stripe Tax calculation audit rows.
+         * @description Reads the `stripe_tax_calculations` audit table. Filterable by purpose, customer state, and subject uid. Returns up to 100 rows ordered by creation time (newest first).
+         */
+        get: {
+            parameters: {
+                query?: {
+                    purpose?: "subscription" | "commission";
+                    state?: string;
+                    subjectUid?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            calculations: {
+                                calculationId: string;
+                                stripeCalculationId: string;
+                                /** @enum {string} */
+                                purpose: "subscription" | "commission";
+                                customerState: string;
+                                customerPostalCode: string | null;
+                                amountCents: number;
+                                taxAmountCents: number;
+                                amountTotalCents: number;
+                                /** @enum {string} */
+                                taxBehavior: "inclusive" | "exclusive";
+                                taxCode: string;
+                                taxBreakdown: {
+                                    amount: number;
+                                    inclusive: boolean;
+                                    taxabilityReason: string | null;
+                                    taxableAmount: number | null;
+                                    state: string | null;
+                                    taxType: string | null;
+                                    percentageDecimal: string | null;
+                                }[];
+                                /** Format: date-time */
+                                expiresAt: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/stripe-tax/registrations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Stripe Tax registrations (the nexus dashboard view).
+         * @description Mirrors Stripe Tax `GET /v1/tax/registrations`. Status defaults to `active`; pass `all` to include scheduled + expired. This is the source of truth admins use to see which states Our Haven is collecting in.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    status?: "active" | "expired" | "scheduled" | "all";
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            registrations: {
+                                id: string;
+                                state: string | null;
+                                registrationType: string | null;
+                                status: string;
+                                /** Format: date-time */
+                                activeFrom: string;
+                                expiresAt: string | null;
+                            }[];
+                            hasMore: boolean;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Register Our Haven for sales-tax collection in a US state — step-up MFA required.
+         * @description Creates a Stripe Tax registration for the named US state (country=US, country_options[us][state]=...). Step-up-MFA-gated because registering for sales-tax collection is a binding compliance action. Used both for the pre-registration posture in priority states (per the OH-97 decision) and reactively when Stripe Tax surfaces a nexus threshold crossing.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        state: string;
+                        /** @default state_sales_tax */
+                        registrationType?: string;
+                        activeFromUnixSec?: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            id: string;
+                            state: string | null;
+                            registrationType: string | null;
+                            status: string;
+                            /** Format: date-time */
+                            activeFrom: string;
+                            expiresAt: string | null;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                502: {
                     headers: {
                         [name: string]: unknown;
                     };

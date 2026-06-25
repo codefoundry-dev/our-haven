@@ -18,8 +18,8 @@ function envForTest() {
 interface ProviderRow {
   id: string;
   uid: string;
-  kind: 'caregiver' | 'specialist';
-  caregiver_category: string | null;
+  role: 'caregiver' | 'provider';
+  categories: string[] | null;
   specialty: string | null;
   state: string;
 }
@@ -226,28 +226,48 @@ async function buildAppWithRoutes(deps: AppDeps) {
   return app;
 }
 
-async function specialistToken(uid: string): Promise<string> {
-  return mintAccessToken({ sub: uid, email: `${uid}@example.com`, appMetadata: { role: 'provider' } });
+async function providerToken(uid: string): Promise<string> {
+  return mintAccessToken({
+    sub: uid,
+    email: `${uid}@example.com`,
+    appMetadata: { role: 'provider', specialty: 'slp' },
+  });
+}
+
+async function caregiverToken(uid: string): Promise<string> {
+  return mintAccessToken({
+    sub: uid,
+    email: `${uid}@example.com`,
+    appMetadata: { role: 'caregiver', categories: ['babysitter'] },
+  });
 }
 
 async function adminToken(uid: string): Promise<string> {
-  return mintAccessToken({ sub: uid, email: `${uid}@ourhaven.com`, appMetadata: { role: 'admin' } });
+  // Admin acts at aal2 with TOTP — the auth plugin rejects any admin token that
+  // is not step-up-verified (403 admin_totp_required) on every request.
+  return mintAccessToken({
+    sub: uid,
+    email: `${uid}@ourhaven.com`,
+    appMetadata: { role: 'admin' },
+    aal: 'aal2',
+    amr: [{ method: 'totp' }],
+  });
 }
 
-const SPECIALIST_FL: ProviderRow = {
+const PROVIDER_FL: ProviderRow = {
   id: '0193a4b1-1001-7a01-9abc-000000000001',
-  uid: 'sup-uid-specialist-fl',
-  kind: 'specialist',
-  caregiver_category: null,
+  uid: 'sup-uid-provider-fl',
+  role: 'provider',
+  categories: null,
   specialty: 'ot',
   state: 'FL',
 };
 
-const SPECIALIST_AK: ProviderRow = {
+const PROVIDER_AK: ProviderRow = {
   id: '0193a4b1-1002-7a02-9abc-000000000002',
-  uid: 'sup-uid-specialist-ak',
-  kind: 'specialist',
-  caregiver_category: null,
+  uid: 'sup-uid-provider-ak',
+  role: 'provider',
+  categories: null,
   specialty: 'slp',
   state: 'AK',
 };
@@ -255,8 +275,8 @@ const SPECIALIST_AK: ProviderRow = {
 const CAREGIVER: ProviderRow = {
   id: '0193a4b1-1003-7a03-9abc-000000000003',
   uid: 'sup-uid-caregiver',
-  kind: 'caregiver',
-  caregiver_category: 'babysitter',
+  role: 'caregiver',
+  categories: ['babysitter'],
   specialty: null,
   state: 'NY',
 };
@@ -264,11 +284,11 @@ const CAREGIVER: ProviderRow = {
 describe('GET /v1/providers/me/credentials', () => {
   beforeEach(() => resetEnvForTests());
 
-  it('returns FL board context for an OT Specialist in FL', async () => {
-    const { db } = makeDbStub({ providerByUid: SPECIALIST_FL });
+  it('returns FL board context for an OT Provider in FL', async () => {
+    const { db } = makeDbStub({ providerByUid: PROVIDER_FL });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
-      const token = await specialistToken(SPECIALIST_FL.uid);
+      const token = await providerToken(PROVIDER_FL.uid);
       const res = await app.inject({
         method: 'GET',
         url: '/v1/providers/me/credentials',
@@ -276,7 +296,7 @@ describe('GET /v1/providers/me/credentials', () => {
       });
       expect(res.statusCode).toBe(200);
       const body = res.json();
-      expect(body.kind).toBe('specialist');
+      expect(body.role).toBe('provider');
       expect(body.residentState).toBe('FL');
       expect(body.licenseBoardSupported).toBe(true);
       expect(body.defaultBoard).not.toBeNull();
@@ -289,11 +309,11 @@ describe('GET /v1/providers/me/credentials', () => {
     }
   });
 
-  it('marks licenseBoardSupported=false for a Specialist in a non-slate state', async () => {
-    const { db } = makeDbStub({ providerByUid: SPECIALIST_AK });
+  it('marks licenseBoardSupported=false for a Provider in a non-slate state', async () => {
+    const { db } = makeDbStub({ providerByUid: PROVIDER_AK });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
-      const token = await specialistToken(SPECIALIST_AK.uid);
+      const token = await providerToken(PROVIDER_AK.uid);
       const res = await app.inject({
         method: 'GET',
         url: '/v1/providers/me/credentials',
@@ -309,18 +329,18 @@ describe('GET /v1/providers/me/credentials', () => {
     }
   });
 
-  it('409s for a Caregiver', async () => {
+  it('403s for a Caregiver (provider-only role guard)', async () => {
     const { db } = makeDbStub({ providerByUid: CAREGIVER });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
-      const token = await specialistToken(CAREGIVER.uid);
+      const token = await caregiverToken(CAREGIVER.uid);
       const res = await app.inject({
         method: 'GET',
         url: '/v1/providers/me/credentials',
         headers: { authorization: `Bearer ${token}` },
       });
-      expect(res.statusCode).toBe(409);
-      expect(res.json().error).toBe('license_not_applicable');
+      expect(res.statusCode).toBe(403);
+      expect(res.json().error).toBe('forbidden_role');
     } finally {
       await app.close();
     }
@@ -341,7 +361,7 @@ describe('GET /v1/providers/me/credentials', () => {
     const { db } = makeDbStub({ providerByUid: null });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
-      const token = await specialistToken('orphan-uid');
+      const token = await providerToken('orphan-uid');
       const res = await app.inject({
         method: 'GET',
         url: '/v1/providers/me/credentials',
@@ -358,11 +378,11 @@ describe('POST /v1/providers/me/credentials/license', () => {
   beforeEach(() => resetEnvForTests());
 
   it('records a license upload + licenseNumber + licenseBoardState', async () => {
-    const { db, getCredentials } = makeDbStub({ providerByUid: SPECIALIST_FL });
+    const { db, getCredentials } = makeDbStub({ providerByUid: PROVIDER_FL });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
-      const token = await specialistToken(SPECIALIST_FL.uid);
-      const objectPath = `license-doc/${SPECIALIST_FL.uid}/abc-def-license.pdf`;
+      const token = await providerToken(PROVIDER_FL.uid);
+      const objectPath = `license-doc/${PROVIDER_FL.uid}/abc-def-license.pdf`;
       const res = await app.inject({
         method: 'POST',
         url: '/v1/providers/me/credentials/license',
@@ -382,10 +402,10 @@ describe('POST /v1/providers/me/credentials/license', () => {
   });
 
   it('400s when objectPath is not scoped to the caller', async () => {
-    const { db } = makeDbStub({ providerByUid: SPECIALIST_FL });
+    const { db } = makeDbStub({ providerByUid: PROVIDER_FL });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
-      const token = await specialistToken(SPECIALIST_FL.uid);
+      const token = await providerToken(PROVIDER_FL.uid);
       const res = await app.inject({
         method: 'POST',
         url: '/v1/providers/me/credentials/license',
@@ -400,16 +420,16 @@ describe('POST /v1/providers/me/credentials/license', () => {
   });
 
   it('400s on too-long licenseNumber', async () => {
-    const { db } = makeDbStub({ providerByUid: SPECIALIST_FL });
+    const { db } = makeDbStub({ providerByUid: PROVIDER_FL });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
-      const token = await specialistToken(SPECIALIST_FL.uid);
+      const token = await providerToken(PROVIDER_FL.uid);
       const res = await app.inject({
         method: 'POST',
         url: '/v1/providers/me/credentials/license',
         headers: { authorization: `Bearer ${token}` },
         payload: {
-          objectPath: `license-doc/${SPECIALIST_FL.uid}/lic.pdf`,
+          objectPath: `license-doc/${PROVIDER_FL.uid}/lic.pdf`,
           licenseNumber: 'X'.repeat(65),
         },
       });
@@ -419,18 +439,19 @@ describe('POST /v1/providers/me/credentials/license', () => {
     }
   });
 
-  it('409s for a Caregiver', async () => {
+  it('403s for a Caregiver (provider-only role guard)', async () => {
     const { db } = makeDbStub({ providerByUid: CAREGIVER });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
-      const token = await specialistToken(CAREGIVER.uid);
+      const token = await caregiverToken(CAREGIVER.uid);
       const res = await app.inject({
         method: 'POST',
         url: '/v1/providers/me/credentials/license',
         headers: { authorization: `Bearer ${token}` },
         payload: { objectPath: `license-doc/${CAREGIVER.uid}/x.pdf` },
       });
-      expect(res.statusCode).toBe(409);
+      expect(res.statusCode).toBe(403);
+      expect(res.json().error).toBe('forbidden_role');
     } finally {
       await app.close();
     }
@@ -441,11 +462,11 @@ describe('POST /v1/providers/me/credentials/insurance', () => {
   beforeEach(() => resetEnvForTests());
 
   it('records an insurance COI upload', async () => {
-    const { db, getCredentials } = makeDbStub({ providerByUid: SPECIALIST_FL });
+    const { db, getCredentials } = makeDbStub({ providerByUid: PROVIDER_FL });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
-      const token = await specialistToken(SPECIALIST_FL.uid);
-      const objectPath = `insurance-doc/${SPECIALIST_FL.uid}/coi.pdf`;
+      const token = await providerToken(PROVIDER_FL.uid);
+      const objectPath = `insurance-doc/${PROVIDER_FL.uid}/coi.pdf`;
       const res = await app.inject({
         method: 'POST',
         url: '/v1/providers/me/credentials/insurance',
@@ -463,10 +484,10 @@ describe('POST /v1/providers/me/credentials/insurance', () => {
   });
 
   it('400s when objectPath is not scoped to the caller', async () => {
-    const { db } = makeDbStub({ providerByUid: SPECIALIST_FL });
+    const { db } = makeDbStub({ providerByUid: PROVIDER_FL });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
-      const token = await specialistToken(SPECIALIST_FL.uid);
+      const token = await providerToken(PROVIDER_FL.uid);
       const res = await app.inject({
         method: 'POST',
         url: '/v1/providers/me/credentials/insurance',
@@ -484,13 +505,13 @@ describe('Admin license verification', () => {
   beforeEach(() => resetEnvForTests());
 
   it('403s when the caller is a Provider, not an admin', async () => {
-    const { db } = makeDbStub({ providerById: SPECIALIST_FL });
+    const { db } = makeDbStub({ providerById: PROVIDER_FL });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
-      const token = await specialistToken(SPECIALIST_FL.uid);
+      const token = await providerToken(PROVIDER_FL.uid);
       const res = await app.inject({
         method: 'POST',
-        url: `/v1/admin/providers/${SPECIALIST_FL.id}/license-verification`,
+        url: `/v1/admin/providers/${PROVIDER_FL.id}/license-verification`,
         headers: { authorization: `Bearer ${token}` },
         payload: { decision: 'verified' },
       });
@@ -500,25 +521,25 @@ describe('Admin license verification', () => {
     }
   });
 
-  it('admin GET returns board context + uploaded docs for a Specialist', async () => {
+  it('admin GET returns board context + uploaded docs for a Provider', async () => {
     const cred = {
-      ...emptyCredentials(SPECIALIST_FL.id),
-      license_doc_object_path: `license-doc/${SPECIALIST_FL.uid}/lic.pdf`,
+      ...emptyCredentials(PROVIDER_FL.id),
+      license_doc_object_path: `license-doc/${PROVIDER_FL.uid}/lic.pdf`,
       license_number: 'OT12345',
       license_uploaded_at: new Date('2026-05-28T08:00:00Z'),
     };
-    const { db } = makeDbStub({ providerById: SPECIALIST_FL, credentials: cred });
+    const { db } = makeDbStub({ providerById: PROVIDER_FL, credentials: cred });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
       const token = await adminToken('admin-1');
       const res = await app.inject({
         method: 'GET',
-        url: `/v1/admin/providers/${SPECIALIST_FL.id}/license-verification`,
+        url: `/v1/admin/providers/${PROVIDER_FL.id}/license-verification`,
         headers: { authorization: `Bearer ${token}` },
       });
       expect(res.statusCode).toBe(200);
       const body = res.json();
-      expect(body.providerId).toBe(SPECIALIST_FL.id);
+      expect(body.providerId).toBe(PROVIDER_FL.id);
       expect(body.defaultBoard.registerUrl).toMatch(/^https:\/\//);
       expect(body.licenseNumber).toBe('OT12345');
     } finally {
@@ -528,14 +549,14 @@ describe('Admin license verification', () => {
 
   it('admin POST verified records decision + sets provider_verifications.license_verified_at', async () => {
     const { db, getCredentials, getVerification, verifUpdateSpy } = makeDbStub({
-      providerById: SPECIALIST_FL,
+      providerById: PROVIDER_FL,
     });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
       const token = await adminToken('admin-1');
       const res = await app.inject({
         method: 'POST',
-        url: `/v1/admin/providers/${SPECIALIST_FL.id}/license-verification`,
+        url: `/v1/admin/providers/${PROVIDER_FL.id}/license-verification`,
         headers: { authorization: `Bearer ${token}` },
         payload: { decision: 'verified', notes: 'License # checked on FL MQA portal — active.' },
       });
@@ -555,13 +576,13 @@ describe('Admin license verification', () => {
   });
 
   it('admin POST rejected sets provider_verifications.rejected_at + rejection_reason from notes', async () => {
-    const { db, getCredentials, verifUpdateSpy } = makeDbStub({ providerById: SPECIALIST_FL });
+    const { db, getCredentials, verifUpdateSpy } = makeDbStub({ providerById: PROVIDER_FL });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
       const token = await adminToken('admin-1');
       const res = await app.inject({
         method: 'POST',
-        url: `/v1/admin/providers/${SPECIALIST_FL.id}/license-verification`,
+        url: `/v1/admin/providers/${PROVIDER_FL.id}/license-verification`,
         headers: { authorization: `Bearer ${token}` },
         payload: { decision: 'rejected', notes: 'License lapsed in 2024' },
       });
@@ -590,19 +611,20 @@ describe('Admin license verification', () => {
         payload: { decision: 'verified' },
       });
       expect(res.statusCode).toBe(409);
+      expect(res.json().error).toBe('license_not_applicable');
     } finally {
       await app.close();
     }
   });
 
   it('admin POST 400s on unknown decision value', async () => {
-    const { db } = makeDbStub({ providerById: SPECIALIST_FL });
+    const { db } = makeDbStub({ providerById: PROVIDER_FL });
     const app = await buildAppWithRoutes(makeDeps({ db }));
     try {
       const token = await adminToken('admin-1');
       const res = await app.inject({
         method: 'POST',
-        url: `/v1/admin/providers/${SPECIALIST_FL.id}/license-verification`,
+        url: `/v1/admin/providers/${PROVIDER_FL.id}/license-verification`,
         headers: { authorization: `Bearer ${token}` },
         payload: { decision: 'maybe' },
       });

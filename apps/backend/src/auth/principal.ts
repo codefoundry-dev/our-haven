@@ -1,4 +1,4 @@
-import type { ProviderKind, Role } from '@/auth/roles.js';
+import type { Role } from '@/auth/roles.js';
 
 export type SecondFactor = 'totp' | 'phone';
 
@@ -19,7 +19,10 @@ export interface SupabaseJwtPayload {
 export interface Principal {
   uid: string;
   role: Role | null;
-  kind: ProviderKind | null;
+  /** role=caregiver — one or more supply categories (ADR-0011). */
+  categories: string[] | null;
+  /** role=provider — clinical specialty (ADR-0011). */
+  specialty: string | null;
   email: string | null;
   phone: string | null;
   secondFactor: SecondFactor | null;
