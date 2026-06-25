@@ -20,6 +20,11 @@ tags:
     description: Caregiver Stripe Connect Express — onboarding, summary, dashboard (OH-190)
   - name: webhooks
     description: Vendor webhooks — Stripe Connect account.updated (OH-190)
+  - name: admin
+    description: Admin-only surfaces (Stripe Tax registrations + calculation audit, etc.)
+  - name: tax
+    description: Stripe Tax (OH-192) — per-state taxability on Subscription +
+      Commission; Bookings deliberately not taxed.
 components:
   securitySchemes:
     supabaseAccessToken:
@@ -299,6 +304,196 @@ components:
           type: string
       required:
         - error
+    AdminStripeTaxCalculation:
+      type: object
+      properties:
+        calculationId:
+          type: string
+        stripeCalculationId:
+          type: string
+        purpose:
+          type: string
+          enum:
+            - subscription
+            - commission
+        customerState:
+          type: string
+          minLength: 2
+          maxLength: 2
+          pattern: ^[A-Z]{2}$
+        customerPostalCode:
+          type: string
+          nullable: true
+        amountCents:
+          type: integer
+        taxAmountCents:
+          type: integer
+        amountTotalCents:
+          type: integer
+        taxBehavior:
+          type: string
+          enum:
+            - inclusive
+            - exclusive
+        taxCode:
+          type: string
+        taxBreakdown:
+          type: array
+          items:
+            type: object
+            properties:
+              amount:
+                type: integer
+              inclusive:
+                type: boolean
+              taxabilityReason:
+                type: string
+                nullable: true
+              taxableAmount:
+                type: integer
+                nullable: true
+              state:
+                type: string
+                nullable: true
+              taxType:
+                type: string
+                nullable: true
+              percentageDecimal:
+                type: string
+                nullable: true
+            required:
+              - amount
+              - inclusive
+              - taxabilityReason
+              - taxableAmount
+              - state
+              - taxType
+              - percentageDecimal
+        expiresAt:
+          type: string
+          format: date-time
+      required:
+        - calculationId
+        - stripeCalculationId
+        - purpose
+        - customerState
+        - customerPostalCode
+        - amountCents
+        - taxAmountCents
+        - amountTotalCents
+        - taxBehavior
+        - taxCode
+        - taxBreakdown
+        - expiresAt
+    AdminStripeTaxError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
+    AdminStripeTaxPreviewRequest:
+      type: object
+      properties:
+        purpose:
+          type: string
+          enum:
+            - subscription
+            - commission
+        amountCents:
+          type: integer
+          minimum: 0
+          exclusiveMinimum: true
+        state:
+          type: string
+          minLength: 2
+          maxLength: 2
+          pattern: ^[A-Z]{2}$
+        postalCode:
+          type: string
+          minLength: 3
+          maxLength: 10
+        city:
+          type: string
+          maxLength: 80
+        reference:
+          type: string
+          minLength: 1
+          maxLength: 120
+        subjectUid:
+          type: string
+          format: uuid
+      required:
+        - purpose
+        - amountCents
+        - state
+        - reference
+    AdminStripeTaxCalculationList:
+      type: object
+      properties:
+        calculations:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminStripeTaxCalculation"
+      required:
+        - calculations
+    AdminStripeTaxRegistrationList:
+      type: object
+      properties:
+        registrations:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminStripeTaxRegistration"
+        hasMore:
+          type: boolean
+      required:
+        - registrations
+        - hasMore
+    AdminStripeTaxRegistration:
+      type: object
+      properties:
+        id:
+          type: string
+        state:
+          type: string
+          nullable: true
+        registrationType:
+          type: string
+          nullable: true
+        status:
+          type: string
+        activeFrom:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          nullable: true
+          format: date-time
+      required:
+        - id
+        - state
+        - registrationType
+        - status
+        - activeFrom
+        - expiresAt
+    AdminStripeTaxCreateRegistrationRequest:
+      type: object
+      properties:
+        state:
+          type: string
+          minLength: 2
+          maxLength: 2
+          pattern: ^[A-Z]{2}$
+        registrationType:
+          type: string
+          minLength: 1
+          default: state_sales_tax
+        activeFromUnixSec:
+          type: integer
+      required:
+        - state
   parameters: {}
 paths:
   /v1/healthz:
@@ -724,3 +919,225 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StripeConnectWebhookError"
+  /v1/admin/stripe-tax/preview-calculation:
+    post:
+      tags:
+        - admin
+        - tax
+      summary: Compute a Stripe Tax preview for a purpose + US state + amount;
+        persists an audit row
+      description: "Calls Stripe Tax POST /v1/tax/calculations for either
+        `subscription` (state = subscriber's resident state) or `commission`
+        (state = Provider's resident state). Persists the result to
+        `stripe_tax_calculations`. Used during launch verification to sample tax
+        outcomes across states (OH-192 ACs #1 + #2) and at runtime as a preview
+        before the Subscription/Commission flow charges. The purpose enum
+        deliberately excludes Bookings — Our Haven does not collect sales tax on
+        Bookings (CONTEXT § Sales tax model)."
+      security:
+        - supabaseAccessToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminStripeTaxPreviewRequest"
+      responses:
+        "200":
+          description: Tax calculation computed + persisted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStripeTaxCalculation"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStripeTaxError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStripeTaxError"
+        "403":
+          description: Not an admin / TOTP required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStripeTaxError"
+        "502":
+          description: Stripe Tax call failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStripeTaxError"
+  /v1/admin/stripe-tax/calculations:
+    get:
+      tags:
+        - admin
+        - tax
+      summary: List recent Stripe Tax calculation audit rows
+      description: Reads the `stripe_tax_calculations` audit table. Filterable by
+        purpose, customer state, and subject uid. Returns up to 100 rows ordered
+        by creation time (newest first).
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            enum:
+              - subscription
+              - commission
+          required: false
+          name: purpose
+          in: query
+        - schema:
+            type: string
+            minLength: 2
+            maxLength: 2
+            pattern: ^[A-Z]{2}$
+          required: false
+          name: state
+          in: query
+        - schema:
+            type: string
+            format: uuid
+          required: false
+          name: subjectUid
+          in: query
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+          required: false
+          name: limit
+          in: query
+      responses:
+        "200":
+          description: Audit rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStripeTaxCalculationList"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStripeTaxError"
+        "403":
+          description: Not an admin / TOTP required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStripeTaxError"
+  /v1/admin/stripe-tax/registrations:
+    get:
+      tags:
+        - admin
+        - tax
+      summary: List Stripe Tax registrations (the nexus dashboard view)
+      description: Mirrors Stripe Tax GET /v1/tax/registrations. Status defaults to
+        `active`; pass `all` to include scheduled + expired. The source of truth
+        admins use to see which states Our Haven is collecting in — and where
+        Stripe is prompting registration as nexus is crossed.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            enum:
+              - active
+              - expired
+              - scheduled
+              - all
+            default: active
+          required: false
+          name: status
+          in: query
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 100
+          required: false
+          name: limit
+          in: query
+      responses:
+        "200":
+          description: Registrations (nexus view)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStripeTaxRegistrationList"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStripeTaxError"
+        "403":
+          description: Not an admin / TOTP required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStripeTaxError"
+        "502":
+          description: Stripe call failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStripeTaxError"
+    post:
+      tags:
+        - admin
+        - tax
+      summary: Register Our Haven for sales-tax collection in a US state — step-up MFA
+        required
+      description: Creates a Stripe Tax registration for the named US state
+        (country=US, country_options[us][state]=...). Step-up-MFA gated because
+        registering for sales-tax collection is a binding compliance action.
+        Used both for the pre-registration posture in priority states (OH-163)
+        and reactively when Stripe Tax surfaces a nexus threshold crossing.
+      security:
+        - supabaseAccessToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminStripeTaxCreateRegistrationRequest"
+      responses:
+        "200":
+          description: Registration created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStripeTaxRegistration"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStripeTaxError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStripeTaxError"
+        "403":
+          description: Not an admin / TOTP / step-up required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStripeTaxError"
+        "502":
+          description: Stripe call failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStripeTaxError"
