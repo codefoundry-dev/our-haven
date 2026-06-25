@@ -1,31 +1,33 @@
 /**
- * Application-quota tracker (OH-113).
+ * Application-quota tracker — deep module (OH-179, deepens OH-113).
  *
- * Pure-TS deep module per ADR-0004. Encodes the per-Provider monthly
- * Application cap from CONTEXT.md § Application + ADR-0006 § Decision 7.
+ * Pure-TS per ADR-0004. Encodes the per-Caregiver monthly Application cap from
+ * CONTEXT.md § Application + ADR-0006 § Decision 7 (narrowed by ADR-0011 to
+ * Caregiver-only — only Caregivers file Applications; the quota never applies
+ * to the clinical Provider role).
  *
- *   v1 default: 30 Applications / Provider / calendar month, reset on the
- *   1st of the month (UTC for storage, displayed to the Provider in their
+ *   v1 default: 30 Applications / Caregiver / calendar month, reset on the
+ *   1st of the month (UTC for storage, displayed to the Caregiver in their
  *   local timezone by the UI layer — not this module's concern).
  *
  * The tracker is pure logic over a thin counter storage shape; the handler
  * layer owns the actual row in Supabase. The pure module decides:
- *   - whether the Provider may file another Application now,
+ *   - whether the Caregiver may file another Application now,
  *   - what the post-increment counter shape looks like,
  *   - whether a stored counter has aged into a new month and must be reset,
- *   - whether an admin override raises a Provider's effective cap.
+ *   - whether an admin override raises a Caregiver's effective cap.
  *
  * Pure + deterministic. No I/O.
  */
 
 /**
- * Default cap per Provider per calendar month (ADR-0006 §7). Documented as
+ * Default cap per Caregiver per calendar month (ADR-0006 §7). Documented as
  * a v1 starting number; re-tunable based on observed usage.
  */
 export const DEFAULT_MONTHLY_APPLICATION_CAP = 30;
 
 /**
- * Per-Provider counter shape. Stored as-is by the handler in the Provider
+ * Per-Caregiver counter shape. Stored as-is by the handler in the Caregiver
  * row (or a sidecar table — schema decision is outside this module).
  *
  *   `count`              — Applications filed in the current period.
@@ -34,11 +36,11 @@ export const DEFAULT_MONTHLY_APPLICATION_CAP = 30;
  *                          is stale and must be reset to 0 with the period
  *                          advanced.
  *   `adminOverrideCap`   — If present, raises the effective cap above the
- *                          default for this Provider this period. Cleared
+ *                          default for this Caregiver this period. Cleared
  *                          on monthly reset. ADR-0006 §7 "admin override
  *                          path".
  */
-export interface ProviderApplicationCounter {
+export interface CaregiverApplicationCounter {
   count: number;
   periodYearMonth: string;
   adminOverrideCap: number | null;
@@ -47,7 +49,7 @@ export interface ProviderApplicationCounter {
 /**
  * Result of a quota check.
  *
- *   `allowed: true`  — the Provider may file another Application; the
+ *   `allowed: true`  — the Caregiver may file another Application; the
  *                      handler should `applyFile()` the counter and persist
  *                      it.
  *   `allowed: false` — the cap is reached (or the override-cap is reached
@@ -73,10 +75,10 @@ export function periodKey(now: Date): string {
 }
 
 /**
- * Build a fresh counter for a brand-new Provider, anchored to `now`'s
+ * Build a fresh counter for a brand-new Caregiver, anchored to `now`'s
  * calendar month.
  */
-export function initialCounter(now: Date): ProviderApplicationCounter {
+export function initialCounter(now: Date): CaregiverApplicationCounter {
   return { count: 0, periodYearMonth: periodKey(now), adminOverrideCap: null };
 }
 
@@ -86,13 +88,13 @@ export function initialCounter(now: Date): ProviderApplicationCounter {
  * Otherwise return the input unchanged.
  *
  * This is the monthly-reset boundary logic. The handler calls this before
- * `checkQuota()` so a Provider whose count was at-cap last month can file
+ * `checkQuota()` so a Caregiver whose count was at-cap last month can file
  * again as soon as the new month begins.
  */
 export function maybeReset(
-  counter: ProviderApplicationCounter,
+  counter: CaregiverApplicationCounter,
   now: Date,
-): ProviderApplicationCounter {
+): CaregiverApplicationCounter {
   const currentPeriod = periodKey(now);
   if (counter.periodYearMonth === currentPeriod) return counter;
   return initialCounter(now);
@@ -102,18 +104,18 @@ export function maybeReset(
  * The effective cap for this counter — either the admin override, if set,
  * or the default. Exposed for UI ("you can file X more this month").
  */
-export function effectiveCap(counter: ProviderApplicationCounter): number {
+export function effectiveCap(counter: CaregiverApplicationCounter): number {
   return counter.adminOverrideCap ?? DEFAULT_MONTHLY_APPLICATION_CAP;
 }
 
 /**
- * Whether the Provider may file another Application *now*. Reset-aware:
+ * Whether the Caregiver may file another Application *now*. Reset-aware:
  * if the counter is from a previous period, the answer is computed against
  * the reset-equivalent counter (the handler still needs to persist the
  * reset itself via `maybeReset()`).
  */
 export function checkQuota(
-  counter: ProviderApplicationCounter,
+  counter: CaregiverApplicationCounter,
   now: Date,
 ): QuotaCheckResult {
   const effective = maybeReset(counter, now);
@@ -141,9 +143,9 @@ export function checkQuota(
  * caller bug (re-filing without re-checking under concurrent contention).
  */
 export function applyFile(
-  counter: ProviderApplicationCounter,
+  counter: CaregiverApplicationCounter,
   now: Date,
-): ProviderApplicationCounter {
+): CaregiverApplicationCounter {
   const effective = maybeReset(counter, now);
   const cap = effectiveCap(effective);
   if (effective.count >= cap) {
@@ -156,16 +158,16 @@ export function applyFile(
 
 /**
  * Apply an admin override for the current period. `cap` must be a positive
- * integer ≥ current count (we don't retroactively cap a Provider below
+ * integer ≥ current count (we don't retroactively cap a Caregiver below
  * what they've already filed — that would create unexplained-state UI).
  *
  * Pass `null` to clear the override and revert to the default cap.
  */
 export function applyAdminOverride(
-  counter: ProviderApplicationCounter,
+  counter: CaregiverApplicationCounter,
   now: Date,
   cap: number | null,
-): ProviderApplicationCounter {
+): CaregiverApplicationCounter {
   const effective = maybeReset(counter, now);
   if (cap !== null) {
     if (!Number.isInteger(cap) || cap <= 0) {
@@ -180,4 +182,4 @@ export function applyAdminOverride(
   return { ...effective, adminOverrideCap: cap };
 }
 
-export const APPLICATION_QUOTA_MODULE_VERSION = '0.1.0-OH-113';
+export const APPLICATION_QUOTA_MODULE_VERSION = '0.2.0-OH-179';

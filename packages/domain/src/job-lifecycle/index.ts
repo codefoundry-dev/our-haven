@@ -1,8 +1,10 @@
 /**
- * Job lifecycle state machine (OH-113).
+ * Job lifecycle state machine — deep module (OH-179, deepens OH-113).
  *
- * Pure-TS deep module per ADR-0004. Encodes the v1 Job state graph from
- * CONTEXT.md § Job + ADR-0006 § Decision 3.
+ * Pure-TS per ADR-0004. Encodes the v1 Job state graph from CONTEXT.md § Job +
+ * ADR-0006 § Decision 3 (narrowed by ADR-0011 to Caregiver-only — clinical
+ * Providers are slot-booked and never posted to, so a Job's supply audience is
+ * always Caregivers).
  *
  *   Posted Job:
  *     draft → open → (awarded | expired | cancelled) → closed
@@ -92,7 +94,7 @@ export interface JobEvent {
  */
 export const JOB_SIDE_EFFECT_TYPES = [
   'schedule-job-expiry-14d',
-  'notify-providers-in-category',
+  'notify-caregivers-in-category',
   'notify-parent',
   'notify-applicants',
   'auto-decline-losing-applications',
@@ -179,7 +181,7 @@ export function transitionJob(job: Job, event: JobEvent): JobTransitionResult {
         ok: true,
         next: 'open',
         sideEffects: [
-          { type: 'notify-providers-in-category' },
+          { type: 'notify-caregivers-in-category' },
           { type: 'schedule-job-expiry-14d' },
         ],
       };
@@ -285,4 +287,4 @@ export function transitionJob(job: Job, event: JobEvent): JobTransitionResult {
   }
 }
 
-export const JOB_LIFECYCLE_MODULE_VERSION = '0.1.0-OH-113';
+export const JOB_LIFECYCLE_MODULE_VERSION = '0.2.0-OH-179';

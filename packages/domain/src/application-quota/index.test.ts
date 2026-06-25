@@ -10,7 +10,7 @@ import {
   initialCounter,
   maybeReset,
   periodKey,
-  type ProviderApplicationCounter,
+  type CaregiverApplicationCounter,
 } from './index.js';
 
 const JAN_15 = new Date('2026-01-15T10:00:00.000Z');
@@ -52,20 +52,20 @@ describe('checkQuota', () => {
   });
 
   it('allowed at cap-1 with 1 remaining', () => {
-    const c: ProviderApplicationCounter = { ...initialCounter(JAN_15), count: 29 };
+    const c: CaregiverApplicationCounter = { ...initialCounter(JAN_15), count: 29 };
     const r = checkQuota(c, JAN_15);
     expect(r).toEqual({ allowed: true, effectiveCap: 30, remaining: 1 });
   });
 
   it('denied at cap', () => {
-    const c: ProviderApplicationCounter = { ...initialCounter(JAN_15), count: 30 };
+    const c: CaregiverApplicationCounter = { ...initialCounter(JAN_15), count: 30 };
     const r = checkQuota(c, JAN_15);
     expect(r.allowed).toBe(false);
     if (!r.allowed) expect(r.reason).toMatch(/cap reached/);
   });
 
   it('allowed at default cap (30) once an override raises it to 50', () => {
-    const c: ProviderApplicationCounter = {
+    const c: CaregiverApplicationCounter = {
       count: 30,
       periodYearMonth: '2026-01',
       adminOverrideCap: 50,
@@ -79,7 +79,7 @@ describe('checkQuota', () => {
   });
 
   it('denied at override-cap; reason names the override', () => {
-    const c: ProviderApplicationCounter = {
+    const c: CaregiverApplicationCounter = {
       count: 50,
       periodYearMonth: '2026-01',
       adminOverrideCap: 50,
@@ -97,7 +97,7 @@ describe('maybeReset — monthly reset boundary', () => {
   });
 
   it('resets to 0 when crossing the month boundary', () => {
-    const c: ProviderApplicationCounter = {
+    const c: CaregiverApplicationCounter = {
       count: 30,
       periodYearMonth: '2026-01',
       adminOverrideCap: 50,
@@ -107,7 +107,7 @@ describe('maybeReset — monthly reset boundary', () => {
   });
 
   it('reset clears the admin override (override is per-period — ADR-0006 §7)', () => {
-    const c: ProviderApplicationCounter = {
+    const c: CaregiverApplicationCounter = {
       count: 10,
       periodYearMonth: '2026-01',
       adminOverrideCap: 50,
@@ -116,7 +116,7 @@ describe('maybeReset — monthly reset boundary', () => {
   });
 
   it('checkQuota is reset-aware — at-cap last month is allowed on the 1st', () => {
-    const c: ProviderApplicationCounter = {
+    const c: CaregiverApplicationCounter = {
       count: 30,
       periodYearMonth: '2026-01',
       adminOverrideCap: null,
@@ -134,7 +134,7 @@ describe('applyFile', () => {
   });
 
   it('resets first, then increments — first filing of the new month becomes count=1', () => {
-    const c: ProviderApplicationCounter = {
+    const c: CaregiverApplicationCounter = {
       count: 30,
       periodYearMonth: '2026-01',
       adminOverrideCap: null,
@@ -145,7 +145,7 @@ describe('applyFile', () => {
   });
 
   it('throws if called past the cap — caller must checkQuota first', () => {
-    const c: ProviderApplicationCounter = {
+    const c: CaregiverApplicationCounter = {
       count: 30,
       periodYearMonth: '2026-01',
       adminOverrideCap: null,
@@ -154,7 +154,7 @@ describe('applyFile', () => {
   });
 
   it('respects override — applyFile up to overrideCap works', () => {
-    const c: ProviderApplicationCounter = {
+    const c: CaregiverApplicationCounter = {
       count: 30,
       periodYearMonth: '2026-01',
       adminOverrideCap: 35,
@@ -173,7 +173,7 @@ describe('applyAdminOverride', () => {
   });
 
   it('clears the override when passed null', () => {
-    const c: ProviderApplicationCounter = {
+    const c: CaregiverApplicationCounter = {
       count: 5,
       periodYearMonth: '2026-01',
       adminOverrideCap: 50,
@@ -188,8 +188,8 @@ describe('applyAdminOverride', () => {
     expect(() => applyAdminOverride(c, JAN_15, 1.5)).toThrow();
   });
 
-  it('throws if the new cap would retroactively put the Provider over', () => {
-    const c: ProviderApplicationCounter = {
+  it('throws if the new cap would retroactively put the Caregiver over', () => {
+    const c: CaregiverApplicationCounter = {
       count: 20,
       periodYearMonth: '2026-01',
       adminOverrideCap: 30,
@@ -198,7 +198,7 @@ describe('applyAdminOverride', () => {
   });
 
   it('resets stale counters before applying — override does not bring back a dead month', () => {
-    const c: ProviderApplicationCounter = {
+    const c: CaregiverApplicationCounter = {
       count: 30,
       periodYearMonth: '2026-01',
       adminOverrideCap: null,
@@ -214,7 +214,7 @@ describe('Concurrent-filing race — pure semantics', () => {
     // returns the post-increment counter. The handler's responsibility is
     // to wrap the read-check-write in a single TX (or row-level lock); the
     // pure module proves the increment is monotonic and deterministic.
-    let c: ProviderApplicationCounter = initialCounter(JAN_15);
+    let c: CaregiverApplicationCounter = initialCounter(JAN_15);
     for (let i = 0; i < 2; i++) {
       const check = checkQuota(c, JAN_15);
       expect(check.allowed).toBe(true);
@@ -224,7 +224,7 @@ describe('Concurrent-filing race — pure semantics', () => {
   });
 
   it('applyFile at the cap boundary refuses; the 31st filing of a 30-cap month throws', () => {
-    let c: ProviderApplicationCounter = initialCounter(JAN_15);
+    let c: CaregiverApplicationCounter = initialCounter(JAN_15);
     for (let i = 0; i < 30; i++) c = applyFile(c, JAN_15);
     expect(c.count).toBe(30);
     expect(checkQuota(c, JAN_15).allowed).toBe(false);
@@ -233,7 +233,7 @@ describe('Concurrent-filing race — pure semantics', () => {
 });
 
 describe('Property-based — quota tracker', () => {
-  const counterArb: fc.Arbitrary<ProviderApplicationCounter> = fc.record({
+  const counterArb: fc.Arbitrary<CaregiverApplicationCounter> = fc.record({
     count: fc.integer({ min: 0, max: 100 }),
     periodYearMonth: fc.constantFrom('2026-01', '2026-02', '2026-03'),
     adminOverrideCap: fc.option(fc.integer({ min: 1, max: 200 }), { nil: null }),

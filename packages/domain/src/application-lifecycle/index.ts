@@ -1,13 +1,14 @@
 /**
- * Application lifecycle state machine (OH-113).
+ * Application lifecycle state machine — deep module (OH-179, deepens OH-113).
  *
- * Pure-TS deep module per ADR-0004. Encodes the v1 Application state graph
- * from CONTEXT.md § Application + ADR-0006 § Decision 4.
+ * Pure-TS per ADR-0004. Encodes the v1 Application state graph from CONTEXT.md
+ * § Application + ADR-0006 § Decision 4 (narrowed by ADR-0011 to Caregiver-only
+ * — an Application is a Caregiver's response to a Job).
  *
- *   submitted → countered          (Parent or Provider counter-Offer)
+ *   submitted → countered          (Parent or Caregiver counter-Offer)
  *             → awarded            (Parent accepts current Offer)
  *             → declined           (Parent declines Application)
- *             → withdrawn          (Provider withdraws their own Application)
+ *             → withdrawn          (Caregiver withdraws their own Application)
  *             → expired            (Job auto-expired or was parent-cancelled
  *                                   while this Application was still open)
  *
@@ -61,10 +62,10 @@ export interface Application extends ApplicationShape {
 
 export const APPLICATION_EVENT_TYPES = [
   'parent-counter',
-  'provider-counter',
+  'caregiver-counter',
   'parent-award',
   'parent-decline',
-  'provider-withdraw',
+  'caregiver-withdraw',
   'auto-decline',
   'job-expired',
 ] as const;
@@ -76,7 +77,7 @@ export interface ApplicationEvent {
 
 export const APPLICATION_SIDE_EFFECT_TYPES = [
   'notify-parent',
-  'notify-provider',
+  'notify-caregiver',
   'notify-both',
   'supersede-previous-offer',
   'transition-job-to-awarded',
@@ -141,14 +142,14 @@ export function transitionApplication(
 
   switch (event.type) {
     case 'parent-counter':
-    case 'provider-counter': {
+    case 'caregiver-counter': {
       // A counter-Offer reopens the Application to a fresh pending Offer.
       // The previous Offer is `countered` (see Offer state machine).
       if (state !== 'submitted' && state !== 'countered') {
         return { ok: false, reason: `${event.type} invalid from ${state}` };
       }
       const notify: ApplicationSideEffectType =
-        event.type === 'parent-counter' ? 'notify-provider' : 'notify-parent';
+        event.type === 'parent-counter' ? 'notify-caregiver' : 'notify-parent';
       return {
         ok: true,
         next: 'countered',
@@ -167,7 +168,7 @@ export function transitionApplication(
         sideEffects: [
           { type: 'transition-job-to-awarded' },
           { type: 'create-booking-from-offer' },
-          { type: 'notify-provider' },
+          { type: 'notify-caregiver' },
         ],
       };
     }
@@ -179,13 +180,13 @@ export function transitionApplication(
       return {
         ok: true,
         next: 'declined',
-        sideEffects: [{ type: 'notify-provider' }],
+        sideEffects: [{ type: 'notify-caregiver' }],
       };
     }
 
-    case 'provider-withdraw': {
+    case 'caregiver-withdraw': {
       if (state !== 'submitted' && state !== 'countered') {
-        return { ok: false, reason: `provider-withdraw invalid from ${state}` };
+        return { ok: false, reason: `caregiver-withdraw invalid from ${state}` };
       }
       return {
         ok: true,
@@ -202,7 +203,7 @@ export function transitionApplication(
       return {
         ok: true,
         next: 'declined',
-        sideEffects: [{ type: 'notify-provider' }],
+        sideEffects: [{ type: 'notify-caregiver' }],
       };
     }
 
@@ -214,10 +215,10 @@ export function transitionApplication(
       return {
         ok: true,
         next: 'expired',
-        sideEffects: [{ type: 'notify-provider' }],
+        sideEffects: [{ type: 'notify-caregiver' }],
       };
     }
   }
 }
 
-export const APPLICATION_LIFECYCLE_MODULE_VERSION = '0.1.0-OH-113';
+export const APPLICATION_LIFECYCLE_MODULE_VERSION = '0.2.0-OH-179';

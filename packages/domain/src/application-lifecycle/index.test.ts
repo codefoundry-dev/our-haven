@@ -56,18 +56,18 @@ describe('countsAgainstJobCap', () => {
 });
 
 describe('Posted-Job Application transitions', () => {
-  it('submitted → countered (parent-counter) — supersedes previous Offer + notifies provider', () => {
+  it('submitted → countered (parent-counter) — supersedes previous Offer + notifies caregiver', () => {
     const r = transitionApplication(appAt(POSTED, 'submitted'), { type: 'parent-counter' });
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.next).toBe('countered');
       expect(r.sideEffects).toContainEqual({ type: 'supersede-previous-offer' });
-      expect(r.sideEffects).toContainEqual({ type: 'notify-provider' });
+      expect(r.sideEffects).toContainEqual({ type: 'notify-caregiver' });
     }
   });
 
-  it('submitted → countered (provider-counter) — notifies parent', () => {
-    const r = transitionApplication(appAt(POSTED, 'submitted'), { type: 'provider-counter' });
+  it('submitted → countered (caregiver-counter) — notifies parent', () => {
+    const r = transitionApplication(appAt(POSTED, 'submitted'), { type: 'caregiver-counter' });
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.next).toBe('countered');
@@ -76,7 +76,7 @@ describe('Posted-Job Application transitions', () => {
   });
 
   it('countered → countered (re-counter) — chain stays open', () => {
-    const r = transitionApplication(appAt(POSTED, 'countered'), { type: 'provider-counter' });
+    const r = transitionApplication(appAt(POSTED, 'countered'), { type: 'caregiver-counter' });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.next).toBe('countered');
   });
@@ -101,8 +101,8 @@ describe('Posted-Job Application transitions', () => {
     expect(r.ok && r.next).toBe('declined');
   });
 
-  it('submitted → withdrawn (provider-withdraw)', () => {
-    const r = transitionApplication(appAt(POSTED, 'submitted'), { type: 'provider-withdraw' });
+  it('submitted → withdrawn (caregiver-withdraw)', () => {
+    const r = transitionApplication(appAt(POSTED, 'submitted'), { type: 'caregiver-withdraw' });
     expect(r.ok && r.next).toBe('withdrawn');
   });
 
@@ -141,10 +141,10 @@ describe('Terminal Posted-Job Applications reject everything', () => {
 describe('Exhaustive illegal-event matrix — Posted Applications', () => {
   const ACTIONABLE: ReadonlyArray<ApplicationEventType> = [
     'parent-counter',
-    'provider-counter',
+    'caregiver-counter',
     'parent-award',
     'parent-decline',
-    'provider-withdraw',
+    'caregiver-withdraw',
     'auto-decline',
     'job-expired',
   ];
