@@ -284,3 +284,154 @@ export function listBoardSlate(): readonly LicenseBoard[] {
  * board picker (mirrors `SPECIALTIES` from @our-haven/shared).
  */
 export const LICENSE_BOARD_SPECIALTIES: readonly Specialty[] = SPECIALTIES;
+
+// ===========================================================================
+// Per-state license-board ADAPTER CONTRACT (OH-181)
+//
+// OH-107 (above) is the per-(state, specialty) *data*. OH-181 adds the
+// vendor/portal-agnostic *contract* a Provider's license is verified through —
+// same split as the background-check module (OH-106): an adapter (handler-layer
+// collaborator) + a pure reducer that folds a normalized outcome into a
+// VerificationFacts patch. The verification-workflow state machine reads the
+// resulting `license_verified_at` to advance a Provider out of `license-pending`.
+//
+// Two concrete adapters ship:
+//   - `createPortalLicenseBoardAdapter` — the LAUNCH adapter. All 12 launch
+//     states are `portal-only` (see Mode legend), so an admin verifies the
+//     license against the board's public register URL and the handler records
+//     the outcome; there is no programmatic lookup.
+//   - `createStubApiLicenseBoardAdapter` — a STUB for a future `api`-mode
+//     register (CONTEXT § Verification: "whether it's API-callable or
+//     human-portal-only"). Proves the contract is open to a second
+//     implementation; its `lookup` is intentionally not implemented.
+// ===========================================================================
+
+/**
+ * Normalized terminal outcome of a license verification, mapped by the adapter
+ * from whatever the board portal/API reports. `verified` clears the Provider's
+ * license gate; every other value rejects.
+ */
+export type LicenseVerificationOutcome =
+  | 'verified'
+  | 'not-found'
+  | 'name-mismatch'
+  | 'expired'
+  | 'revoked';
+
+/** Normalized license-verification event the adapter produces from a board lookup. */
+export type LicenseVerificationEvent =
+  | { kind: 'verified'; occurredAt: Date; boardName: string; licenseNumber: string }
+  | {
+      kind: 'rejected';
+      occurredAt: Date;
+      outcome: Exclude<LicenseVerificationOutcome, 'verified'>;
+      /** Board-specific human-readable detail, surfaced to admin only. */
+      detail?: string | null;
+    };
+
+/**
+ * Patch applied to `provider_verifications` — mirrors the background-check
+ * reducer's shape (snake_case DB columns) so the handler merges it the same way.
+ */
+export interface LicenseVerificationFactsPatch {
+  license_verified_at?: Date;
+  rejected_at?: Date;
+  rejection_reason?: string;
+}
+
+/**
+ * Fold one normalized license-verification event into a facts patch. Pure +
+ * deterministic.
+ */
+export function reduceLicenseVerificationEvent(
+  event: LicenseVerificationEvent,
+): LicenseVerificationFactsPatch {
+  switch (event.kind) {
+    case 'verified':
+      return { license_verified_at: event.occurredAt };
+    case 'rejected': {
+      const detail = event.detail ? `: ${event.detail}` : '';
+      return { rejected_at: event.occurredAt, rejection_reason: `license ${event.outcome}${detail}` };
+    }
+  }
+}
+
+/** Input the adapter needs to look a license up against a board. */
+export interface LicenseLookupInput {
+  specialty: Specialty;
+  licenseNumber: string;
+  /** Name to cross-check against the register (the board indexes by name). */
+  holderName: string;
+  /** Stable correlation id for audit / lookup matching. */
+  correlationId: string;
+}
+
+/**
+ * Per-state professional-license-board adapter. Handler-layer collaborator;
+ * the domain modules construct it but never perform I/O through it themselves.
+ */
+export interface LicenseBoardAdapter {
+  readonly state: UsState;
+  readonly mode: LicenseBoardMode;
+  /** The board for a specialty in this adapter's state, or null if out of slate. */
+  boardFor(specialty: Specialty): LicenseBoard | null;
+  /**
+   * Look a license up. `api`-mode adapters query the register programmatically
+   * and resolve a normalized event. `portal-only` adapters REJECT: there is no
+   * API, so an admin verifies via the board's `registerUrl` out-of-band and the
+   * handler records the outcome by calling `reduceLicenseVerificationEvent`
+   * with the admin's decision.
+   */
+  lookup(input: LicenseLookupInput): Promise<LicenseVerificationEvent>;
+}
+
+/**
+ * The LAUNCH adapter: a `portal-only` board for one of the 12 launch states.
+ * Throws if the state is outside the slate (the caller should route to the
+ * Verification `holding-state-not-supported` branch instead).
+ */
+export function createPortalLicenseBoardAdapter(state: UsState): LicenseBoardAdapter {
+  if (!isLicenseBoardLaunchState(state)) {
+    throw new Error(`createPortalLicenseBoardAdapter: ${state} is outside the launch slate`);
+  }
+  return {
+    state,
+    mode: 'portal-only',
+    boardFor: (specialty) => findLicenseBoard(state, specialty),
+    lookup: () =>
+      Promise.reject(
+        new Error(
+          `license board for ${state} is portal-only — an admin verifies via the register URL and the handler records the outcome with reduceLicenseVerificationEvent`,
+        ),
+      ),
+  };
+}
+
+/**
+ * The STUB second adapter: an `api`-mode board reserved for a future
+ * programmatic register integration. `lookup` is intentionally not implemented
+ * — it documents that the contract supports a second, non-portal implementation
+ * without committing one in v1.
+ */
+export function createStubApiLicenseBoardAdapter(state: UsState): LicenseBoardAdapter {
+  return {
+    state,
+    mode: 'api',
+    boardFor: (specialty) => findLicenseBoard(state, specialty),
+    lookup: () =>
+      Promise.reject(
+        new Error(
+          `api-mode license-board adapter for ${state} is not implemented — stub for a future programmatic register integration`,
+        ),
+      ),
+  };
+}
+
+/**
+ * Resolve the launch adapter for a state, or `null` when the state is outside
+ * the slate — the seam the Verification state machine reads to route an
+ * out-of-slate Provider to `holding-state-not-supported`.
+ */
+export function licenseBoardAdapterFor(state: UsState): LicenseBoardAdapter | null {
+  return isLicenseBoardLaunchState(state) ? createPortalLicenseBoardAdapter(state) : null;
+}

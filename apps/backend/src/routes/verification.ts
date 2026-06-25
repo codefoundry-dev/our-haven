@@ -113,6 +113,11 @@ function buildResponse(
     screeningInitiatedAt: asDate(row.screening_initiated_at),
     screeningPassedAt: asDate(row.screening_passed_at),
     licenseVerifiedAt: asDate(row.license_verified_at),
+    // OH-181: liability-insurance proof is now a Provider activation gate. The
+    // upload + admin-verify flow (and its column) lands with the M2.4 handler
+    // rework; until then this is null, so a Provider correctly rests at
+    // `insurance-pending` after the license clears. Caregivers ignore it.
+    insuranceVerifiedAt: null,
     connectAccountReadyAt: asDate(connect?.account_ready_at ?? null),
     rejectedAt: asDate(row.rejected_at),
   };
