@@ -17,13 +17,13 @@ function at(offsetMs: number): Date {
   return new Date(START.getTime() - offsetMs);
 }
 
-describe('Provider-initiated cancellation', () => {
+describe('Caregiver-initiated cancellation', () => {
   it('is always free (full refund, regardless of timing)', () => {
     const r = calculateCancellation({
       originalAuthorizedCents: cents(10_000),
       bookingStartAt: START,
       cancellationAt: at(60 * 60 * 1000), // 1h before start (would be 100% if Parent-initiated)
-      cancelledBy: 'provider',
+      cancelledBy: 'caregiver',
     });
     expect(r).toEqual({ chargeCents: 0, refundCents: 10_000, tier: 'free' });
   });
@@ -33,7 +33,7 @@ describe('Provider-initiated cancellation', () => {
       originalAuthorizedCents: cents(5_000),
       bookingStartAt: START,
       cancellationAt: new Date(START.getTime() + 60 * 60 * 1000), // 1h AFTER start
-      cancelledBy: 'provider',
+      cancelledBy: 'caregiver',
     });
     expect(r.tier).toBe('free');
     expect(r.refundCents).toBe(5_000);
@@ -220,14 +220,14 @@ describe('Property-based — calculateCancellation', () => {
     );
   });
 
-  it('provider-initiated always lands in the free tier with a full refund', () => {
+  it('caregiver-initiated always lands in the free tier with a full refund', () => {
     fc.assert(
       fc.property(originalArb, startArb, offsetMsArb, (original, start, offsetMs) => {
         const r = calculateCancellation({
           originalAuthorizedCents: original,
           bookingStartAt: start,
           cancellationAt: new Date(start.getTime() - offsetMs),
-          cancelledBy: 'provider',
+          cancelledBy: 'caregiver',
         });
         expect(r.tier).toBe('free');
         expect(r.refundCents).toBe(original);
