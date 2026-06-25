@@ -5,9 +5,14 @@ import { SPECIALTIES, US_STATES_50_PLUS_DC, type UsState } from '@our-haven/shar
 import {
   LICENSE_BOARD_LAUNCH_STATES,
   boardsForState,
+  createPortalLicenseBoardAdapter,
+  createStubApiLicenseBoardAdapter,
   findLicenseBoard,
   isLicenseBoardLaunchState,
+  licenseBoardAdapterFor,
   listBoardSlate,
+  reduceLicenseVerificationEvent,
+  type LicenseVerificationEvent,
 } from './index.js';
 
 describe('license-board adapter slate', () => {
@@ -59,5 +64,74 @@ describe('license-board adapter slate', () => {
   it('boardsForState returns empty for non-slate states', () => {
     expect(boardsForState('AK')).toHaveLength(0);
     expect(boardsForState('VT')).toHaveLength(0);
+  });
+});
+
+describe('license-board adapter contract (OH-181)', () => {
+  it('the launch adapter is portal-only and surfaces the board for a specialty', () => {
+    const adapter = createPortalLicenseBoardAdapter('CA');
+    expect(adapter.state).toBe('CA');
+    expect(adapter.mode).toBe('portal-only');
+    const board = adapter.boardFor('slp');
+    expect(board).not.toBeNull();
+    expect(board!.state).toBe('CA');
+    expect(board!.specialty).toBe('slp');
+  });
+
+  it('a portal-only lookup rejects — admin verifies out-of-band', async () => {
+    const adapter = createPortalLicenseBoardAdapter('NY');
+    await expect(
+      adapter.lookup({ specialty: 'ot', licenseNumber: 'X', holderName: 'Jane', correlationId: 'c1' }),
+    ).rejects.toThrow(/portal-only/);
+  });
+
+  it('refuses to build a launch adapter for an out-of-slate state', () => {
+    expect(() => createPortalLicenseBoardAdapter('WY')).toThrow(/outside the launch slate/);
+  });
+
+  it('the stub api adapter advertises api mode but is not implemented', async () => {
+    const adapter = createStubApiLicenseBoardAdapter('CA');
+    expect(adapter.mode).toBe('api');
+    await expect(
+      adapter.lookup({ specialty: 'aba', licenseNumber: 'X', holderName: 'Jo', correlationId: 'c2' }),
+    ).rejects.toThrow(/not implemented/);
+  });
+
+  it('licenseBoardAdapterFor yields an adapter for slate states and null otherwise', () => {
+    expect(licenseBoardAdapterFor('FL')).not.toBeNull();
+    expect(licenseBoardAdapterFor('FL')!.mode).toBe('portal-only');
+    expect(licenseBoardAdapterFor('WY')).toBeNull(); // → verification holding-state-not-supported
+  });
+});
+
+describe('reduceLicenseVerificationEvent', () => {
+  const T = new Date('2026-06-25T10:00:00.000Z');
+
+  it('verified → license_verified_at patch', () => {
+    const event: LicenseVerificationEvent = {
+      kind: 'verified',
+      occurredAt: T,
+      boardName: 'California Board of Occupational Therapy',
+      licenseNumber: 'OT-12345',
+    };
+    expect(reduceLicenseVerificationEvent(event)).toEqual({ license_verified_at: T });
+  });
+
+  it('rejected → rejected_at + a reason naming the outcome', () => {
+    const patch = reduceLicenseVerificationEvent({
+      kind: 'rejected',
+      occurredAt: T,
+      outcome: 'name-mismatch',
+      detail: 'Smith vs Smyth',
+    });
+    expect(patch.rejected_at).toBe(T);
+    expect(patch.rejection_reason).toBe('license name-mismatch: Smith vs Smyth');
+    expect(patch.license_verified_at).toBeUndefined();
+  });
+
+  it('rejected without detail still produces a reason', () => {
+    expect(
+      reduceLicenseVerificationEvent({ kind: 'rejected', occurredAt: T, outcome: 'expired' }).rejection_reason,
+    ).toBe('license expired');
   });
 });

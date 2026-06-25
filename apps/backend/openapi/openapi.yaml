@@ -1748,16 +1748,15 @@ paths:
                     enum:
                       - unverified
                       - email-verified
-                      - phone-verified
                       - id-uploaded
                       - screening-initiated
-                      - screening-passed
-                      - license-pending
-                      - license-verified
                       - connect-pending
+                      - license-pending
+                      - insurance-pending
+                      - holding-state-not-supported
+                      - awaiting-phone-verification
                       - activated
                       - rejected
-                      - holding-state-not-supported
                   role:
                     type: string
                     enum:
@@ -1969,16 +1968,15 @@ paths:
                     enum:
                       - unverified
                       - email-verified
-                      - phone-verified
                       - id-uploaded
                       - screening-initiated
-                      - screening-passed
-                      - license-pending
-                      - license-verified
                       - connect-pending
+                      - license-pending
+                      - insurance-pending
+                      - holding-state-not-supported
+                      - awaiting-phone-verification
                       - activated
                       - rejected
-                      - holding-state-not-supported
                   role:
                     type: string
                     enum:
@@ -2218,16 +2216,15 @@ paths:
                     enum:
                       - unverified
                       - email-verified
-                      - phone-verified
                       - id-uploaded
                       - screening-initiated
-                      - screening-passed
-                      - license-pending
-                      - license-verified
                       - connect-pending
+                      - license-pending
+                      - insurance-pending
+                      - holding-state-not-supported
+                      - awaiting-phone-verification
                       - activated
                       - rejected
-                      - holding-state-not-supported
                   role:
                     type: string
                     enum:

@@ -393,7 +393,7 @@ describe('POST /v1/providers/me/verification/phone-confirm', () => {
     }
   });
 
-  it('records phone_confirmed_at and returns phone-verified', async () => {
+  it('records phone_confirmed_at; phone is off-spine so state stays email-verified until ID upload (OH-181)', async () => {
     const { db, getVerification } = makeDbStub({
       provider: { id: 'p-1', uid: 'u-1', role: 'caregiver', state: 'NY' },
       verification: {
@@ -426,7 +426,10 @@ describe('POST /v1/providers/me/verification/phone-confirm', () => {
       });
       expect(res.statusCode).toBe(200);
       const body = res.json();
-      expect(body.state).toBe('phone-verified');
+      // Phone is a hard ACTIVATION gate (ADR-0015), not a linear step — with
+      // email confirmed but no ID yet, the spine rests at email-verified while
+      // the phone fact is recorded for the final activation gate.
+      expect(body.state).toBe('email-verified');
       expect(body.facts.phoneConfirmedAt).toBe('2026-05-20T13:00:00.000Z');
       expect(getVerification()?.phone_confirmed_at).toBeInstanceOf(Date);
     } finally {
