@@ -60,16 +60,17 @@ Role is **permanent** (ADR-0011) and lives in the access token's
 `app_metadata.role`. After claiming, the client refreshes the session so the new
 claim lands in the JWT.
 
-### Skeleton scope note — Parent vs Caregiver/Provider
+### Role-claim by role
 
-`POST /v1/auth/role-claim` requires permanent extra data for two roles
-(`categories` for Caregiver, `specialty` for Provider) that is collected in
-downstream onboarding. So in this skeleton:
+`POST /v1/auth/role-claim` takes permanent extra data for the supply roles
+(`categories` for Caregiver, `specialty` for Provider) plus a resident `state`:
 
 - **Parent** claims end-to-end (role-pick → sign-up → role-claim → app). ✅
-- **Caregiver / Provider** create an account, then stop at `DeferredOnboarding`
-  rather than claiming a permanent role with placeholder data. Their
-  category/specialty selectors + claim land in the next M2 ticket.
+- **Caregiver / Provider** (OH-183): after sign-up they land on `SupplyOnboarding`
+  — Caregiver multi-selects categories (Babysitter / Tutor / Nanny), Provider
+  picks a specialty, both choose their state — then claim. The claim also writes
+  the `providers` row. ✅ Rates, verification, and Stripe/subscription are later
+  M2 tickets.
 
 ## Web build & deploy (live deploy deferred — OH-176 AC #4)
 
@@ -93,7 +94,6 @@ PRD wins.
 ## Deferred to downstream M2+ tickets
 
 - Full sign-up wizard (email-OTP, phone verify, ZIP profile, Stripe payment).
-- Caregiver category / Provider specialty selection + their role-claim.
 - OAuth (Apple / Google) sign-in.
 - Per-tab feeds (home, search, bookings, messages, schedule, …).
 - Live staging deploy.

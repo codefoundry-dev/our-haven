@@ -7,18 +7,18 @@
  *   - right after sign-up (intended role carried in user_metadata), or
  *   - an existing role-less account signs in (shows the role cards).
  *
- * Skeleton scope: Parent claims end-to-end (no extra permanent data). Caregiver
- * and Provider need permanent categories/specialty collected in downstream M2
- * onboarding, so they stop at DeferredOnboarding instead of claiming here.
+ * Parent claims directly here (no extra permanent data). Caregiver and Provider
+ * collect their permanent categories/specialty + resident state in
+ * SupplyOnboarding (OH-183) before claiming.
  */
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ApiError, roleClaim } from '@/api/client';
 import { useAuth } from '@/auth/AuthProvider';
-import { DeferredOnboarding } from '@/components/DeferredOnboarding';
 import { RolePickCards } from '@/components/RolePickCards';
 import { Screen } from '@/components/Screen';
+import { SupplyOnboarding } from '@/components/SupplyOnboarding';
 import { isRole, type Role } from '@/lib/roles';
 import { colors, fonts } from '@/theme/tokens';
 
@@ -60,7 +60,7 @@ export default function RoleClaimScreen() {
   if (picked === 'caregiver' || picked === 'provider') {
     return (
       <Screen scroll>
-        <DeferredOnboarding role={picked} />
+        <SupplyOnboarding role={picked} />
       </Screen>
     );
   }

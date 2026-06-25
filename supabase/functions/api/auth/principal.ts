@@ -24,6 +24,8 @@ export interface Principal {
   categories: string[] | null;
   /** role=provider — clinical specialty (ADR-0011). */
   specialty: string | null;
+  /** Supply roles — resident state, drives per-state adapter routing (ADR-0009/0015). */
+  state: string | null;
   email: string | null;
   phone: string | null;
   secondFactor: SecondFactor | null;

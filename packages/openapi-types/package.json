@@ -2,7 +2,7 @@
   "name": "@our-haven/openapi-types",
   "version": "0.0.0",
   "private": true,
-  "description": "TypeScript types generated from apps/backend/openapi/openapi.yaml. Source of truth per ADR-0004.",
+  "description": "TypeScript types generated from supabase/functions/api/openapi/openapi.yaml — the live Hono Edge Function spec (ADR-0019 supersedes the retired Fastify host). Source of truth per ADR-0004.",
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
@@ -10,7 +10,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "generate": "openapi-typescript ../../apps/backend/openapi/openapi.yaml --output src/generated/schema.ts",
+    "generate": "openapi-typescript ../../supabase/functions/api/openapi/openapi.yaml --output src/generated/schema.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {

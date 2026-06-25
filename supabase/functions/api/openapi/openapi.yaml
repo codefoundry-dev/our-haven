@@ -89,10 +89,67 @@ components:
             - psychology
             - other
             - null
+        state:
+          type: string
+          nullable: true
+          enum:
+            - AL
+            - AK
+            - AZ
+            - AR
+            - CA
+            - CO
+            - CT
+            - DE
+            - DC
+            - FL
+            - GA
+            - HI
+            - ID
+            - IL
+            - IN
+            - IA
+            - KS
+            - KY
+            - LA
+            - ME
+            - MD
+            - MA
+            - MI
+            - MN
+            - MS
+            - MO
+            - MT
+            - NE
+            - NV
+            - NH
+            - NJ
+            - NM
+            - NY
+            - NC
+            - ND
+            - OH
+            - OK
+            - OR
+            - PA
+            - RI
+            - SC
+            - SD
+            - TN
+            - TX
+            - UT
+            - VT
+            - VA
+            - WA
+            - WV
+            - WI
+            - WY
+            - null
       required:
         - role
         - categories
         - specialty
+        - state
     AuthErrorResponse:
       type: object
       properties:
@@ -192,9 +249,13 @@ paths:
         that differs from the request — role is permanent (ADR-0011 / CONTEXT §
         Authentication). `role` is one of {parent, caregiver, provider} (admin
         is internal-only, never self-assignable). A caregiver must include
-        `categories`; a provider must include `specialty`. Claims are written to
-        Supabase `app_metadata`; the client must refresh its session to receive
-        an access token carrying the new claims.
+        `categories`; a provider must include `specialty`. Supply roles
+        (caregiver/provider) must include a resident `state` (drives per-state
+        adapter routing, ADR-0009/0015); parent must not. Claims are written to
+        Supabase `app_metadata`, and the supply identity (role,
+        categories/specialty, state) is persisted to the `providers` table. The
+        client must refresh its session to receive an access token carrying the
+        new claims.
       security:
         - supabaseAccessToken: []
       requestBody:
@@ -227,6 +288,60 @@ paths:
                     - aba
                     - psychology
                     - other
+                state:
+                  type: string
+                  enum:
+                    - AL
+                    - AK
+                    - AZ
+                    - AR
+                    - CA
+                    - CO
+                    - CT
+                    - DE
+                    - DC
+                    - FL
+                    - GA
+                    - HI
+                    - ID
+                    - IL
+                    - IN
+                    - IA
+                    - KS
+                    - KY
+                    - LA
+                    - ME
+                    - MD
+                    - MA
+                    - MI
+                    - MN
+                    - MS
+                    - MO
+                    - MT
+                    - NE
+                    - NV
+                    - NH
+                    - NJ
+                    - NM
+                    - NY
+                    - NC
+                    - ND
+                    - OH
+                    - OK
+                    - OR
+                    - PA
+                    - RI
+                    - SC
+                    - SD
+                    - TN
+                    - TX
+                    - UT
+                    - VT
+                    - VA
+                    - WA
+                    - WV
+                    - WI
+                    - WY
               required:
                 - role
       responses:
