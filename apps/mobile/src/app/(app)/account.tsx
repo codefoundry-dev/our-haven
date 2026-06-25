@@ -1,5 +1,6 @@
 /** Account — identity + sign out (satisfies OH-176 "auth client logs in/out"). */
-import { StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useAuth } from '@/auth/AuthProvider';
 import { Icon } from '@/components/Icon';
@@ -9,7 +10,9 @@ import { ROLE_CARDS } from '@/lib/roles';
 import { colors, fonts, radii, shadow } from '@/theme/tokens';
 
 export default function AccountScreen() {
+  const router = useRouter();
   const { session, role, signOut } = useAuth();
+  const isSupply = role === 'caregiver' || role === 'provider';
   const meta = (session?.user?.user_metadata ?? {}) as { first_name?: string; last_name?: string };
   const first = meta.first_name ?? '';
   const last = meta.last_name ?? '';
@@ -39,6 +42,23 @@ export default function AccountScreen() {
           ) : null}
         </View>
       </View>
+
+      {isSupply ? (
+        <Pressable
+          onPress={() => router.push('/verification')}
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.linkCard, { opacity: pressed ? 0.85 : 1 }]}
+        >
+          <View style={styles.linkIcon}>
+            <Icon name="shield" size={18} color={colors.brand} />
+          </View>
+          <View style={styles.linkText}>
+            <Text style={styles.linkTitle}>Verification</Text>
+            <Text style={styles.linkSub}>Complete your steps to go live.</Text>
+          </View>
+          <Icon name="chevron-right" size={20} color={colors.ink3} />
+        </Pressable>
+      ) : null}
 
       <View style={styles.spacer} />
 
@@ -70,6 +90,27 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceAlt,
   },
   roleText: { fontFamily: fonts.semibold, fontSize: 12, color: colors.ink },
+  linkCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: colors.surface,
+    borderRadius: radii.lg,
+    padding: 16,
+    marginTop: 12,
+    ...shadow.e1,
+  },
+  linkIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: radii.pill,
+    backgroundColor: colors.brandSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  linkText: { flex: 1, minWidth: 0 },
+  linkTitle: { fontFamily: fonts.semibold, fontSize: 15, color: colors.ink },
+  linkSub: { fontFamily: fonts.regular, fontSize: 13, color: colors.ink2, marginTop: 2 },
   spacer: { flex: 1 },
   note: { fontFamily: fonts.regular, fontSize: 12, color: colors.ink3, textAlign: 'center', marginTop: 12 },
 });
