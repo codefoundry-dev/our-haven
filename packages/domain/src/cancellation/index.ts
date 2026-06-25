@@ -1,25 +1,33 @@
 /**
- * Cancellation policy calculator (OH-112).
+ * Cancellation policy calculator (OH-178; completes the OH-112 draft).
  *
  * Pure-TS deep module per ADR-0004. Encodes the v1 platform-wide cancellation
- * rule from CONTEXT.md § Cancellation policy:
+ * rule from CONTEXT.md § Cancellation policy.
+ *
+ * ── Caregiver-only (ADR-0011) ──────────────────────────────────────────────
+ * Only Caregiver Bookings carry on-platform money, so only they have refund/fee
+ * math. A Provider consultation cancellation (either party) has **no fee math**
+ * — it just releases the held slot and notifies (off-platform, null payment) —
+ * so a consultation NEVER enters this calculator. The two parties that can
+ * cancel a Caregiver Booking are the **Parent** and the **Caregiver**:
  *
  *   - Parent-initiated, ≥24h before start → free (full refund)
  *   - Parent-initiated, <24h and ≥2h      → 50% charge
  *   - Parent-initiated, <2h or after start → 100% charge
- *   - Provider-initiated                  → free in v1 (Provider tracked
- *     for admin review at the state-machine layer, not here)
+ *   - Caregiver-initiated                 → free in v1 (full refund); repeat
+ *     caregiver cancellations are tracked for admin review + search-ranking at
+ *     the state-machine / handler layer, not here.
  *
  * The arithmetic operates on the Booking's `agreed_rate × scope` original
  * authorized amount (in integer cents). The split returned satisfies the
  * invariant `chargeCents + refundCents = originalAuthorizedCents` for every
  * input.
  *
- * Per-Provider cancellation policies are deferred past v1 — this module is
- * intentionally policy-table-free.
+ * Per-supply (per-Caregiver) cancellation policies are deferred past v1 — this
+ * module is intentionally policy-table-free.
  */
 
-export const CANCELLATION_PARTIES = ['parent', 'provider'] as const;
+export const CANCELLATION_PARTIES = ['parent', 'caregiver'] as const;
 export type CancellationParty = (typeof CANCELLATION_PARTIES)[number];
 
 export const CANCELLATION_TIERS = ['free', 'half', 'full'] as const;
@@ -37,7 +45,7 @@ export interface CancellationInput {
 }
 
 export interface CancellationResult {
-  /** Amount captured from the Parent (flows to Provider less Commission downstream). */
+  /** Amount captured from the Parent (flows to the Caregiver less Commission downstream). */
   chargeCents: number;
   /** Amount refunded to the Parent. */
   refundCents: number;
@@ -73,7 +81,9 @@ export function calculateCancellation(input: CancellationInput): CancellationRes
     throw new Error('bookingStartAt and cancellationAt must be valid Dates');
   }
 
-  if (cancelledBy === 'provider') {
+  if (cancelledBy === 'caregiver') {
+    // Caregiver-initiated cancellation is free to the Parent (full refund) in
+    // v1; the repeat-cancellation tracking is a handler/state-machine concern.
     return {
       chargeCents: 0,
       refundCents: originalAuthorizedCents,
@@ -107,4 +117,4 @@ export function calculateCancellation(input: CancellationInput): CancellationRes
   };
 }
 
-export const CANCELLATION_MODULE_VERSION = '0.1.0-OH-112';
+export const CANCELLATION_MODULE_VERSION = '0.2.0-OH-178';
