@@ -2,10 +2,11 @@
  * Typed API client for the Our Haven backend.
  *
  * Request/response shapes come from @our-haven/openapi-types (generated from
- * apps/backend/openapi/openapi.yaml — the source of truth per ADR-0004), so the
- * client can never drift from the spec without a type error.
+ * supabase/functions/api/openapi/openapi.yaml — the live Hono Edge Function spec
+ * and source of truth per ADR-0004/0019), so the client can never drift from the
+ * spec without a type error.
  *
- * Base URL is EXPO_PUBLIC_API_URL (the Supabase Edge Functions host / backend).
+ * Base URL is EXPO_PUBLIC_API_URL (the Supabase Edge Functions host).
  */
 import type { paths } from '@our-haven/openapi-types';
 

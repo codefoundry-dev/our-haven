@@ -3,6 +3,7 @@ import { createRoute, type OpenAPIHono, z } from '@hono/zod-openapi';
 import { requireAuth } from '../auth/middleware.ts';
 import { SIGNUP_ROLES } from '../auth/roles.ts';
 import { CAREGIVER_CATEGORIES, SPECIALTIES } from '../auth/taxonomy.ts';
+import { US_STATES } from '../auth/us-states.ts';
 import type { AppEnv } from '../context.ts';
 import type { Db } from '../db/kysely.ts';
 import { ConsoleEmailOtpNotifier, EmailOtpService } from '../services/email-otp.ts';
@@ -26,11 +27,15 @@ const STEP_UP_MAX_AGE_SEC = 15 * 60;
 const RoleEnum = z.enum(SIGNUP_ROLES);
 const CategoriesSchema = z.array(z.enum(CAREGIVER_CATEGORIES)).min(1);
 const SpecialtySchema = z.enum(SPECIALTIES);
+const StateSchema = z.enum(US_STATES);
 
 const RoleClaimRequest = z.object({
   role: RoleEnum,
   categories: CategoriesSchema.optional(),
   specialty: SpecialtySchema.optional(),
+  // Resident state (drives per-state adapter routing, ADR-0009/0015). Required
+  // for supply roles; not allowed for parent (cross-field check in the handler).
+  state: StateSchema.optional(),
 });
 
 const RoleClaimResponse = z
@@ -38,6 +43,7 @@ const RoleClaimResponse = z
     role: RoleEnum,
     categories: z.array(z.enum(CAREGIVER_CATEGORIES)).nullable(),
     specialty: SpecialtySchema.nullable(),
+    state: StateSchema.nullable(),
   })
   .openapi('RoleClaimResponse');
 
@@ -80,7 +86,7 @@ const roleClaimRoute = createRoute({
   tags: ['auth'],
   summary: 'Set the permanent role on the authenticated Supabase user',
   description:
-    'Idempotent. Rejects with 409 if the user already has a role claim that differs from the request — role is permanent (ADR-0011 / CONTEXT § Authentication). `role` is one of {parent, caregiver, provider} (admin is internal-only, never self-assignable). A caregiver must include `categories`; a provider must include `specialty`. Claims are written to Supabase `app_metadata`; the client must refresh its session to receive an access token carrying the new claims.',
+    'Idempotent. Rejects with 409 if the user already has a role claim that differs from the request — role is permanent (ADR-0011 / CONTEXT § Authentication). `role` is one of {parent, caregiver, provider} (admin is internal-only, never self-assignable). A caregiver must include `categories`; a provider must include `specialty`. Supply roles (caregiver/provider) must include a resident `state` (drives per-state adapter routing, ADR-0009/0015); parent must not. Claims are written to Supabase `app_metadata`, and the supply identity (role, categories/specialty, state) is persisted to the `providers` table. The client must refresh its session to receive an access token carrying the new claims.',
   security: [{ supabaseAccessToken: [] }],
   middleware: [requireAuth()] as const,
   request: { body: { content: json(RoleClaimRequest), required: true } },
@@ -183,12 +189,14 @@ async function grantStepUp(
 
 export function registerAuthRoutes(app: OpenAPIHono<AppEnv>): void {
   app.openapi(roleClaimRoute, async (c) => {
-    const { supabase } = c.var.deps;
+    const { supabase, db } = c.var.deps;
     const principal = c.get('principal')!;
     const body = c.req.valid('json');
 
     // Cross-field validation (kept in the handler so the request schema stays a
     // plain ZodObject for @hono/zod-openapi).
+    const isSupply = body.role === 'caregiver' || body.role === 'provider';
+
     if (body.role === 'caregiver' && !body.categories) {
       return c.json({ error: 'categories_required', reason: 'categories is required when role=caregiver' }, 400);
     }
@@ -201,25 +209,59 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>): void {
     if (body.role !== 'provider' && body.specialty) {
       return c.json({ error: 'specialty_not_allowed', reason: 'specialty is only valid when role=provider' }, 400);
     }
+    if (isSupply && !body.state) {
+      return c.json({ error: 'state_required', reason: 'state is required when role=caregiver or role=provider' }, 400);
+    }
+    if (!isSupply && body.state) {
+      return c.json(
+        { error: 'state_not_allowed', reason: 'state is only valid for supply roles (caregiver, provider)' },
+        400,
+      );
+    }
 
     const desiredCategories = body.categories ?? null;
     const desiredSpecialty = body.specialty ?? null;
+    const desiredState = body.state ?? null;
 
     if (principal.role) {
       const same =
         principal.role === body.role &&
         sameStringArray(principal.categories, desiredCategories) &&
-        (principal.specialty ?? null) === desiredSpecialty;
+        (principal.specialty ?? null) === desiredSpecialty &&
+        (principal.state ?? null) === desiredState;
       if (same) {
-        return c.json({ role: body.role, categories: desiredCategories, specialty: desiredSpecialty }, 200);
+        return c.json(
+          { role: body.role, categories: desiredCategories, specialty: desiredSpecialty, state: desiredState },
+          200,
+        );
       }
       return c.json({ error: 'role_already_claimed', reason: 'role is permanent and cannot be changed' }, 409);
+    }
+
+    // First claim. Persist the supply identity to the `providers` table BEFORE
+    // writing app_metadata: the two stores can't share a transaction, and a
+    // failed app_metadata write must leave the user re-claimable (role still
+    // unset in the JWT) rather than logged-in with no supply record. The insert
+    // is idempotent on `uid`, so a retry after a partial failure converges.
+    if (isSupply && desiredState) {
+      await db
+        .insertInto('providers')
+        .values({
+          uid: principal.uid,
+          role: body.role as 'caregiver' | 'provider',
+          categories: desiredCategories,
+          specialty: desiredSpecialty,
+          state: desiredState,
+        })
+        .onConflict((oc) => oc.column('uid').doNothing())
+        .execute();
     }
 
     const existingAppMeta = (principal.claims.app_metadata ?? {}) as Record<string, unknown>;
     const nextAppMeta: Record<string, unknown> = { ...existingAppMeta, role: body.role };
     if (desiredCategories) nextAppMeta.categories = desiredCategories;
     if (desiredSpecialty) nextAppMeta.specialty = desiredSpecialty;
+    if (desiredState) nextAppMeta.state = desiredState;
 
     const { error } = await supabase.admin.auth.admin.updateUserById(principal.uid, {
       app_metadata: nextAppMeta,
@@ -228,7 +270,10 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>): void {
       console.error('[auth] supabase updateUserById failed', error);
       throw new Error('failed_to_set_role_claim');
     }
-    return c.json({ role: body.role, categories: desiredCategories, specialty: desiredSpecialty }, 200);
+    return c.json(
+      { role: body.role, categories: desiredCategories, specialty: desiredSpecialty, state: desiredState },
+      200,
+    );
   });
 
   app.openapi(emailOtpIssueRoute, async (c) => {

@@ -87,11 +87,14 @@ function principalFromPayload(payload: SupabaseJwtPayload): Principal {
   const appMeta = (payload.app_metadata ?? {}) as Record<string, unknown>;
   const role = isRole(appMeta.role) ? appMeta.role : null;
 
+  const isSupply = role === 'caregiver' || role === 'provider';
+
   return {
     uid: payload.sub,
     role,
     categories: role === 'caregiver' ? readStringArray(appMeta.categories) : null,
     specialty: role === 'provider' ? readString(appMeta.specialty) : null,
+    state: isSupply ? readString(appMeta.state) : null,
     email: payload.email ?? null,
     phone: payload.phone ?? null,
     secondFactor: deriveSecondFactor(payload),

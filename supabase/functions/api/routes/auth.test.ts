@@ -30,6 +30,22 @@ function makeDb(opts: { stepUpGrant?: { granted_at: Date } | null } = {}): AppDe
   } as unknown as AppDeps['db'];
 }
 
+/** Db stub for the role-claim providers insert. Captures each `.values(...)` so
+ *  tests can assert the persisted supply identity. The handler calls
+ *  `insertInto('providers').values(row).onConflict(...).execute()`. */
+function makeProvidersDb(): { db: AppDeps['db']; inserts: Array<Record<string, unknown>> } {
+  const inserts: Array<Record<string, unknown>> = [];
+  const insertChain = {
+    values: (row: Record<string, unknown>) => {
+      inserts.push(row);
+      return insertChain;
+    },
+    onConflict: () => insertChain,
+    execute: async () => [],
+  };
+  return { db: { insertInto: () => insertChain } as unknown as AppDeps['db'], inserts };
+}
+
 function makeDeps(opts: {
   db?: AppDeps['db'];
   updateUserById?: ReturnType<typeof vi.fn>;
@@ -62,74 +78,132 @@ describe('POST /v1/auth/role-claim', () => {
     expect(res.status).toBe(401);
   });
 
-  it('sets the caregiver role + categories on a role-less token and writes app_metadata', async () => {
+  it('sets the caregiver role + categories + state, writes app_metadata, and persists a providers row', async () => {
     const updateUserById = vi.fn(async () => ({ data: null, error: null }));
-    const app = buildApp(makeDeps({ updateUserById }));
+    const { db, inserts } = makeProvidersDb();
+    const app = buildApp(makeDeps({ db, updateUserById }));
     const token = await mintAccessToken({ sub: 'uid-1', email: 'cg@example.com' });
     const res = await app.request(
       '/v1/auth/role-claim',
-      postJson(token, { role: 'caregiver', categories: ['babysitter', 'nanny'] }),
+      postJson(token, { role: 'caregiver', categories: ['babysitter', 'nanny'], state: 'CA' }),
     );
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       role: 'caregiver',
       categories: ['babysitter', 'nanny'],
       specialty: null,
+      state: 'CA',
     });
     expect(updateUserById).toHaveBeenCalledWith(
       'uid-1',
       expect.objectContaining({
-        app_metadata: expect.objectContaining({ role: 'caregiver', categories: ['babysitter', 'nanny'] }),
+        app_metadata: expect.objectContaining({ role: 'caregiver', categories: ['babysitter', 'nanny'], state: 'CA' }),
       }),
     );
+    expect(inserts).toEqual([
+      { uid: 'uid-1', role: 'caregiver', categories: ['babysitter', 'nanny'], specialty: null, state: 'CA' },
+    ]);
   });
 
-  it('sets the provider role + specialty', async () => {
+  it('sets the provider role + specialty + state and persists a providers row', async () => {
     const updateUserById = vi.fn(async () => ({ data: null, error: null }));
-    const app = buildApp(makeDeps({ updateUserById }));
+    const { db, inserts } = makeProvidersDb();
+    const app = buildApp(makeDeps({ db, updateUserById }));
     const token = await mintAccessToken({ sub: 'uid-2', email: 'pv@example.com' });
-    const res = await app.request('/v1/auth/role-claim', postJson(token, { role: 'provider', specialty: 'slp' }));
+    const res = await app.request(
+      '/v1/auth/role-claim',
+      postJson(token, { role: 'provider', specialty: 'slp', state: 'TX' }),
+    );
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ role: 'provider', categories: null, specialty: 'slp' });
+    expect(await res.json()).toEqual({ role: 'provider', categories: null, specialty: 'slp', state: 'TX' });
     expect(updateUserById).toHaveBeenCalledWith(
       'uid-2',
-      expect.objectContaining({ app_metadata: expect.objectContaining({ role: 'provider', specialty: 'slp' }) }),
+      expect.objectContaining({ app_metadata: expect.objectContaining({ role: 'provider', specialty: 'slp', state: 'TX' }) }),
     );
+    expect(inserts).toEqual([
+      { uid: 'uid-2', role: 'provider', categories: null, specialty: 'slp', state: 'TX' },
+    ]);
   });
 
-  it('is idempotent (200, no write) when the existing claim matches', async () => {
+  it('is idempotent (200, no write) when the existing claim matches, including state', async () => {
     const updateUserById = vi.fn(async () => ({ data: null, error: null }));
-    const app = buildApp(makeDeps({ updateUserById }));
+    const { db, inserts } = makeProvidersDb();
+    const app = buildApp(makeDeps({ db, updateUserById }));
     const token = await mintAccessToken({
       sub: 'uid-3',
-      appMetadata: { role: 'caregiver', categories: ['babysitter'] },
+      appMetadata: { role: 'caregiver', categories: ['babysitter'], state: 'NY' },
     });
-    const res = await app.request('/v1/auth/role-claim', postJson(token, { role: 'caregiver', categories: ['babysitter'] }));
+    const res = await app.request(
+      '/v1/auth/role-claim',
+      postJson(token, { role: 'caregiver', categories: ['babysitter'], state: 'NY' }),
+    );
     expect(res.status).toBe(200);
     expect(updateUserById).not.toHaveBeenCalled();
+    expect(inserts).toEqual([]);
   });
 
   it('409 role_already_claimed when changing an existing role (permanence)', async () => {
     const updateUserById = vi.fn(async () => ({ data: null, error: null }));
-    const app = buildApp(makeDeps({ updateUserById }));
+    const { db, inserts } = makeProvidersDb();
+    const app = buildApp(makeDeps({ db, updateUserById }));
     const token = await mintAccessToken({ sub: 'uid-4', appMetadata: { role: 'parent' } });
-    const res = await app.request('/v1/auth/role-claim', postJson(token, { role: 'caregiver', categories: ['babysitter'] }));
+    const res = await app.request(
+      '/v1/auth/role-claim',
+      postJson(token, { role: 'caregiver', categories: ['babysitter'], state: 'CA' }),
+    );
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ error: 'role_already_claimed' });
     expect(updateUserById).not.toHaveBeenCalled();
+    expect(inserts).toEqual([]);
   });
 
   it('400 when role=caregiver omits categories', async () => {
     const app = buildApp(makeDeps());
     const token = await mintAccessToken({ sub: 'uid-5' });
-    const res = await app.request('/v1/auth/role-claim', postJson(token, { role: 'caregiver' }));
+    const res = await app.request('/v1/auth/role-claim', postJson(token, { role: 'caregiver', state: 'CA' }));
     expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'categories_required' });
   });
 
   it('400 when role=provider omits specialty', async () => {
     const app = buildApp(makeDeps());
     const token = await mintAccessToken({ sub: 'uid-6' });
-    const res = await app.request('/v1/auth/role-claim', postJson(token, { role: 'provider' }));
+    const res = await app.request('/v1/auth/role-claim', postJson(token, { role: 'provider', state: 'TX' }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'specialty_required' });
+  });
+
+  it('400 state_required when a caregiver omits state', async () => {
+    const app = buildApp(makeDeps());
+    const token = await mintAccessToken({ sub: 'uid-5b' });
+    const res = await app.request('/v1/auth/role-claim', postJson(token, { role: 'caregiver', categories: ['tutor'] }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'state_required' });
+  });
+
+  it('400 state_required when a provider omits state', async () => {
+    const app = buildApp(makeDeps());
+    const token = await mintAccessToken({ sub: 'uid-6b' });
+    const res = await app.request('/v1/auth/role-claim', postJson(token, { role: 'provider', specialty: 'ot' }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'state_required' });
+  });
+
+  it('400 state_not_allowed when state is sent for a parent', async () => {
+    const app = buildApp(makeDeps());
+    const token = await mintAccessToken({ sub: 'uid-7b' });
+    const res = await app.request('/v1/auth/role-claim', postJson(token, { role: 'parent', state: 'CA' }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'state_not_allowed' });
+  });
+
+  it('400 (schema) when state is not a valid US state', async () => {
+    const app = buildApp(makeDeps());
+    const token = await mintAccessToken({ sub: 'uid-7c' });
+    const res = await app.request(
+      '/v1/auth/role-claim',
+      postJson(token, { role: 'caregiver', categories: ['babysitter'], state: 'ZZ' }),
+    );
     expect(res.status).toBe(400);
   });
 
