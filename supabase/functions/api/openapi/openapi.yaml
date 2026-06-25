@@ -18,6 +18,10 @@ tags:
     description: Authentication — role-claim, email-OTP, step-up MFA
   - name: caregiver
     description: Caregiver Stripe Connect Express — onboarding, summary, dashboard (OH-190)
+  - name: verification
+    description: Supply verification — state + email/phone/ID-doc facts (OH-184)
+  - name: uploads
+    description: Signed URLs for client-direct private Storage uploads (OH-184)
   - name: webhooks
     description: Vendor webhooks — Stripe Connect account.updated (OH-190)
   - name: admin
@@ -286,6 +290,196 @@ components:
       required:
         - url
         - createdAt
+    SupplyVerification:
+      type: object
+      properties:
+        state:
+          type: string
+          enum:
+            - unverified
+            - email-verified
+            - id-uploaded
+            - screening-initiated
+            - connect-pending
+            - license-pending
+            - insurance-pending
+            - holding-state-not-supported
+            - awaiting-phone-verification
+            - activated
+            - rejected
+        role:
+          type: string
+          enum:
+            - caregiver
+            - provider
+        residentState:
+          type: string
+          enum:
+            - AL
+            - AK
+            - AZ
+            - AR
+            - CA
+            - CO
+            - CT
+            - DE
+            - DC
+            - FL
+            - GA
+            - HI
+            - ID
+            - IL
+            - IN
+            - IA
+            - KS
+            - KY
+            - LA
+            - ME
+            - MD
+            - MA
+            - MI
+            - MN
+            - MS
+            - MO
+            - MT
+            - NE
+            - NV
+            - NH
+            - NJ
+            - NM
+            - NY
+            - NC
+            - ND
+            - OH
+            - OK
+            - OR
+            - PA
+            - RI
+            - SC
+            - SD
+            - TN
+            - TX
+            - UT
+            - VT
+            - VA
+            - WA
+            - WV
+            - WI
+            - WY
+        licenseBoardSupported:
+          type: boolean
+        facts:
+          $ref: "#/components/schemas/SupplyVerificationFacts"
+      required:
+        - state
+        - role
+        - residentState
+        - licenseBoardSupported
+        - facts
+    SupplyVerificationFacts:
+      type: object
+      properties:
+        emailConfirmedAt:
+          type: string
+          nullable: true
+          format: date-time
+        phoneConfirmedAt:
+          type: string
+          nullable: true
+          format: date-time
+        idDocUploadedAt:
+          type: string
+          nullable: true
+          format: date-time
+        idDocObjectPath:
+          type: string
+          nullable: true
+        screeningInitiatedAt:
+          type: string
+          nullable: true
+          format: date-time
+        screeningPassedAt:
+          type: string
+          nullable: true
+          format: date-time
+        licenseVerifiedAt:
+          type: string
+          nullable: true
+          format: date-time
+        connectAccountReadyAt:
+          type: string
+          nullable: true
+          format: date-time
+        rejectedAt:
+          type: string
+          nullable: true
+          format: date-time
+        rejectionReason:
+          type: string
+          nullable: true
+      required:
+        - emailConfirmedAt
+        - phoneConfirmedAt
+        - idDocUploadedAt
+        - idDocObjectPath
+        - screeningInitiatedAt
+        - screeningPassedAt
+        - licenseVerifiedAt
+        - connectAccountReadyAt
+        - rejectedAt
+        - rejectionReason
+    VerificationError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
+    IdDocConfirmRequest:
+      type: object
+      properties:
+        objectPath:
+          type: string
+          minLength: 1
+          maxLength: 512
+      required:
+        - objectPath
+    SignedUploadUrl:
+      type: object
+      properties:
+        bucket:
+          type: string
+        objectPath:
+          type: string
+        token:
+          type: string
+        signedUrl:
+          type: string
+      required:
+        - bucket
+        - objectPath
+        - token
+        - signedUrl
+    UploadsError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
+    SignedUploadUrlRequest:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum:
+            - id-doc
+      required:
+        - kind
     StripeConnectWebhookAck:
       type: object
       properties:
@@ -892,6 +1086,182 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CaregiverConnectError"
+  /v1/providers/me/verification:
+    get:
+      tags:
+        - verification
+      summary: Read the authenticated supply member's verification state + checklist
+        facts
+      description: Returns the current Verification state computed from per-step facts
+        (email / phone / ID / screening / license) plus the raw timestamps that
+        drive the verification checklist. Email + phone confirmations are
+        mirrored from Supabase Auth on read so they reflect the latest session
+        state. Scoped to the unified `providers` supply table, so both
+        Caregivers and Providers use it.
+      security:
+        - supabaseAccessToken: []
+      responses:
+        "200":
+          description: Verification state + facts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupplyVerification"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationError"
+        "403":
+          description: Wrong role (parent / admin)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationError"
+        "404":
+          description: Supply (provider) row not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationError"
+  /v1/providers/me/verification/phone-confirm:
+    post:
+      tags:
+        - verification
+      summary: Mirror a completed Supabase phone confirmation into the verification
+        facts
+      description: Called by the client after it completes Supabase phone OTP
+        (supabase.auth.verifyOtp). Fetches the user from the Supabase admin API,
+        requires phone_confirmed_at, and records it on provider_verifications.
+        Phone is the hard final activation gate (ADR-0015). Idempotent.
+      security:
+        - supabaseAccessToken: []
+      responses:
+        "200":
+          description: Phone confirmation mirrored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupplyVerification"
+        "400":
+          description: Phone not yet confirmed in Supabase
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationError"
+        "403":
+          description: Wrong role (parent / admin)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationError"
+        "404":
+          description: Supply (provider) row not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationError"
+  /v1/providers/me/verification/id-doc:
+    post:
+      tags:
+        - verification
+      summary: Record a completed government-ID upload
+      description: Called after the client uploads a government-issued ID through the
+        signed-URL flow (POST /v1/uploads/signed-url → PUT to Supabase Storage).
+        The body carries the returned objectPath; the server validates it is
+        scoped to this user's id-doc namespace (id-doc/<uid>/) and records the
+        upload timestamp.
+      security:
+        - supabaseAccessToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IdDocConfirmRequest"
+      responses:
+        "200":
+          description: ID upload recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupplyVerification"
+        "400":
+          description: objectPath not scoped to this user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationError"
+        "403":
+          description: Wrong role (parent / admin)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationError"
+        "404":
+          description: Supply (provider) row not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationError"
+  /v1/uploads/signed-url:
+    post:
+      tags:
+        - uploads
+      summary: Mint a one-time signed URL for a client-direct private Storage upload
+      description: Returns a signed upload URL + token for a server-chosen,
+        uid-namespaced object key in a private Supabase Storage bucket. The
+        client PUTs the file with
+        supabase.storage.from(bucket).uploadToSignedUrl(objectPath, token,
+        file), then confirms the objectPath to the owning resource (id-doc →
+        POST /v1/providers/me/verification/id-doc). Supply-scoped (caregiver /
+        provider).
+      security:
+        - supabaseAccessToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignedUploadUrlRequest"
+      responses:
+        "200":
+          description: Signed upload URL issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignedUploadUrl"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadsError"
+        "403":
+          description: Wrong role (parent / admin)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadsError"
+        "502":
+          description: Storage failed to mint a signed URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadsError"
   /v1/webhooks/stripe-connect:
     post:
       tags:

@@ -6,6 +6,8 @@ import { registerAdminStripeTaxRoutes } from './routes/admin/stripe-tax.ts';
 import { registerAuthRoutes } from './routes/auth.ts';
 import { registerCaregiverConnectRoutes } from './routes/caregiver-connect.ts';
 import { registerHealthRoutes } from './routes/health.ts';
+import { registerUploadRoutes } from './routes/uploads.ts';
+import { registerVerificationRoutes } from './routes/verification.ts';
 import { registerStripeConnectWebhookRoutes } from './routes/webhooks/stripe-connect.ts';
 
 export const OPENAPI_DOC_PATH = '/openapi.json';
@@ -37,6 +39,8 @@ export const openApiInfo = {
     { name: 'health', description: 'Liveness and readiness probes' },
     { name: 'auth', description: 'Authentication — role-claim, email-OTP, step-up MFA' },
     { name: 'caregiver', description: 'Caregiver Stripe Connect Express — onboarding, summary, dashboard (OH-190)' },
+    { name: 'verification', description: 'Supply verification — state + email/phone/ID-doc facts (OH-184)' },
+    { name: 'uploads', description: 'Signed URLs for client-direct private Storage uploads (OH-184)' },
     { name: 'webhooks', description: 'Vendor webhooks — Stripe Connect account.updated (OH-190)' },
     { name: 'admin', description: 'Admin-only surfaces (Stripe Tax registrations + calculation audit, etc.)' },
     {
@@ -75,6 +79,8 @@ export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerHealthRoutes(v1);
   registerAuthRoutes(v1);
   registerCaregiverConnectRoutes(v1);
+  registerVerificationRoutes(v1);
+  registerUploadRoutes(v1);
   registerStripeConnectWebhookRoutes(v1);
   registerAdminStripeTaxRoutes(v1);
   app.route('/v1', v1);

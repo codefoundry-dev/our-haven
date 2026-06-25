@@ -568,6 +568,296 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/providers/me/verification": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the authenticated supply member's verification state + checklist facts
+         * @description Returns the current Verification state computed from per-step facts (email / phone / ID / screening / license) plus the raw timestamps that drive the verification checklist. Email + phone confirmations are mirrored from Supabase Auth on read so they reflect the latest session state. Scoped to the unified `providers` supply table, so both Caregivers and Providers use it.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Verification state + facts */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SupplyVerification"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VerificationError"];
+                    };
+                };
+                /** @description Wrong role (parent / admin) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VerificationError"];
+                    };
+                };
+                /** @description Supply (provider) row not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VerificationError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers/me/verification/phone-confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mirror a completed Supabase phone confirmation into the verification facts
+         * @description Called by the client after it completes Supabase phone OTP (supabase.auth.verifyOtp). Fetches the user from the Supabase admin API, requires phone_confirmed_at, and records it on provider_verifications. Phone is the hard final activation gate (ADR-0015). Idempotent.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Phone confirmation mirrored */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SupplyVerification"];
+                    };
+                };
+                /** @description Phone not yet confirmed in Supabase */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VerificationError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VerificationError"];
+                    };
+                };
+                /** @description Wrong role (parent / admin) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VerificationError"];
+                    };
+                };
+                /** @description Supply (provider) row not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VerificationError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers/me/verification/id-doc": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record a completed government-ID upload
+         * @description Called after the client uploads a government-issued ID through the signed-URL flow (POST /v1/uploads/signed-url → PUT to Supabase Storage). The body carries the returned objectPath; the server validates it is scoped to this user's id-doc namespace (id-doc/<uid>/) and records the upload timestamp.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["IdDocConfirmRequest"];
+                };
+            };
+            responses: {
+                /** @description ID upload recorded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SupplyVerification"];
+                    };
+                };
+                /** @description objectPath not scoped to this user */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VerificationError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VerificationError"];
+                    };
+                };
+                /** @description Wrong role (parent / admin) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VerificationError"];
+                    };
+                };
+                /** @description Supply (provider) row not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VerificationError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/uploads/signed-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint a one-time signed URL for a client-direct private Storage upload
+         * @description Returns a signed upload URL + token for a server-chosen, uid-namespaced object key in a private Supabase Storage bucket. The client PUTs the file with supabase.storage.from(bucket).uploadToSignedUrl(objectPath, token, file), then confirms the objectPath to the owning resource (id-doc → POST /v1/providers/me/verification/id-doc). Supply-scoped (caregiver / provider).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SignedUploadUrlRequest"];
+                };
+            };
+            responses: {
+                /** @description Signed upload URL issued */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SignedUploadUrl"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UploadsError"];
+                    };
+                };
+                /** @description Wrong role (parent / admin) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UploadsError"];
+                    };
+                };
+                /** @description Storage failed to mint a signed URL */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UploadsError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/webhooks/stripe-connect": {
         parameters: {
             query?: never;
@@ -966,6 +1256,57 @@ export interface components {
             url: string;
             /** Format: date-time */
             createdAt: string;
+        };
+        SupplyVerification: {
+            /** @enum {string} */
+            state: "unverified" | "email-verified" | "id-uploaded" | "screening-initiated" | "connect-pending" | "license-pending" | "insurance-pending" | "holding-state-not-supported" | "awaiting-phone-verification" | "activated" | "rejected";
+            /** @enum {string} */
+            role: "caregiver" | "provider";
+            /** @enum {string} */
+            residentState: "AL" | "AK" | "AZ" | "AR" | "CA" | "CO" | "CT" | "DE" | "DC" | "FL" | "GA" | "HI" | "ID" | "IL" | "IN" | "IA" | "KS" | "KY" | "LA" | "ME" | "MD" | "MA" | "MI" | "MN" | "MS" | "MO" | "MT" | "NE" | "NV" | "NH" | "NJ" | "NM" | "NY" | "NC" | "ND" | "OH" | "OK" | "OR" | "PA" | "RI" | "SC" | "SD" | "TN" | "TX" | "UT" | "VT" | "VA" | "WA" | "WV" | "WI" | "WY";
+            licenseBoardSupported: boolean;
+            facts: components["schemas"]["SupplyVerificationFacts"];
+        };
+        SupplyVerificationFacts: {
+            /** Format: date-time */
+            emailConfirmedAt: string | null;
+            /** Format: date-time */
+            phoneConfirmedAt: string | null;
+            /** Format: date-time */
+            idDocUploadedAt: string | null;
+            idDocObjectPath: string | null;
+            /** Format: date-time */
+            screeningInitiatedAt: string | null;
+            /** Format: date-time */
+            screeningPassedAt: string | null;
+            /** Format: date-time */
+            licenseVerifiedAt: string | null;
+            /** Format: date-time */
+            connectAccountReadyAt: string | null;
+            /** Format: date-time */
+            rejectedAt: string | null;
+            rejectionReason: string | null;
+        };
+        VerificationError: {
+            error: string;
+            reason?: string;
+        };
+        IdDocConfirmRequest: {
+            objectPath: string;
+        };
+        SignedUploadUrl: {
+            bucket: string;
+            objectPath: string;
+            token: string;
+            signedUrl: string;
+        };
+        UploadsError: {
+            error: string;
+            reason?: string;
+        };
+        SignedUploadUrlRequest: {
+            /** @enum {string} */
+            kind: "id-doc";
         };
         StripeConnectWebhookAck: {
             /** @enum {boolean} */
