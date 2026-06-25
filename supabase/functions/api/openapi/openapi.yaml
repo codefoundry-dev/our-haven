@@ -16,6 +16,10 @@ tags:
     description: Liveness and readiness probes
   - name: auth
     description: Authentication — role-claim, email-OTP, step-up MFA
+  - name: caregiver
+    description: Caregiver Stripe Connect Express — onboarding, summary, dashboard (OH-190)
+  - name: webhooks
+    description: Vendor webhooks — Stripe Connect account.updated (OH-190)
 components:
   securitySchemes:
     supabaseAccessToken:
@@ -189,21 +193,112 @@ components:
         - secondFactor
         - grantedAt
         - expiresAt
-    StepUpSampleResponse:
+    CaregiverConnectSummary:
       type: object
       properties:
-        uid:
+        hasAccount:
+          type: boolean
+        stripeAccountId:
           type: string
-        stepUp:
+          nullable: true
+        chargesEnabled:
+          type: boolean
+        payoutsEnabled:
+          type: boolean
+        detailsSubmitted:
+          type: boolean
+        disabledReason:
           type: string
-          enum:
-            - satisfied
-        note:
+          nullable: true
+        accountReady:
+          type: boolean
+        accountReadyAt:
+          type: string
+          nullable: true
+          format: date-time
+        requirementsCurrentlyDue:
+          type: array
+          items:
+            type: string
+        requirementsPastDue:
+          type: array
+          items:
+            type: string
+        requirementsPendingVerification:
+          type: array
+          items:
+            type: string
+        lastWebhookAt:
+          type: string
+          nullable: true
+          format: date-time
+      required:
+        - hasAccount
+        - stripeAccountId
+        - chargesEnabled
+        - payoutsEnabled
+        - detailsSubmitted
+        - disabledReason
+        - accountReady
+        - accountReadyAt
+        - requirementsCurrentlyDue
+        - requirementsPastDue
+        - requirementsPendingVerification
+        - lastWebhookAt
+    CaregiverConnectError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
           type: string
       required:
-        - uid
-        - stepUp
-        - note
+        - error
+    CaregiverConnectOnboardingLink:
+      type: object
+      properties:
+        stripeAccountId:
+          type: string
+        url:
+          type: string
+          format: uri
+        expiresAt:
+          type: string
+          format: date-time
+      required:
+        - stripeAccountId
+        - url
+        - expiresAt
+    CaregiverConnectDashboardLink:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - url
+        - createdAt
+    StripeConnectWebhookAck:
+      type: object
+      properties:
+        received:
+          type: boolean
+          enum:
+            - true
+      required:
+        - received
+    StripeConnectWebhookError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
   parameters: {}
 paths:
   /v1/healthz:
@@ -466,34 +561,166 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthErrorResponse"
-  /v1/caregiver/payout-settings:
+  /v1/caregiver/connect/summary:
     get:
       tags:
-        - auth
-      summary: SCAFFOLD — sample step-up-MFA-gated payout-sensitive endpoint
-      description: Demonstrates the step-up MFA gate for payout-sensitive Caregiver
-        actions (CONTEXT § MFA posture). Requires role=caregiver AND a fresh
-        step-up grant (POST /v1/auth/step-up/refresh within 15 min) — otherwise
-        403 `step_up_required`. OH-190 replaces this scaffold with the real
-        Stripe Connect bank-detail / withdrawal endpoints.
+        - caregiver
+      summary: Read the authenticated Caregiver's Stripe Connect Express account summary
+      description: "Returns the read-only Connect account state mirrored from
+        `account.updated` webhooks: charges_enabled / payouts_enabled /
+        details_submitted, the disabled_reason if Stripe paused the account, and
+        the requirement lists (currently_due, past_due, pending_verification).
+        `accountReady` is true iff both capabilities are enabled — the gate on
+        verification activation + appearing in search (OH-190)."
       security:
         - supabaseAccessToken: []
       responses:
         "200":
-          description: Step-up satisfied
+          description: Connect account summary
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/StepUpSampleResponse"
+                $ref: "#/components/schemas/CaregiverConnectSummary"
         "401":
           description: Unauthenticated
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AuthErrorResponse"
+                $ref: "#/components/schemas/CaregiverConnectError"
+        "403":
+          description: Wrong role (Providers have no Connect)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverConnectError"
+        "404":
+          description: Caregiver not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverConnectError"
+  /v1/caregiver/connect/onboarding-link:
+    post:
+      tags:
+        - caregiver
+      summary: Create / reuse a Stripe Connect Express account and return a hosted
+        onboarding URL
+      description: "Idempotent: if the Caregiver already has a
+        `provider_connect_accounts` row with a `stripe_account_id`, reuses it;
+        otherwise creates a fresh Express account (type=express, country=US,
+        capabilities=card_payments+transfers, business_type=individual) and
+        stamps it onto the row. Returns a freshly-issued Stripe-hosted
+        account-onboarding link (the KYC flow — PRD story 49). Precondition:
+        Checkr screening has cleared (`screening_passed_at`)."
+      security:
+        - supabaseAccessToken: []
+      responses:
+        "200":
+          description: Onboarding link issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverConnectOnboardingLink"
+        "400":
+          description: Screening not cleared / no email
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverConnectError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverConnectError"
+        "403":
+          description: Wrong role (Providers have no Connect)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverConnectError"
+        "404":
+          description: Caregiver not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverConnectError"
+        "409":
+          description: Verification terminated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverConnectError"
+  /v1/caregiver/connect/dashboard-link:
+    post:
+      tags:
+        - caregiver
+      summary: Issue a Stripe Express dashboard login link — requires step-up MFA
+        (bank/withdrawal gate)
+      description: "Returns a one-time Stripe Express dashboard login URL. Bank-detail
+        edits and payout withdrawals both happen inside the Express dashboard,
+        so this single MFA-gated endpoint satisfies OH-190 AC #3 (step-up MFA
+        enforced on bank/withdrawal — PRD story 57). Requires a step-up MFA
+        grant issued within the last 5 minutes (`POST
+        /v1/auth/step-up/refresh`); without it the auth middleware returns 403
+        `step_up_required`."
+      security:
+        - supabaseAccessToken: []
+      responses:
+        "200":
+          description: Dashboard login link issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverConnectDashboardLink"
+        "400":
+          description: Connect account missing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverConnectError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverConnectError"
         "403":
           description: Wrong role or step-up required
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AuthErrorResponse"
+                $ref: "#/components/schemas/CaregiverConnectError"
+        "404":
+          description: Caregiver not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverConnectError"
+  /v1/webhooks/stripe-connect:
+    post:
+      tags:
+        - webhooks
+      summary: Stripe Connect Express webhook — mirrors account.updated onto
+        provider_connect_accounts
+      description: Receives Stripe Connect webhook deliveries (separate endpoint +
+        signing secret from the screening webhook). Verifies the
+        `Stripe-Signature` header with STRIPE_CONNECT_WEBHOOK_SECRET, then on
+        `account.updated` mirrors charges_enabled / payouts_enabled /
+        details_submitted / requirements / disabled_reason onto the row keyed by
+        `stripe_account_id`. When both capabilities transition to enabled for
+        the first time, stamps `account_ready_at`. Public route — the Stripe
+        signature is the authentication.
+      responses:
+        "200":
+          description: Acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StripeConnectWebhookAck"
+        "400":
+          description: Invalid signature or payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StripeConnectWebhookError"

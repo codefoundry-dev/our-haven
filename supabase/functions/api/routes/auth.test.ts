@@ -56,6 +56,7 @@ function makeDeps(opts: {
     env: buildTestEnv(),
     db: (opts.db ?? stub) as AppDeps['db'],
     supabase: { admin: { auth: { admin: { updateUserById } } } } as unknown as AppDeps['supabase'],
+    stripe: stub as AppDeps['stripe'],
   };
 }
 
@@ -246,32 +247,6 @@ describe('POST /v1/auth/step-up/refresh', () => {
     expect(body.secondFactor).toBe('totp');
     expect(typeof body.grantedAt).toBe('string');
     expect(typeof body.expiresAt).toBe('string');
-  });
-});
-
-describe('GET /v1/caregiver/payout-settings (sample step-up gate)', () => {
-  it('403 forbidden_role for a non-caregiver role', async () => {
-    const app = buildApp(makeDeps({ db: makeDb({ stepUpGrant: { granted_at: new Date() } }) }));
-    const token = await mintAccessToken({ sub: 'uid-1', appMetadata: { role: 'provider', specialty: 'slp' } });
-    const res = await app.request('/v1/caregiver/payout-settings', { headers: { authorization: `Bearer ${token}` } });
-    expect(res.status).toBe(403);
-    expect(await res.json()).toMatchObject({ error: 'forbidden_role' });
-  });
-
-  it('403 step_up_required for a caregiver without a fresh grant', async () => {
-    const app = buildApp(makeDeps({ db: makeDb({ stepUpGrant: null }) }));
-    const token = await mintAccessToken({ sub: 'uid-1', appMetadata: { role: 'caregiver', categories: ['babysitter'] } });
-    const res = await app.request('/v1/caregiver/payout-settings', { headers: { authorization: `Bearer ${token}` } });
-    expect(res.status).toBe(403);
-    expect(await res.json()).toMatchObject({ error: 'step_up_required' });
-  });
-
-  it('200 for a caregiver with a fresh step-up grant', async () => {
-    const app = buildApp(makeDeps({ db: makeDb({ stepUpGrant: { granted_at: new Date() } }) }));
-    const token = await mintAccessToken({ sub: 'uid-1', appMetadata: { role: 'caregiver', categories: ['babysitter'] } });
-    const res = await app.request('/v1/caregiver/payout-settings', { headers: { authorization: `Bearer ${token}` } });
-    expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ uid: 'uid-1', stepUp: 'satisfied' });
   });
 });
 

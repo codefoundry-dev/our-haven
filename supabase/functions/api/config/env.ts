@@ -48,6 +48,41 @@ const EnvSchema = z.object({
     .describe(
       'Supabase service-role key — server-only, full Auth admin access (writes role claims to app_metadata). NEVER ship to clients. Auto-injected into deployed Edge Functions.',
     ),
+
+  // ── Stripe Connect Express (OH-190) ──────────────────────────────────────
+  // Caregiver-only payment rail (ADR-0001 / ADR-0011): hosted KYC onboarding,
+  // the `account.updated` Connect webhook, and the destination-charge
+  // application_fee skim. Providers carry no Connect (clinical fees are
+  // off-platform). Set via `supabase secrets set` — never auto-injected.
+  STRIPE_SECRET_KEY: z
+    .string()
+    .min(1)
+    .describe('Stripe secret API key (sk_test_… in dev, sk_live_… in prod). Server-only.'),
+  STRIPE_CONNECT_WEBHOOK_SECRET: z
+    .string()
+    .min(1)
+    .describe(
+      'Stripe Connect webhook signing secret (whsec_…) for `account.updated` events on Caregiver Connect Express accounts. Distinct endpoint + secret from the screening webhook (OH-106).',
+    ),
+  STRIPE_CONNECT_RETURN_URL: z
+    .string()
+    .url()
+    .default('http://localhost:8081/caregiver/verification?stripe=return')
+    .describe(
+      'Where Stripe redirects a Caregiver after they finish (or close) the hosted Connect Express onboarding flow. The page re-fetches the Connect summary to reflect new capabilities.',
+    ),
+  STRIPE_CONNECT_REFRESH_URL: z
+    .string()
+    .url()
+    .default('http://localhost:8081/caregiver/verification?stripe=refresh')
+    .describe(
+      'Where Stripe redirects when the Caregiver needs a fresh onboarding link mid-flow (e.g. the previous link expired). The page requests a new onboarding link and continues.',
+    ),
+  STRIPE_API_BASE: z
+    .string()
+    .url()
+    .default('https://api.stripe.com/v1')
+    .describe('Stripe API base URL. Overridable for staging / sandbox; tests inject a fetch stub instead.'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

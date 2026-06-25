@@ -16,16 +16,19 @@ export function buildTestEnv(overrides: Record<string, string | undefined> = {})
     JWT_SECRET: TEST_JWT_SECRET,
     SUPABASE_URL: 'https://test.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
+    STRIPE_SECRET_KEY: 'sk_test_unused',
+    STRIPE_CONNECT_WEBHOOK_SECRET: 'whsec_test_connect',
     ...overrides,
   });
 }
 
-/** Deps with a Proxy db + supabase that throw if a route actually touches them —
- *  health (liveness) + auth (no step-up / no claim write) must not. Tests that
- *  exercise Postgres or the admin client pass their own stubs. */
+/** Deps with a Proxy db + supabase + stripe that throw if a route actually
+ *  touches them — health (liveness) + auth (no step-up / no claim write) must
+ *  not. Tests that exercise Postgres / the admin client / Stripe pass their own
+ *  stubs. */
 export function stubDeps(): AppDeps {
   const stub = new Proxy({} as never, { get: () => stub });
-  return { env: buildTestEnv(), db: stub, supabase: stub };
+  return { env: buildTestEnv(), db: stub, supabase: stub, stripe: stub };
 }
 
 export interface TestTokenInput {

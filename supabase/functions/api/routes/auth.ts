@@ -15,14 +15,16 @@ import { ConsoleEmailOtpNotifier, EmailOtpService } from '../services/email-otp.
  *   - POST /auth/email-otp/issue   — pre-paywall Parent email-OTP fallback
  *   - POST /auth/email-otp/verify  — verify the email-OTP, open a step-up window
  *   - POST /auth/step-up/refresh   — mint a step-up grant from an aal2 token
- *   - GET  /caregiver/payout-settings — SCAFFOLD sample of the step-up gate
+ *
+ * The real step-up-gated payout endpoints (Stripe Connect bank/withdrawal) live
+ * in routes/caregiver-connect.ts (OH-190); this module no longer carries a
+ * scaffold sample.
  *
  * Role permanence (ADR-0011 / CONTEXT § Authentication) is enforced server-side:
  * once `app_metadata.role` is set, role-claim returns 409 on any change.
  */
 
 const STEP_UP_GRANT_TTL_MS = 15 * 60 * 1_000;
-const STEP_UP_MAX_AGE_SEC = 15 * 60;
 
 const RoleEnum = z.enum(SIGNUP_ROLES);
 const CategoriesSchema = z.array(z.enum(CAREGIVER_CATEGORIES)).min(1);
@@ -65,14 +67,6 @@ const StepUpRefreshResponse = z
     expiresAt: z.string().datetime(),
   })
   .openapi('StepUpRefreshResponse');
-
-const StepUpSampleResponse = z
-  .object({
-    uid: z.string(),
-    stepUp: z.literal('satisfied'),
-    note: z.string(),
-  })
-  .openapi('StepUpSampleResponse');
 
 const ErrorResponse = z
   .object({ error: z.string(), reason: z.string().optional() })
@@ -142,22 +136,6 @@ const stepUpRefreshRoute = createRoute({
     200: { description: 'Step-up window opened', content: json(StepUpRefreshResponse) },
     400: { description: 'Access token is not aal2', content: json(ErrorResponse) },
     401: { description: 'Unauthenticated', content: json(ErrorResponse) },
-  },
-});
-
-const stepUpSampleRoute = createRoute({
-  method: 'get',
-  path: '/caregiver/payout-settings',
-  tags: ['auth'],
-  summary: 'SCAFFOLD — sample step-up-MFA-gated payout-sensitive endpoint',
-  description:
-    'Demonstrates the step-up MFA gate for payout-sensitive Caregiver actions (CONTEXT § MFA posture). Requires role=caregiver AND a fresh step-up grant (POST /v1/auth/step-up/refresh within 15 min) — otherwise 403 `step_up_required`. OH-190 replaces this scaffold with the real Stripe Connect bank-detail / withdrawal endpoints.',
-  security: [{ supabaseAccessToken: [] }],
-  middleware: [requireAuth({ roles: ['caregiver'], stepUpMaxAgeSec: STEP_UP_MAX_AGE_SEC })] as const,
-  responses: {
-    200: { description: 'Step-up satisfied', content: json(StepUpSampleResponse) },
-    401: { description: 'Unauthenticated', content: json(ErrorResponse) },
-    403: { description: 'Wrong role or step-up required', content: json(ErrorResponse) },
   },
 });
 
@@ -324,15 +302,4 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>): void {
     );
   });
 
-  app.openapi(stepUpSampleRoute, (c) => {
-    const principal = c.get('principal')!;
-    return c.json(
-      {
-        uid: principal.uid,
-        stepUp: 'satisfied' as const,
-        note: 'scaffold — OH-190 replaces with the real Stripe Connect bank/withdrawal endpoints',
-      },
-      200,
-    );
-  });
 }

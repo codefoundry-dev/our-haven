@@ -16,8 +16,10 @@ function fakeDeps(): AppDeps {
     JWT_SECRET: 'unused-edge-openapi-jwt-secret',
     SUPABASE_URL: 'https://unused.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'unused-service-role-key',
+    STRIPE_SECRET_KEY: 'sk_test_unused',
+    STRIPE_CONNECT_WEBHOOK_SECRET: 'whsec_unused',
   });
-  return { env, db: stub, supabase: stub };
+  return { env, db: stub, supabase: stub, stripe: stub };
 }
 
 export async function edgeOpenApiDocument(): Promise<unknown> {

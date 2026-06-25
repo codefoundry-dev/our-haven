@@ -11,6 +11,7 @@ import { loadEnv } from './config/env.ts';
 import { createDb } from './db/kysely.ts';
 import { mountUnderSlug } from './edge.ts';
 import { initSupabase } from './supabase/admin.ts';
+import { createStripeAdapter } from './vendors/stripe.ts';
 
 // Build the handler once at module scope (warm-isolate reuse). Supabase keeps
 // the function slug (`api`) in the request path, so mount the app under `/api`
@@ -19,7 +20,12 @@ function boot(): (req: Request) => Response | Promise<Response> {
   const env = loadEnv(Deno.env.toObject());
   const db = createDb(env);
   const supabase = initSupabase(env);
-  return mountUnderSlug(buildApp({ env, db, supabase }), 'api').fetch;
+  const stripe = createStripeAdapter({
+    secretKey: env.STRIPE_SECRET_KEY,
+    connectWebhookSecret: env.STRIPE_CONNECT_WEBHOOK_SECRET,
+    apiBase: env.STRIPE_API_BASE,
+  });
+  return mountUnderSlug(buildApp({ env, db, supabase, stripe }), 'api').fetch;
 }
 
 // A boot failure is almost always a missing/invalid secret (DATABASE_URL,
