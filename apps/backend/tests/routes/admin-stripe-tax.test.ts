@@ -181,7 +181,6 @@ function makeDeps(opts: { db: unknown; stripe?: StripeAdapter }): AppDeps {
     db: opts.db as never,
     supabase: passThrough,
     storage: passThrough,
-    queue: passThrough,
     stripe: opts.stripe ?? makeStripeStub(),
     backgroundCheck: passThrough,
   };

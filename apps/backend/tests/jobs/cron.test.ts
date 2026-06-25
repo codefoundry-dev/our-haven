@@ -1,38 +1,42 @@
 import { describe, expect, it } from 'vitest';
 
-import { CRON_JOBS, RETENTION_QUEUE, retentionSweepJob } from '@/jobs/cron.js';
+import {
+  CRON_JOBS,
+  WORKER_TICK_SCHEDULE,
+  WORKER_TICK_URL_SETTING,
+  workerTickJob,
+} from '@/jobs/cron.js';
 
 const cronFields = (expr: string) => expr.trim().split(/\s+/);
 
-describe('retentionSweepJob', () => {
-  it('schedules a daily sweep that enqueues onto the retention_planner pgmq queue', () => {
-    const job = retentionSweepJob();
+describe('workerTickJob', () => {
+  it('POSTs to the worker-tick function via pg_net every minute', () => {
+    const job = workerTickJob();
 
-    // pg_cron is SQL-only and cannot call app code (ADR-0010: no in-process
-    // timers), so the periodic job enqueues a pgmq message that the Node
-    // retention worker drains.
-    expect(RETENTION_QUEUE).toBe('retention_planner');
-    expect(job.command).toContain(`pgmq.send('${RETENTION_QUEUE}'`);
+    expect(job.name).toBe('worker_tick');
+    // pg_cron cannot call app code, so the job is a pg_net HTTP POST (schedule +
+    // transport — the plpgsql-canary carve-out, ADR-0019 § Decision 4).
+    expect(job.command).toContain('net.http_post');
+    expect(job.command).toContain(WORKER_TICK_URL_SETTING);
+    // No pgmq anywhere — that layer is gone.
+    expect(job.command).not.toContain('pgmq');
 
-    // Runs once per day at a fixed UTC time: numeric minute + hour, wildcard
-    // day-of-month / month / day-of-week.
-    const fields = cronFields(job.schedule);
-    expect(fields).toHaveLength(5);
-    const [minute, hour, dom, month, dow] = fields;
-    expect(Number.isInteger(Number(minute))).toBe(true);
-    expect(Number.isInteger(Number(hour))).toBe(true);
-    expect([dom, month, dow]).toEqual(['*', '*', '*']);
+    // Every minute: all five cron fields are wildcards.
+    expect(job.schedule).toBe(WORKER_TICK_SCHEDULE);
+    expect(cronFields(job.schedule)).toEqual(['*', '*', '*', '*', '*']);
   });
 
-  it('targets a caller-supplied queue so non-default deployments wire correctly', () => {
-    const job = retentionSweepJob('retention_planner_staging');
-    expect(job.command).toContain(`pgmq.send('retention_planner_staging'`);
+  it('is a no-op until the function URL is configured (safe to apply anywhere)', () => {
+    // The WHERE guard means an unset app.worker_tick_url skips the POST, so the
+    // migration applies cleanly in local/CI/staging without a configured URL.
+    const job = workerTickJob();
+    expect(job.command).toContain(`where current_setting('${WORKER_TICK_URL_SETTING}', true) is not null`);
   });
 });
 
 describe('CRON_JOBS catalog', () => {
-  it('registers the retention sweep', () => {
-    expect(CRON_JOBS.map((job) => job.name)).toContain('retention_planner_daily_sweep');
+  it('registers the worker tick', () => {
+    expect(CRON_JOBS.map((job) => job.name)).toContain('worker_tick');
   });
 
   it('uses unique job names (pg_cron keys jobs by name; dupes would clobber)', () => {

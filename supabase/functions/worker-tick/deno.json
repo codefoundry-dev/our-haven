@@ -1,0 +1,8 @@
+{
+  "imports": {
+    "zod": "npm:zod@4",
+    "kysely": "npm:kysely@0.29",
+    "postgres": "npm:postgres@3",
+    "kysely-postgres-js": "npm:kysely-postgres-js@2"
+  }
+}

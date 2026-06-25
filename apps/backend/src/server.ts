@@ -1,7 +1,6 @@
 import { buildApp } from '@/app.js';
 import { loadEnv } from '@/config/env.js';
 import { createDb } from '@/db/kysely.js';
-import { initQueue } from '@/jobs/queue.js';
 import { initSupabase } from '@/supabase/admin.js';
 import { initStorage } from '@/supabase/storage.js';
 import { createCheckrAdapter } from '@/vendors/checkr.js';
@@ -12,7 +11,6 @@ async function main(): Promise<void> {
   const db = createDb(env);
   const supabase = initSupabase(env);
   const storage = initStorage(env, supabase.admin);
-  const queue = initQueue(db);
   const stripe = createStripeAdapter({
     secretKey: env.STRIPE_SECRET_KEY,
     webhookSecret: env.STRIPE_WEBHOOK_SECRET,
@@ -30,7 +28,7 @@ async function main(): Promise<void> {
     apiBase: env.CHECKR_API_BASE,
   });
 
-  const app = await buildApp({ env, db, supabase, storage, queue, stripe, backgroundCheck });
+  const app = await buildApp({ env, db, supabase, storage, stripe, backgroundCheck });
 
   const shutdown = async (signal: string): Promise<void> => {
     app.log.info({ signal }, 'received shutdown signal');

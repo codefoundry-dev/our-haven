@@ -280,7 +280,6 @@ function makeDeps(opts: {
       } as never,
     },
     storage: passThrough,
-    queue: passThrough,
     stripe: (opts.stripe ?? makeStripeStub()) as never,
     backgroundCheck: (opts.backgroundCheck ?? makeBgcStub()) as never,
   };
