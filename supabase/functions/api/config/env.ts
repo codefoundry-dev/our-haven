@@ -105,6 +105,36 @@ const EnvSchema = z.object({
     .describe(
       'Private Supabase Storage bucket holding government-ID uploads. Signed upload URLs are minted by the service-role admin client (POST /v1/uploads/signed-url); objects are namespaced id-doc/<uid>/<uuid>. Provisioned by migration 20260627000001.',
     ),
+
+  // ── Stripe Tax (OH-192) ──────────────────────────────────────────────────
+  // Per-state taxability on the Parent Subscription + the platform Commission
+  // (ADR-0009 / CONTEXT § Sales tax model). Tax codes drive the Stripe Tax
+  // Calculation line item; Bookings are deliberately never plumbed through
+  // Stripe Tax (the route layer enforces the `subscription | commission` guard).
+  // Defaults keep the host bootable without extra secrets — both are stable,
+  // non-sensitive Stripe tax-code identifiers, not credentials.
+  STRIPE_TAX_SUBSCRIPTION_TAX_CODE: z
+    .string()
+    .min(1)
+    .default('txcd_10103001')
+    .describe(
+      'Stripe Tax product tax code for the Parent Subscription line (default txcd_10103001 — "Software as a service (SaaS) — business use"). State = subscriber\'s resident state.',
+    ),
+  STRIPE_TAX_COMMISSION_TAX_CODE: z
+    .string()
+    .min(1)
+    .default('txcd_20030000')
+    .describe(
+      'Stripe Tax product tax code for the platform Commission line (default txcd_20030000 — "General services"). State = Provider\'s resident state (B2B service).',
+    ),
+  STRIPE_TAX_ORIGIN_STATE: z
+    .string()
+    .length(2)
+    .regex(/^[A-Z]{2}$/)
+    .optional()
+    .describe(
+      "2-letter US state where Our Haven is registered as the seller. Stripe Tax uses it alongside the customer address to decide nexus; omitted falls back to the account's primary address.",
+    ),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

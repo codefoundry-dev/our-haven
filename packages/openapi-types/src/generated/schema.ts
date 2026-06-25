@@ -906,6 +906,279 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/stripe-tax/preview-calculation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Compute a Stripe Tax preview for a purpose + US state + amount; persists an audit row
+         * @description Calls Stripe Tax POST /v1/tax/calculations for either `subscription` (state = subscriber's resident state) or `commission` (state = Provider's resident state). Persists the result to `stripe_tax_calculations`. Used during launch verification to sample tax outcomes across states (OH-192 ACs #1 + #2) and at runtime as a preview before the Subscription/Commission flow charges. The purpose enum deliberately excludes Bookings — Our Haven does not collect sales tax on Bookings (CONTEXT § Sales tax model).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AdminStripeTaxPreviewRequest"];
+                };
+            };
+            responses: {
+                /** @description Tax calculation computed + persisted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminStripeTaxCalculation"];
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminStripeTaxError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminStripeTaxError"];
+                    };
+                };
+                /** @description Not an admin / TOTP required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminStripeTaxError"];
+                    };
+                };
+                /** @description Stripe Tax call failed */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminStripeTaxError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/stripe-tax/calculations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List recent Stripe Tax calculation audit rows
+         * @description Reads the `stripe_tax_calculations` audit table. Filterable by purpose, customer state, and subject uid. Returns up to 100 rows ordered by creation time (newest first).
+         */
+        get: {
+            parameters: {
+                query?: {
+                    purpose?: "subscription" | "commission";
+                    state?: string;
+                    subjectUid?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Audit rows */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminStripeTaxCalculationList"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminStripeTaxError"];
+                    };
+                };
+                /** @description Not an admin / TOTP required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminStripeTaxError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/stripe-tax/registrations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Stripe Tax registrations (the nexus dashboard view)
+         * @description Mirrors Stripe Tax GET /v1/tax/registrations. Status defaults to `active`; pass `all` to include scheduled + expired. The source of truth admins use to see which states Our Haven is collecting in — and where Stripe is prompting registration as nexus is crossed.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    status?: "active" | "expired" | "scheduled" | "all";
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Registrations (nexus view) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminStripeTaxRegistrationList"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminStripeTaxError"];
+                    };
+                };
+                /** @description Not an admin / TOTP required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminStripeTaxError"];
+                    };
+                };
+                /** @description Stripe call failed */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminStripeTaxError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Register Our Haven for sales-tax collection in a US state — step-up MFA required
+         * @description Creates a Stripe Tax registration for the named US state (country=US, country_options[us][state]=...). Step-up-MFA gated because registering for sales-tax collection is a binding compliance action. Used both for the pre-registration posture in priority states (OH-163) and reactively when Stripe Tax surfaces a nexus threshold crossing.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AdminStripeTaxCreateRegistrationRequest"];
+                };
+            };
+            responses: {
+                /** @description Registration created */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminStripeTaxRegistration"];
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminStripeTaxError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminStripeTaxError"];
+                    };
+                };
+                /** @description Not an admin / TOTP / step-up required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminStripeTaxError"];
+                    };
+                };
+                /** @description Stripe call failed */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminStripeTaxError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1042,6 +1315,69 @@ export interface components {
         StripeConnectWebhookError: {
             error: string;
             reason?: string;
+        };
+        AdminStripeTaxCalculation: {
+            calculationId: string;
+            stripeCalculationId: string;
+            /** @enum {string} */
+            purpose: "subscription" | "commission";
+            customerState: string;
+            customerPostalCode: string | null;
+            amountCents: number;
+            taxAmountCents: number;
+            amountTotalCents: number;
+            /** @enum {string} */
+            taxBehavior: "inclusive" | "exclusive";
+            taxCode: string;
+            taxBreakdown: {
+                amount: number;
+                inclusive: boolean;
+                taxabilityReason: string | null;
+                taxableAmount: number | null;
+                state: string | null;
+                taxType: string | null;
+                percentageDecimal: string | null;
+            }[];
+            /** Format: date-time */
+            expiresAt: string;
+        };
+        AdminStripeTaxError: {
+            error: string;
+            reason?: string;
+        };
+        AdminStripeTaxPreviewRequest: {
+            /** @enum {string} */
+            purpose: "subscription" | "commission";
+            amountCents: number;
+            state: string;
+            postalCode?: string;
+            city?: string;
+            reference: string;
+            /** Format: uuid */
+            subjectUid?: string;
+        };
+        AdminStripeTaxCalculationList: {
+            calculations: components["schemas"]["AdminStripeTaxCalculation"][];
+        };
+        AdminStripeTaxRegistrationList: {
+            registrations: components["schemas"]["AdminStripeTaxRegistration"][];
+            hasMore: boolean;
+        };
+        AdminStripeTaxRegistration: {
+            id: string;
+            state: string | null;
+            registrationType: string | null;
+            status: string;
+            /** Format: date-time */
+            activeFrom: string;
+            /** Format: date-time */
+            expiresAt: string | null;
+        };
+        AdminStripeTaxCreateRegistrationRequest: {
+            state: string;
+            /** @default state_sales_tax */
+            registrationType: string;
+            activeFromUnixSec?: number;
         };
     };
     responses: never;

@@ -2,6 +2,7 @@ import { OpenAPIHono } from '@hono/zod-openapi';
 
 import type { AppEnv } from './context.ts';
 import type { AppDeps } from './deps.ts';
+import { registerAdminStripeTaxRoutes } from './routes/admin/stripe-tax.ts';
 import { registerAuthRoutes } from './routes/auth.ts';
 import { registerCaregiverConnectRoutes } from './routes/caregiver-connect.ts';
 import { registerHealthRoutes } from './routes/health.ts';
@@ -41,6 +42,12 @@ export const openApiInfo = {
     { name: 'verification', description: 'Supply verification — state + email/phone/ID-doc facts (OH-184)' },
     { name: 'uploads', description: 'Signed URLs for client-direct private Storage uploads (OH-184)' },
     { name: 'webhooks', description: 'Vendor webhooks — Stripe Connect account.updated (OH-190)' },
+    { name: 'admin', description: 'Admin-only surfaces (Stripe Tax registrations + calculation audit, etc.)' },
+    {
+      name: 'tax',
+      description:
+        'Stripe Tax (OH-192) — per-state taxability on Subscription + Commission; Bookings deliberately not taxed.',
+    },
   ],
 };
 
@@ -75,6 +82,7 @@ export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerVerificationRoutes(v1);
   registerUploadRoutes(v1);
   registerStripeConnectWebhookRoutes(v1);
+  registerAdminStripeTaxRoutes(v1);
   app.route('/v1', v1);
 
   // Bearer security scheme for the Supabase access token (ADR-0010 § 62).
