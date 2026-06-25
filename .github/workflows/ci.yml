@@ -1,0 +1,66 @@
+name: CI
+
+# OH-174 acceptance gate (ADR-0019): typecheck + OpenAPI spec-drift + the
+# plpgsql canary + tests must pass before merge — for both the Fastify
+# workspaces and the Edge (Hono) `api` function.
+# Node version is pinned by .nvmrc (see ADR-0010 platform notes); keep them in sync.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same ref supersedes in-flight runs.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: typecheck • spec-drift • tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Node (pinned by .nvmrc)
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install (clean, lockfile-exact)
+        run: npm ci
+
+      # Gate 1 — typecheck every workspace (tsc --noEmit) + the Edge `api` tree
+      # (supabase/ is not an npm workspace, so it needs its own tsc invocation).
+      - name: Typecheck (workspaces)
+        run: npm run typecheck
+
+      - name: Typecheck (Edge api function)
+        run: npm run typecheck:edge
+
+      # Gate 2 — OpenAPI is the source of truth (ADR-0004). Fail on drift in the
+      # canonical Fastify spec, and in the growing Edge (Hono) spec (ADR-0019).
+      - name: OpenAPI spec-drift gate (Fastify, canonical)
+        run: npm run openapi:check --workspace=@our-haven/backend
+
+      - name: OpenAPI spec-drift gate (Edge / Hono)
+        run: npm run openapi:check:edge
+
+      # Gate 3 — the plpgsql canary (ADR-0019 § The plpgsql canary). Fail if a
+      # migration forces write-path logic into the DB without a registered
+      # exception — the pivot's switch-trigger.
+      - name: plpgsql canary
+        run: npm run check:no-plpgsql
+
+      # Gate 4 — unit/integration tests across workspaces (backend + domain)
+      # and the Edge `api` function (Hono app + Node-side scripts).
+      - name: Tests (workspaces)
+        run: npm test
+
+      - name: Tests (Edge api function)
+        run: npm run test:edge

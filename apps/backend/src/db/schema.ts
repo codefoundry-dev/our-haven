@@ -152,6 +152,20 @@ export interface StripeTaxCalculationsTable {
   created_at: Generated<Date>;
 }
 
+/**
+ * Chat messages for live Direct-Message threads, enabled for Supabase Realtime
+ * (OH-174 skeleton). Minimal foundational shape; OH-2.13 extends it. The
+ * realtime helper (src/supabase/realtime.ts) subscribes to INSERTs filtered by
+ * `thread_id`.
+ */
+export interface MessagesTable {
+  id: Generated<string>;
+  thread_id: string;
+  sender_uid: string;
+  body: string;
+  created_at: Generated<Date>;
+}
+
 export interface Database {
   auth_email_otps: AuthEmailOtpsTable;
   auth_step_up_grants: AuthStepUpGrantsTable;
@@ -163,4 +177,5 @@ export interface Database {
   provider_home_childcare_registrations: ProviderHomeChildcareRegistrationsTable;
   provider_connect_accounts: ProviderConnectAccountsTable;
   stripe_tax_calculations: StripeTaxCalculationsTable;
+  messages: MessagesTable;
 }

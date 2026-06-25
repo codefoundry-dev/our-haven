@@ -29,6 +29,13 @@ apps/backend/.gcp/
 **/*-credentials.json
 **/service-account*.json
 
+# Supabase Edge Functions env / secrets (ADR-0019)
+supabase/functions/**/.env
+supabase/functions/**/.env.*
+!supabase/functions/**/.env.example
+supabase/.temp/
+supabase/.branches/
+
 # Generated OpenAPI artifacts are committed (machine-generated source).
 # CI runs `npm run openapi:generate` and fails on diff (see openapi:check).
 
