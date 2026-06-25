@@ -20,10 +20,13 @@ tags:
     description: Caregiver Stripe Connect Express — onboarding, summary, dashboard (OH-190)
   - name: verification
     description: Supply verification — state + email/phone/ID-doc facts (OH-184)
+  - name: screening
+    description: Background screening — $35 Stripe charge + Checkr standard package (OH-185)
   - name: uploads
     description: Signed URLs for client-direct private Storage uploads (OH-184)
   - name: webhooks
-    description: Vendor webhooks — Stripe Connect account.updated (OH-190)
+    description: Vendor webhooks — Stripe Connect account.updated (OH-190), Stripe
+      payments payment_intent.succeeded + Checkr report.* (OH-185)
   - name: admin
     description: Admin-only surfaces (Stripe Tax registrations + calculation audit, etc.)
   - name: tax
@@ -446,6 +449,34 @@ components:
           maxLength: 512
       required:
         - objectPath
+    ScreeningInitiateResponse:
+      type: object
+      properties:
+        screeningId:
+          type: string
+          format: uuid
+        clientSecret:
+          type: string
+        paymentIntentId:
+          type: string
+        amountCents:
+          type: integer
+          minimum: 0
+          exclusiveMinimum: true
+      required:
+        - screeningId
+        - clientSecret
+        - paymentIntentId
+        - amountCents
+    ScreeningError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
     SignedUploadUrl:
       type: object
       properties:
@@ -490,6 +521,42 @@ components:
       required:
         - received
     StripeConnectWebhookError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
+    StripePaymentsWebhookAck:
+      type: object
+      properties:
+        received:
+          type: boolean
+          enum:
+            - true
+      required:
+        - received
+    StripePaymentsWebhookError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
+    CheckrWebhookAck:
+      type: object
+      properties:
+        received:
+          type: boolean
+          enum:
+            - true
+      required:
+        - received
+    CheckrWebhookError:
       type: object
       properties:
         error:
@@ -1217,6 +1284,58 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/VerificationError"
+  /v1/providers/me/verification/screening/initiate:
+    post:
+      tags:
+        - screening
+      summary: Initiate the $35 Stripe charge + create a background-screening row
+      description: Creates a `provider_screenings` row in `payment_pending` and a
+        Stripe PaymentIntent for the screening fee. The applicant confirms the
+        intent client-side; on `payment_intent.succeeded` the payments webhook
+        enqueues a durable `screening.invite` job and the worker-tick creates
+        the Checkr invitation (writing screening_initiated_at). Returns the
+        PaymentIntent client_secret so the web portal can mount Stripe Elements.
+        Rejects if the prior verification step (ID upload) is incomplete or a
+        screening is already in flight / cleared.
+      security:
+        - supabaseAccessToken: []
+      responses:
+        "200":
+          description: Charge created + screening row opened
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScreeningInitiateResponse"
+        "400":
+          description: Prior verification step incomplete (ID upload)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScreeningError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScreeningError"
+        "403":
+          description: Wrong role (parent / admin)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScreeningError"
+        "404":
+          description: Supply (provider) row not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScreeningError"
+        "409":
+          description: Screening already in flight or cleared
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScreeningError"
   /v1/uploads/signed-url:
     post:
       tags:
@@ -1289,6 +1408,59 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StripeConnectWebhookError"
+  /v1/webhooks/stripe-payments:
+    post:
+      tags:
+        - webhooks
+      summary: Stripe payments webhook — completes the screening charge + enqueues the
+        Checkr invite
+      description: Receives Stripe payments webhook deliveries (separate endpoint +
+        signing secret from the Connect webhook). Verifies the
+        `Stripe-Signature` header with STRIPE_PAYMENTS_WEBHOOK_SECRET, then on
+        `payment_intent.succeeded` for a screening charge flips the screening
+        row to `payment_succeeded` and enqueues a durable `screening.invite`
+        outbox row (resolving the applicant identity from Supabase Auth). The
+        worker-tick makes the slow Checkr invitation call. Public route — the
+        Stripe signature is the authentication.
+      responses:
+        "200":
+          description: Acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StripePaymentsWebhookAck"
+        "400":
+          description: Invalid signature or payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StripePaymentsWebhookError"
+  /v1/webhooks/checkr:
+    post:
+      tags:
+        - webhooks
+      summary: Checkr (background-check vendor) webhook — drives the Verification
+        state machine
+      description: Receives Checkr `report.*` deliveries. Verifies the
+        `X-Checkr-Signature` HMAC against CHECKR_WEBHOOK_SECRET, normalizes the
+        payload via the vendor-agnostic adapter, folds the result into the
+        verification facts (screening_passed_at / rejected_at), and stamps the
+        raw payload onto `provider_screenings.raw_payload` for FCRA-windowed
+        retention. Idempotent on `(vendor, vendor_report_id)`. Public route —
+        the Checkr signature is the authentication.
+      responses:
+        "200":
+          description: Acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckrWebhookAck"
+        "400":
+          description: Invalid signature
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckrWebhookError"
   /v1/admin/stripe-tax/preview-calculation:
     post:
       tags:

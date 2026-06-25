@@ -30,6 +30,7 @@ function makeDeps(opts: { supabase?: SupabaseHandles } = {}): AppDeps {
     db: stub,
     supabase: (opts.supabase ?? stub) as AppDeps['supabase'],
     stripe: stub,
+    backgroundCheck: stub,
   };
 }
 

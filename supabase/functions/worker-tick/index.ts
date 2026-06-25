@@ -10,9 +10,11 @@
 // Deployed `--no-verify-jwt`: the caller is pg_cron + pg_net, not an end user,
 // so the function gates itself on the WORKER_TICK_SECRET shared secret instead
 // of a Supabase JWT.
+import { createCheckrAdapter } from '../_shared/checkr.ts';
 import { isAuthorized } from './auth.ts';
 import { loadEnv } from './config/env.ts';
 import { createDb } from './db/kysely.ts';
+import { createScreeningInviteDispatcher } from './dispatchers/screening.ts';
 import { runTick } from './tick.ts';
 
 function json(body: unknown, status: number): Response {
@@ -25,11 +27,28 @@ function json(body: unknown, status: number): Response {
 // Build env + db once at module scope (warm-isolate reuse). A boot failure is
 // almost always a missing/invalid secret; surface it as a readable 503 rather
 // than an opaque WORKER_ERROR. The detail is config-validation text only.
-let boot: { env: ReturnType<typeof loadEnv>; db: ReturnType<typeof createDb> } | null = null;
+let boot: {
+  env: ReturnType<typeof loadEnv>;
+  db: ReturnType<typeof createDb>;
+  dispatcher: ReturnType<typeof createScreeningInviteDispatcher>;
+} | null = null;
 let bootError = '';
 try {
   const env = loadEnv(Deno.env.toObject());
-  boot = { env, db: createDb(env) };
+  const db = createDb(env);
+  // A SECOND db handle, dedicated to dispatcher write-backs. The outbox drain
+  // holds `db`'s single pooled connection inside a transaction for the duration
+  // of each dispatch (the SKIP-LOCKED guarantee), so the screening dispatcher
+  // must persist its result through its own connection or it would deadlock
+  // against `max:1` (see dispatchers/screening.ts).
+  const dispatchDb = createDb(env);
+  const checkr = createCheckrAdapter({
+    apiKey: env.CHECKR_API_KEY,
+    packageSlug: env.CHECKR_PACKAGE,
+    apiBase: env.CHECKR_API_BASE,
+  });
+  const dispatcher = createScreeningInviteDispatcher({ db: dispatchDb, checkr });
+  boot = { env, db, dispatcher };
 } catch (err) {
   bootError = err instanceof Error ? err.message : String(err);
   console.error('[worker-tick] boot failed:', bootError);
@@ -46,7 +65,7 @@ async function handler(req: Request): Promise<Response> {
   }
 
   try {
-    const summary = await runTick(boot.db);
+    const summary = await runTick(boot.db, { dispatcher: boot.dispatcher });
     return json(summary, 200);
   } catch (err) {
     console.error('[worker-tick] tick failed', err);

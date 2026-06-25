@@ -9,6 +9,7 @@ export function buildTestEnv(overrides: Record<string, string | undefined> = {})
     DATABASE_URL: 'postgres://test:test@localhost:5432/our_haven_test',
     DATABASE_SSL: 'false',
     WORKER_TICK_SECRET: 'test-worker-tick-secret',
+    CHECKR_API_KEY: 'checkr_api_test',
     ...overrides,
   });
 }

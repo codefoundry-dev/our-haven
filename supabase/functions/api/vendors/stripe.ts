@@ -33,6 +33,12 @@ export interface StripeConfig {
   secretKey: string;
   /** Secret for the Stripe Connect webhook endpoint (account.updated). */
   connectWebhookSecret: string;
+  /**
+   * OH-185: secret for the payments webhook endpoint (`payment_intent.succeeded`
+   * for the screening charge). A DISTINCT endpoint + signing secret from the
+   * Connect webhook — Stripe signs each endpoint with its own secret.
+   */
+  paymentsWebhookSecret?: string;
   /** Stripe API base URL — defaults to https://api.stripe.com/v1. */
   apiBase?: string;
   /** Override fetch impl — tests inject a stub. */
@@ -129,6 +135,40 @@ export interface CreatePaymentIntentResult {
   id: string;
   client_secret: string;
   status: string;
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+ * Screening charge (OH-185) — a one-shot direct PaymentIntent on the platform
+ * account (NOT a Connect destination charge): the Provider/Caregiver pays the
+ * $35 background-check fee, the platform keeps it (margin over Checkr's ~$30
+ * cost). Settled on the platform account so it needs no connected account.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+export interface CreateScreeningPaymentIntentInput {
+  amountCents: number;
+  description: string;
+  /** Carries `purpose: 'screening'` + `screening_id` + `provider_id` so the
+   *  payments webhook can locate the screening row on success. */
+  metadata: Record<string, string>;
+  /** No Stripe customer exists at supply sign-up — charge the PaymentIntent's
+   *  payment method directly. Optional for forward compatibility. */
+  customerId?: string | null;
+  currency?: 'usd';
+}
+
+export interface ParsedPaymentsEvent {
+  id: string;
+  type: string;
+  created: number;
+  data: { object: ParsedStripePaymentIntent };
+}
+
+export interface ParsedStripePaymentIntent {
+  id: string;
+  status: string;
+  amount: number;
+  currency: string;
+  metadata?: Record<string, string>;
 }
 
 /* ────────────────────────────────────────────────────────────────────────
@@ -268,6 +308,11 @@ export interface StripeAdapter {
 
   // Booking payment — application_fee destination charge
   createBookingPaymentIntent(input: CreateBookingPaymentIntentInput): Promise<CreatePaymentIntentResult>;
+
+  // Screening charge (OH-185) — direct PaymentIntent + its own webhook secret
+  createScreeningPaymentIntent(input: CreateScreeningPaymentIntentInput): Promise<CreatePaymentIntentResult>;
+  verifyPaymentsWebhookSignature(rawBody: string, signatureHeader: string | null): boolean;
+  parsePaymentsWebhookEvent(rawBody: string): ParsedPaymentsEvent | null;
 
   // Stripe Tax (OH-192)
   createTaxCalculation(input: TaxCalculationInput): Promise<TaxCalculationResult>;
@@ -414,6 +459,38 @@ export function createStripeAdapter(config: StripeConfig): StripeAdapter {
         body.set(`metadata[${k}]`, v);
       }
       return stripeFetch<CreatePaymentIntentResult>('/payment_intents', body);
+    },
+
+    async createScreeningPaymentIntent(
+      input: CreateScreeningPaymentIntentInput,
+    ): Promise<CreatePaymentIntentResult> {
+      // Direct charge on the platform account (no transfer_data / application_fee):
+      // the screening fee is platform revenue, not a marketplace pass-through.
+      const body = new URLSearchParams();
+      body.set('amount', String(input.amountCents));
+      body.set('currency', input.currency ?? 'usd');
+      body.set('description', input.description);
+      body.set('automatic_payment_methods[enabled]', 'true');
+      if (input.customerId) body.set('customer', input.customerId);
+      for (const [k, v] of Object.entries(input.metadata)) {
+        body.set(`metadata[${k}]`, v);
+      }
+      return stripeFetch<CreatePaymentIntentResult>('/payment_intents', body);
+    },
+
+    verifyPaymentsWebhookSignature(rawBody: string, signatureHeader: string | null): boolean {
+      if (!config.paymentsWebhookSecret) return false;
+      return checkSignature(rawBody, signatureHeader, config.paymentsWebhookSecret);
+    },
+
+    parsePaymentsWebhookEvent(rawBody: string): ParsedPaymentsEvent | null {
+      try {
+        const parsed = JSON.parse(rawBody) as ParsedPaymentsEvent;
+        if (!parsed?.type || !parsed.data?.object?.id) return null;
+        return parsed;
+      } catch {
+        return null;
+      }
     },
 
     async createTaxCalculation(input: TaxCalculationInput): Promise<TaxCalculationResult> {

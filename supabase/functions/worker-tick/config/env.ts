@@ -30,6 +30,30 @@ const EnvSchema = z.object({
     .describe(
       'Shared secret presented as `Authorization: Bearer <secret>` by the pg_cron + pg_net minute tick. The function rejects any caller that does not match it (constant-time). Set via `supabase secrets set` and mirrored into the `app.worker_tick_secret` DB GUC the cron command reads. NOT SUPABASE_-prefixed: the platform reserves that prefix for its own auto-injected vars.',
     ),
+
+  // ── Background screening (OH-185; ADR-0007) ──────────────────────────────
+  // The worker-tick is the ONLY host that calls Checkr's REST API: the
+  // screening-invite dispatcher drains `screening.invite` outbox rows and makes
+  // the slow candidate + invitation calls durably, off the request path. It does
+  // not verify Checkr webhooks (that is the `api` host), so no webhook secret here.
+  CHECKR_API_KEY: z
+    .string()
+    .min(1)
+    .describe(
+      'Checkr secret API key (Basic auth) used to create candidates + invitations. Server-only; set via `supabase secrets set`.',
+    ),
+  CHECKR_PACKAGE: z
+    .string()
+    .min(1)
+    .default('tasker_standard')
+    .describe(
+      'Checkr package slug requested on the invitation (ADR-0007). Must match the slug stamped onto provider_screenings.package by the api initiate route.',
+    ),
+  CHECKR_API_BASE: z
+    .string()
+    .url()
+    .default('https://api.checkr.com/v1')
+    .describe('Checkr API base URL. Overridable for staging / sandbox; tests inject a fetch stub instead.'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

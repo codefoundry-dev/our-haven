@@ -48,6 +48,7 @@ function makeDeps(db: AppDeps['db']): AppDeps {
     db,
     supabase: stub,
     stripe: createStripeAdapter({ secretKey: 'sk_test', connectWebhookSecret: CONNECT_SECRET, fetchImpl: neverFetch }),
+    backgroundCheck: stub,
   };
 }
 
