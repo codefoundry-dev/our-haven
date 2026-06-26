@@ -109,18 +109,15 @@ export default function SignUpScreen() {
         <Text style={styles.eyebrow}>Almost there</Text>
         <Text style={styles.h2}>Check your email.</Text>
         <Text style={styles.subtitle}>
-          We sent a confirmation link to {email.trim()}. Tap it to verify, then sign in.
+          We sent a confirmation link to {email.trim()}. Open it and we&apos;ll sign you in automatically and pick
+          up your setup right where you left off — no need to come back here.
         </Text>
         <View style={styles.notice}>
           <Notice>Didn&apos;t get it? Check spam — it can take up to a minute to arrive.</Notice>
         </View>
-        <PrimaryButton
-          onPress={() => router.replace('/(auth)/sign-in' as Href)}
-          icon={<Icon name="arrow-right" size={18} color={colors.inkInv} />}
-          style={styles.cta}
-        >
-          Back to sign in
-        </PrimaryButton>
+        <Pressable onPress={() => router.replace('/(auth)/sign-in' as Href)} hitSlop={8} style={styles.backLink}>
+          <Text style={styles.link}>Already confirmed? Sign in</Text>
+        </Pressable>
       </AuthWebShell>
     );
   }
@@ -214,6 +211,7 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   error: { fontFamily: fonts.medium, fontSize: 13, color: colors.danger, marginTop: 12 },
   cta: { marginTop: 16 },
+  backLink: { marginTop: 20, alignItems: 'center' },
   terms: { fontFamily: fonts.regular, fontSize: 12, lineHeight: 17, color: colors.ink3, textAlign: 'center', marginTop: 16 },
   footer: { flexDirection: 'row', justifyContent: 'center', marginTop: 16 },
   footerText: { fontFamily: fonts.regular, fontSize: 13, color: colors.ink2 },

@@ -1,10 +1,25 @@
 import { Hono } from 'hono';
-import { describe, expect, it } from 'vitest';
+import { exportJWK, generateKeyPair, SignJWT } from 'jose';
+import { describe, expect, it, vi } from 'vitest';
 
-import { mintAccessToken, stubDeps } from '../_test/jwt.ts';
+import { buildTestEnv, mintAccessToken, stubDeps } from '../_test/jwt.ts';
 import type { AppEnv } from '../context.ts';
 import type { AppDeps } from '../deps.ts';
 import { requireAuth, type RequireAuthOptions } from './middleware.ts';
+
+// The middleware verifies asymmetric (ES256) tokens against the project's remote
+// JWKS. Redirect createRemoteJWKSet to jose's no-network createLocalJWKSet over
+// an in-test key set, so the real jwtVerify still runs genuine ES256 crypto but
+// nothing leaves the box. Only createRemoteJWKSet is replaced; everything else
+// (decodeProtectedHeader, jwtVerify, SignJWT, …) is the real jose.
+const testJwks = vi.hoisted(() => ({ current: { keys: [] as Record<string, unknown>[] } }));
+vi.mock('jose', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('jose')>();
+  return {
+    ...actual,
+    createRemoteJWKSet: () => actual.createLocalJWKSet(testJwks.current as never),
+  };
+});
 
 function buildProbeApp(deps: AppDeps, opts?: RequireAuthOptions) {
   const app = new Hono<AppEnv>();
@@ -198,6 +213,78 @@ describe('requireAuth() — Hono middleware (ported from plugins/auth.ts)', () =
       });
       expect(res.status).toBe(200);
       expect(await res.json()).toMatchObject({ role: 'admin', secondFactor: 'totp' });
+    });
+  });
+
+  // Supabase projects now sign access tokens with ASYMMETRIC JWT signing keys
+  // (ES256, published at /auth/v1/.well-known/jwks.json) by default. The
+  // previous HS256-only verification rejected every real token with
+  // `invalid_token` — this guards the dual-mode (JWKS) verification path.
+  describe('asymmetric (ES256) verification via the project JWKS', () => {
+    it('accepts an ES256 token signed with a key from the project JWKS', async () => {
+      // Distinct host so the module-level JWKS cache cannot collide with the
+      // reject case below (each URL builds its own resolver once).
+      const supabaseUrl = 'https://asym-project.supabase.co';
+      const kid = 'es256-test-key-1';
+      const { publicKey, privateKey } = await generateKeyPair('ES256', { extractable: true });
+      testJwks.current = { keys: [{ ...(await exportJWK(publicKey)), kid, alg: 'ES256', use: 'sig' }] };
+
+      const now = Math.floor(Date.now() / 1000);
+      const token = await new SignJWT({
+        aud: 'authenticated',
+        role: 'authenticated',
+        email: 'caregiver@example.com',
+        app_metadata: { role: 'caregiver', categories: ['babysitter'] },
+        user_metadata: {},
+        aal: 'aal1',
+        amr: [{ method: 'password', timestamp: now }],
+      })
+        .setProtectedHeader({ alg: 'ES256', kid, typ: 'JWT' })
+        .setSubject('asym-uid-1')
+        .setIssuedAt(now)
+        .setExpirationTime(now + 3600)
+        .sign(privateKey);
+
+      const deps = stubDeps();
+      deps.env = buildTestEnv({ SUPABASE_URL: supabaseUrl });
+      const res = await buildProbeApp(deps).request('/probe', {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({
+        uid: 'asym-uid-1',
+        role: 'caregiver',
+        categories: ['babysitter'],
+      });
+    });
+
+    it('rejects an ES256 token signed by a key NOT in the JWKS', async () => {
+      const supabaseUrl = 'https://asym-reject.supabase.co';
+      const kid = 'es256-reject-key';
+      const trusted = await generateKeyPair('ES256', { extractable: true });
+      const attacker = await generateKeyPair('ES256', { extractable: true });
+      testJwks.current = {
+        keys: [{ ...(await exportJWK(trusted.publicKey)), kid, alg: 'ES256', use: 'sig' }],
+      };
+
+      const now = Math.floor(Date.now() / 1000);
+      const token = await new SignJWT({
+        aud: 'authenticated',
+        app_metadata: { role: 'caregiver' },
+      })
+        .setProtectedHeader({ alg: 'ES256', kid, typ: 'JWT' })
+        .setSubject('forged-uid')
+        .setIssuedAt(now)
+        .setExpirationTime(now + 3600)
+        .sign(attacker.privateKey);
+
+      const deps = stubDeps();
+      deps.env = buildTestEnv({ SUPABASE_URL: supabaseUrl });
+      const res = await buildProbeApp(deps).request('/probe', {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(res.status).toBe(401);
+      expect(await res.json()).toEqual({ error: 'invalid_token' });
     });
   });
 });

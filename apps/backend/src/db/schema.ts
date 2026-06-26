@@ -90,6 +90,10 @@ export interface ProviderProfilesTable {
   display_name: string | null;
   headline: string | null;
   bio: string | null;
+  // Caregiver public-profile fields (OH-188 follow-up): 5-digit ZIP + whole years
+  // of experience. Both API-layer-validated, with DB-check backstops.
+  zip: string | null;
+  years_experience: number | null;
   languages: ColumnType<string[], string[] | undefined, string[]>;
   specialty_tags: ColumnType<string[], string[] | undefined, string[]>;
   photo_object_path: string | null;

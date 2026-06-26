@@ -11,9 +11,10 @@
  */
 import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useAuth } from '@/auth/AuthProvider';
+import { AvatarUpload } from '@/components/AvatarUpload';
 import { Icon } from '@/components/Icon';
 import { Notice } from '@/components/Notice';
 import { Screen } from '@/components/Screen';
@@ -27,6 +28,7 @@ import {
   patchCaregiverProfile,
   type CaregiverCredential,
   type CaregiverProfile,
+  type CaregiverProfilePatch,
 } from '@/api/client';
 import type { Category } from '@/lib/supply';
 import {
@@ -41,7 +43,10 @@ import {
   centsToDollars,
   dollarsToCents,
   isSurchargeCategory,
+  LANGUAGE_OPTIONS,
   rateLabel,
+  SPECIALTY_OPTIONS,
+  tagChips,
   type AgeBand,
   type CredentialType,
   type SafetyBehavior,
@@ -54,6 +59,10 @@ interface FormState {
   displayName: string;
   headline: string;
   bio: string;
+  zip: string;
+  yearsExperience: string;
+  languages: string[];
+  specialties: string[];
   rates: Record<string, { rate: string; surcharge: string }>;
   grid: Grid;
   note: string;
@@ -76,6 +85,10 @@ function profileToForm(p: CaregiverProfile): FormState {
     displayName: p.displayName ?? '',
     headline: p.headline ?? '',
     bio: p.bio ?? '',
+    zip: p.zip ?? '',
+    yearsExperience: p.yearsExperience == null ? '' : String(p.yearsExperience),
+    languages: [...p.languages],
+    specialties: [...p.specialties],
     rates,
     grid: (p.availabilityGrid ?? {}) as Grid,
     note: p.availabilityNote ?? '',
@@ -89,6 +102,18 @@ function profileToForm(p: CaregiverProfile): FormState {
 function blankToNull(s: string): string | null {
   const t = s.trim();
   return t === '' ? null : t;
+}
+
+function identityInitials(displayName: string): string {
+  return (
+    (displayName.trim() || 'Y N')
+      .split(/\s+/)
+      .map((w) => w[0])
+      .filter(Boolean)
+      .slice(0, 2)
+      .join('')
+      .toUpperCase() || 'YN'
+  );
 }
 
 export default function ProfileBuilderScreen() {
@@ -139,10 +164,12 @@ export default function ProfileBuilderScreen() {
         const surcharge = isSurchargeCategory(cat) ? dollarsToCents(entry?.surcharge ?? '') : null;
         return [{ category: cat, publishedRateCents: rateCents, perChildSurchargeCents: surcharge }];
       });
-      const updated = await patchCaregiverProfile({
+      const patch: CaregiverProfilePatch = {
         displayName: blankToNull(form.displayName),
         headline: blankToNull(form.headline),
         bio: blankToNull(form.bio),
+        languages: form.languages,
+        specialties: form.specialties,
         categoryRates,
         availabilityGrid: form.grid,
         availabilityNote: blankToNull(form.note),
@@ -150,7 +177,19 @@ export default function ProfileBuilderScreen() {
         negotiable: form.negotiable,
         agesServed: form.agesServed,
         behaviourComfort: form.behaviourComfort,
-      });
+      };
+      // ZIP / years only sent when valid-or-cleared (a partial entry is left out
+      // so the save never trips the server's format check).
+      const zip = form.zip.trim();
+      if (zip === '') patch.zip = null;
+      else if (/^\d{5}$/.test(zip)) patch.zip = zip;
+      const yrs = form.yearsExperience.trim();
+      if (yrs === '') patch.yearsExperience = null;
+      else {
+        const n = Number.parseInt(yrs, 10);
+        if (Number.isFinite(n) && n >= 0 && n <= 75) patch.yearsExperience = n;
+      }
+      const updated = await patchCaregiverProfile(patch);
       setProfile(updated);
       setForm(profileToForm(updated));
       setSaved(true);
@@ -201,11 +240,45 @@ export default function ProfileBuilderScreen() {
       {profile && form && !preview ? (
         <View style={{ gap: spacing.md }}>
           <SectionCard title="Identity" hint="What Parents see at the top of your profile.">
+            <AvatarUpload
+              photoUrl={profile.photoUrl}
+              initials={identityInitials(form.displayName)}
+              size={84}
+              onUploaded={setProfile}
+            />
+            <View style={{ height: spacing.lg }} />
             <TextField label="Display name" value={form.displayName} onChangeText={(v) => patchForm({ displayName: v })} placeholder="e.g. Maya G." autoCapitalize="words" />
             <View style={{ height: spacing.md }} />
             <TextField label="Headline" value={form.headline} onChangeText={(v) => patchForm({ headline: v })} placeholder="One short line under your name" autoCapitalize="sentences" helper={`${form.headline.length}/120`} />
             <View style={{ height: spacing.md }} />
+            <View style={styles.rateRow}>
+              <View style={{ flex: 1 }}>
+                <TextField label="ZIP" value={form.zip} onChangeText={(v) => patchForm({ zip: v.replace(/\D/g, '').slice(0, 5) })} placeholder="90210" keyboardType="number-pad" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <TextField label="Years of experience" value={form.yearsExperience} onChangeText={(v) => patchForm({ yearsExperience: v.replace(/\D/g, '').slice(0, 2) })} placeholder="4" keyboardType="number-pad" />
+              </View>
+            </View>
+            <View style={{ height: spacing.md }} />
             <MultilineField label="About" value={form.bio} onChangeText={(v) => patchForm({ bio: v })} placeholder="How you work — experience, ages, approach." max={600} />
+          </SectionCard>
+
+          <SectionCard title="Specialties & languages" hint="Tags Parents filter by. Tap to toggle; the lists below are suggestions.">
+            <Text style={styles.fieldLabel}>Specialties</Text>
+            <View style={{ height: spacing.sm }} />
+            <ChipMultiSelect
+              options={tagChips(SPECIALTY_OPTIONS, form.specialties).map((t) => ({ value: t, label: t }))}
+              selected={form.specialties}
+              onChange={(specialties) => patchForm({ specialties })}
+            />
+            <View style={{ height: spacing.lg }} />
+            <Text style={styles.fieldLabel}>Languages</Text>
+            <View style={{ height: spacing.sm }} />
+            <ChipMultiSelect
+              options={tagChips(LANGUAGE_OPTIONS, form.languages).map((t) => ({ value: t, label: t }))}
+              selected={form.languages}
+              onChange={(languages) => patchForm({ languages })}
+            />
           </SectionCard>
 
           <SectionCard title="Rates" hint="Set an hourly rate per category. The lowest drives your “from $X”.">
@@ -601,9 +674,13 @@ function ProfilePreview({ profile, form }: { profile: CaregiverProfile; form: Fo
       <View style={styles.previewInner}>
         {form.paused ? <Notice tone="warn">Paused — hidden from search.</Notice> : null}
         <View style={styles.previewHead}>
-          <View style={styles.previewAvatar}>
-            <Text style={styles.previewInitials}>{initials}</Text>
-          </View>
+          {profile.photoUrl ? (
+            <Image source={{ uri: profile.photoUrl }} style={styles.previewAvatar} resizeMode="cover" />
+          ) : (
+            <View style={styles.previewAvatar}>
+              <Text style={styles.previewInitials}>{initials}</Text>
+            </View>
+          )}
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={styles.previewName}>{form.displayName.trim() || 'Your name'}</Text>
             {form.headline.trim() ? <Text style={styles.previewHeadline}>{form.headline.trim()}</Text> : null}
@@ -637,6 +714,8 @@ function ProfilePreview({ profile, form }: { profile: CaregiverProfile; form: Fo
           <Text style={styles.previewMeta}>Available: {days.join(', ')}</Text>
         ) : null}
 
+        {form.specialties.length > 0 ? <PreviewChips title="Specialties" items={form.specialties} /> : null}
+        {form.languages.length > 0 ? <PreviewChips title="Languages" items={form.languages} /> : null}
         {ageLabels.length > 0 ? <PreviewChips title="Ages served" items={ageLabels} /> : null}
         {behaviourLabels.length > 0 ? <PreviewChips title="Comfortable supporting" items={behaviourLabels} /> : null}
 

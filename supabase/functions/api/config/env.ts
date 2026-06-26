@@ -155,6 +155,13 @@ const EnvSchema = z.object({
     .describe(
       'Private Supabase Storage bucket holding government-ID uploads. Signed upload URLs are minted by the service-role admin client (POST /v1/uploads/signed-url); objects are namespaced id-doc/<uid>/<uuid>. Provisioned by migration 20260627000001.',
     ),
+  AVATAR_BUCKET: z
+    .string()
+    .min(1)
+    .default('avatars')
+    .describe(
+      'PUBLIC Supabase Storage bucket holding Caregiver/Provider profile photos. Unlike ID_DOC_BUCKET it is public (avatars are shown to Parents in search) so photo_object_path resolves to a stable /storage/v1/object/public/<bucket>/<path> URL. Uploads are still client-direct via a one-time signed upload URL (kind `avatar`, namespaced avatar/<uid>/<uuid>). Provisioned by migration 20260705000001.',
+    ),
 
   // ── Stripe Tax (OH-192) ──────────────────────────────────────────────────
   // Per-state taxability on the Parent Subscription + the platform Commission

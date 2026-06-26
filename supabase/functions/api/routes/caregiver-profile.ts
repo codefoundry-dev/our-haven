@@ -9,6 +9,9 @@ import type { Db } from '../db/kysely.ts';
 // import, so they deploy unchanged on Deno.
 import {
   fromRateCents,
+  normaliseProfileTags,
+  PROFILE_TAG_MAX_COUNT,
+  PROFILE_TAG_MAX_LEN,
   validateCategoryRates,
   type CategoryRate,
 } from '../../../../packages/domain/src/caregiver-profile/index.ts';
@@ -109,6 +112,18 @@ const ProfileResponse = z
     displayName: z.string().nullable(),
     headline: z.string().nullable(),
     bio: z.string().nullable(),
+    /** 5-digit US ZIP (search proximity + display). Null until set. */
+    zip: z.string().nullable(),
+    /** Whole years of childcare/tutoring experience (0–75). Null until set. */
+    yearsExperience: z.number().int().nullable(),
+    /** Free-text languages the Caregiver speaks (e.g. "English", "Spanish"). */
+    languages: z.array(z.string()),
+    /** Free-text specialty tags (e.g. "Math", "Test prep"). */
+    specialties: z.array(z.string()),
+    /** Storage key of the profile photo (avatar/<uid>/<uuid>), or null. */
+    photoObjectPath: z.string().nullable(),
+    /** Public URL of the profile photo derived from photoObjectPath, or null. */
+    photoUrl: z.string().nullable(),
     categoryRates: z.array(CategoryRateSchema),
     /** Lowest Published Rate across categories — the "from $X" teaser. Null if unpriced. */
     fromRateCents: z.number().int().nullable(),
@@ -127,6 +142,20 @@ const ProfilePatchRequest = z
     displayName: z.string().max(80).nullable().optional(),
     headline: z.string().max(120).nullable().optional(),
     bio: z.string().max(600).nullable().optional(),
+    /** 5-digit US ZIP, or null to clear it. */
+    zip: z
+      .string()
+      .regex(/^\d{5}$/, 'expected a 5-digit US ZIP')
+      .nullable()
+      .optional(),
+    /** Whole years of experience (0–75), or null to clear it. */
+    yearsExperience: z.number().int().min(0).max(75).nullable().optional(),
+    /** Replaces the full languages list; trimmed/de-duped/capped server-side. */
+    languages: z.array(z.string().max(PROFILE_TAG_MAX_LEN)).max(PROFILE_TAG_MAX_COUNT).optional(),
+    /** Replaces the full specialties list; trimmed/de-duped/capped server-side. */
+    specialties: z.array(z.string().max(PROFILE_TAG_MAX_LEN)).max(PROFILE_TAG_MAX_COUNT).optional(),
+    /** Confirmed avatar Storage key (avatar/<uid>/<uuid>), or null to clear the photo. */
+    photoObjectPath: z.string().nullable().optional(),
     /** Replaces the FULL set of per-category Rates when present. */
     categoryRates: z.array(CategoryRateSchema).optional(),
     availabilityGrid: AvailabilityGridSchema.optional(),
@@ -188,12 +217,23 @@ interface ProfileRow {
   display_name: string | null;
   headline: string | null;
   bio: string | null;
+  zip: string | null;
+  years_experience: number | null;
+  languages: string[];
+  specialty_tags: string[];
+  photo_object_path: string | null;
   availability_grid: AvailabilityGrid;
   availability_note: string | null;
   paused: boolean;
   negotiable: boolean;
   ages_served: string[];
   behaviour_comfort: string[];
+}
+
+/** Public URL for an avatars-bucket object key, or null when no photo is set. */
+function photoUrlFor(supabaseUrl: string, bucket: string, objectPath: string | null): string | null {
+  if (!objectPath) return null;
+  return `${supabaseUrl.replace(/\/$/, '')}/storage/v1/object/public/${bucket}/${objectPath}`;
 }
 
 interface CategoryRateRow {
@@ -242,13 +282,22 @@ function credentialView(row: CredentialRow) {
 }
 
 /** Assemble the full profile response from the persisted rows. */
-async function buildProfile(db: Db, provider: ProviderRow) {
+async function buildProfile(
+  db: Db,
+  storage: { SUPABASE_URL: string; AVATAR_BUCKET: string },
+  provider: ProviderRow,
+) {
   const profile = (await db
     .selectFrom('provider_profiles')
     .select([
       'display_name',
       'headline',
       'bio',
+      'zip',
+      'years_experience',
+      'languages',
+      'specialty_tags',
+      'photo_object_path',
       'availability_grid',
       'availability_note',
       'paused',
@@ -284,6 +333,12 @@ async function buildProfile(db: Db, provider: ProviderRow) {
     displayName: profile?.display_name ?? null,
     headline: profile?.headline ?? null,
     bio: profile?.bio ?? null,
+    zip: profile?.zip ?? null,
+    yearsExperience: profile?.years_experience ?? null,
+    languages: profile?.languages ?? [],
+    specialties: profile?.specialty_tags ?? [],
+    photoObjectPath: profile?.photo_object_path ?? null,
+    photoUrl: photoUrlFor(storage.SUPABASE_URL, storage.AVATAR_BUCKET, profile?.photo_object_path ?? null),
     categoryRates,
     fromRateCents: fromRateCents(categoryRates),
     availabilityGrid: (profile?.availability_grid ?? {}) as AvailabilityGrid,
@@ -425,7 +480,7 @@ const adminDecideCredentialRoute = createRoute({
 
 export function registerCaregiverProfileRoutes(app: OpenAPIHono<AppEnv>): void {
   app.openapi(getProfileRoute, async (c) => {
-    const { db } = c.var.deps;
+    const { db, env } = c.var.deps;
     const principal = c.get('principal')!;
 
     const provider = await loadProviderByUid(db, principal.uid);
@@ -435,16 +490,22 @@ export function registerCaregiverProfileRoutes(app: OpenAPIHono<AppEnv>): void {
         404,
       );
     }
-    return c.json(await buildProfile(db, provider), 200);
+    return c.json(await buildProfile(db, env, provider), 200);
   });
 
   app.openapi(patchProfileRoute, async (c) => {
-    const { db } = c.var.deps;
+    const { db, env } = c.var.deps;
     const principal = c.get('principal')!;
     const patch = c.req.valid('json');
 
     const provider = await loadProviderByUid(db, principal.uid);
     if (!provider) return c.json({ error: 'provider_not_found' }, 404);
+
+    // A confirmed avatar must be in THIS uid's namespace — the only path the
+    // client could have been issued a signed upload URL for (uploads route).
+    if (patch.photoObjectPath != null && !patch.photoObjectPath.startsWith(`avatar/${principal.uid}/`)) {
+      return c.json({ error: 'invalid_photo_path', reason: 'photoObjectPath is not an owned avatar object' }, 400);
+    }
 
     // Validate the per-category Rates against the Caregiver's own categories
     // BEFORE any write (surcharge eligibility, ownership, dedupe — domain rule).
@@ -466,6 +527,11 @@ export function registerCaregiverProfileRoutes(app: OpenAPIHono<AppEnv>): void {
     if (patch.displayName !== undefined) set.display_name = patch.displayName;
     if (patch.headline !== undefined) set.headline = patch.headline;
     if (patch.bio !== undefined) set.bio = patch.bio;
+    if (patch.zip !== undefined) set.zip = patch.zip;
+    if (patch.yearsExperience !== undefined) set.years_experience = patch.yearsExperience;
+    if (patch.languages !== undefined) set.languages = normaliseProfileTags(patch.languages);
+    if (patch.specialties !== undefined) set.specialty_tags = normaliseProfileTags(patch.specialties);
+    if (patch.photoObjectPath !== undefined) set.photo_object_path = patch.photoObjectPath;
     if (patch.availabilityGrid !== undefined) {
       set.availability_grid = normaliseAvailabilityGrid(patch.availabilityGrid as AvailabilityGrid);
     }
@@ -500,7 +566,7 @@ export function registerCaregiverProfileRoutes(app: OpenAPIHono<AppEnv>): void {
       });
     }
 
-    return c.json(await buildProfile(db, provider), 200);
+    return c.json(await buildProfile(db, env, provider), 200);
   });
 
   app.openapi(addCredentialRoute, async (c) => {

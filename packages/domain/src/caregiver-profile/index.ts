@@ -170,6 +170,51 @@ export function publishedRateForCategory(
 }
 
 // ---------------------------------------------------------------------------
+// Free-text profile tags (languages, specialty tags)
+// ---------------------------------------------------------------------------
+
+/** Default ceilings for a free-text profile tag list (languages / specialties). */
+export const PROFILE_TAG_MAX_COUNT = 30;
+export const PROFILE_TAG_MAX_LEN = 40;
+
+/**
+ * Normalise a posted free-text tag list (the Caregiver's `languages[]` /
+ * `specialty_tags[]`) before persistence. Unlike `ages_served` /
+ * `behaviour_comfort` these are NOT a fixed taxonomy — a Caregiver types their
+ * own (e.g. "Math", "Yoruba") — so the sanitiser is shape-level, not
+ * membership-level:
+ *
+ *   - trims surrounding whitespace + collapses internal runs to one space,
+ *   - drops empty / whitespace-only entries,
+ *   - drops entries longer than `maxLen` (a UI with a maxLength rarely hits this),
+ *   - de-duplicates case-insensitively, keeping the FIRST occurrence's casing
+ *     and the caller's order,
+ *   - caps the list at `maxCount` (extra tags are dropped, never an error —
+ *     matching the drop-don't-throw convention of `normaliseSafetyBehaviors`).
+ *
+ * Pure + deterministic.
+ */
+export function normaliseProfileTags(
+  values: readonly string[],
+  opts: { maxCount?: number; maxLen?: number } = {},
+): string[] {
+  const maxCount = opts.maxCount ?? PROFILE_TAG_MAX_COUNT;
+  const maxLen = opts.maxLen ?? PROFILE_TAG_MAX_LEN;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of values) {
+    const tag = raw.trim().replace(/\s+/g, ' ');
+    if (tag === '' || tag.length > maxLen) continue;
+    const key = tag.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(tag);
+    if (out.length >= maxCount) break;
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // negotiable gate (ADR-0017)
 // ---------------------------------------------------------------------------
 

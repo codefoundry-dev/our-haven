@@ -12,16 +12,38 @@ import {
 import type { Credential } from '../credentials/index.js';
 
 import {
+  PROFILE_TAG_MAX_COUNT,
   SURCHARGE_ELIGIBLE_CATEGORIES,
   counterAllowed,
   fromRateCents,
   isSurchargeEligible,
+  normaliseProfileTags,
   publicCredentials,
   publishedRateForCategory,
   sanitiseCategoryRate,
   validateCategoryRates,
   type CategoryRate,
 } from './index.js';
+
+describe('normaliseProfileTags', () => {
+  it('trims, collapses internal whitespace, and drops empties', () => {
+    expect(normaliseProfileTags(['  Math ', '', '   ', 'Test  prep'])).toEqual(['Math', 'Test prep']);
+  });
+
+  it('de-duplicates case-insensitively, keeping the first casing + order', () => {
+    expect(normaliseProfileTags(['Spanish', 'English', 'spanish', 'SPANISH'])).toEqual(['Spanish', 'English']);
+  });
+
+  it('drops entries longer than maxLen', () => {
+    expect(normaliseProfileTags(['ok', 'x'.repeat(41)], { maxLen: 40 })).toEqual(['ok']);
+  });
+
+  it('caps the list at maxCount without erroring', () => {
+    const many = Array.from({ length: PROFILE_TAG_MAX_COUNT + 5 }, (_, i) => `t${i}`);
+    expect(normaliseProfileTags(many)).toHaveLength(PROFILE_TAG_MAX_COUNT);
+    expect(normaliseProfileTags(['a', 'b', 'c'], { maxCount: 2 })).toEqual(['a', 'b']);
+  });
+});
 
 describe('surcharge eligibility', () => {
   it('is Babysitter / Nanny only — Tutor is single-child, no surcharge', () => {

@@ -17,7 +17,7 @@
  * ⚠️ PROVISIONAL LIST — M2.10 / M0.8 dependency. CONTEXT.md § Parent profile
  * pins the canonical taxonomy as the "**final list from Ci'erro**". Until that
  * lands, the set below is a reasonable working list seeded from the CONTEXT
- * examples (aggression, self-injurious behaviour, wandering / elopement, …).
+ * examples (aggression, self-injurious behaviour, wandering, …).
  * Every consumer (caregiver profile, parent profile, search filters) reads these
  * constants, so swapping in Ci'erro's final list is a single edit here.
  *
@@ -32,7 +32,7 @@
 export const SAFETY_BEHAVIORS = [
   'aggression',
   'self-injury',
-  'elopement',
+  'wandering',
   'meltdowns',
   'property-destruction',
   'pica',
@@ -46,7 +46,7 @@ export type SafetyBehavior = (typeof SAFETY_BEHAVIORS)[number];
 const SAFETY_BEHAVIOR_LABELS: Record<SafetyBehavior, string> = {
   aggression: 'Aggression',
   'self-injury': 'Self-injurious behaviour',
-  elopement: 'Wandering / elopement',
+  wandering: 'Wandering',
   meltdowns: 'Meltdowns',
   'property-destruction': 'Property destruction',
   pica: 'Pica (eating non-food items)',
