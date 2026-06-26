@@ -47,3 +47,4 @@ export * from './application-lifecycle/index.js';
 export * from './offer-lifecycle/index.js';
 export * from './application-quota/index.js';
 export * from './direct-message-materialisation/index.js';
+export * from './notifications/index.js';

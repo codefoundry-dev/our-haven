@@ -344,6 +344,37 @@ export interface NotificationOutboxTable {
   created_at: Generated<Date>;
 }
 
+/**
+ * Expo Push tokens (OH-194) — a recipient's mobile push destinations. One row per
+ * device token; the worker-tick notifications dispatcher reads every token for a
+ * `uid` and prunes a row when Expo reports `DeviceNotRegistered`. The write
+ * (registration) path lands with the apps/mobile push-setup ticket.
+ */
+export interface NotificationPushTokensTable {
+  id: Generated<string>;
+  uid: string;
+  expo_push_token: string;
+  platform: 'ios' | 'android' | 'web';
+  created_at: Generated<Date>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
+/**
+ * VAPID web-push subscriptions (OH-194) — a recipient's web push destinations.
+ * v1 sends an empty "tickle" (no RFC 8291 encryption), so only `endpoint` is used
+ * to send; `p256dh` + `auth` are stored for future payload encryption. The
+ * dispatcher prunes on a 404/410 from the push service.
+ */
+export interface NotificationWebPushSubscriptionsTable {
+  id: Generated<string>;
+  uid: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  created_at: Generated<Date>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
 export interface Database {
   auth_email_otps: AuthEmailOtpsTable;
   auth_step_up_grants: AuthStepUpGrantsTable;
@@ -363,4 +394,6 @@ export interface Database {
   stripe_tax_calculations: StripeTaxCalculationsTable;
   messages: MessagesTable;
   notification_outbox: NotificationOutboxTable;
+  notification_push_tokens: NotificationPushTokensTable;
+  notification_web_push_subscriptions: NotificationWebPushSubscriptionsTable;
 }

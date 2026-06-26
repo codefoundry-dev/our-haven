@@ -11,9 +11,17 @@
 // so the function gates itself on the WORKER_TICK_SECRET shared secret instead
 // of a Supabase JWT.
 import { createCheckrAdapter } from '../_shared/checkr.ts';
+import { createExpoPushAdapter } from '../_shared/expo-push.ts';
+import { createResendAdapter } from '../_shared/resend.ts';
+import { createTwilioAdapter } from '../_shared/twilio.ts';
+import { createWebPushAdapter } from '../_shared/web-push.ts';
 import { isAuthorized } from './auth.ts';
 import { loadEnv } from './config/env.ts';
 import { createDb } from './db/kysely.ts';
+import {
+  createNotificationsDispatcher,
+  makeKyselyRecipientResolver,
+} from './dispatchers/notifications.ts';
 import { createScreeningInviteDispatcher } from './dispatchers/screening.ts';
 import { runTick } from './tick.ts';
 
@@ -47,7 +55,50 @@ try {
     packageSlug: env.CHECKR_PACKAGE,
     apiBase: env.CHECKR_API_BASE,
   });
-  const dispatcher = createScreeningInviteDispatcher({ db: dispatchDb, checkr });
+
+  // OH-194 notifications fan-out (the real channels behind the OH-237 seam). Each
+  // adapter is built only when its secrets are present; an absent adapter means
+  // that channel is skipped (best-effort) — except a missing Twilio makes the four
+  // SMS-mandatory event kinds fail loudly rather than silently drop. The VAPID
+  // pair is treated as unconfigured while still the deploy-time placeholder.
+  const vapidConfigured =
+    !!env.VAPID_PUBLIC_KEY &&
+    !!env.VAPID_PRIVATE_KEY &&
+    !env.VAPID_PUBLIC_KEY.includes('placeholder') &&
+    !env.VAPID_PRIVATE_KEY.includes('placeholder');
+  const notificationsDispatcher = createNotificationsDispatcher({
+    resolver: makeKyselyRecipientResolver(dispatchDb),
+    bases: {
+      mobile: env.NOTIFICATIONS_DEEP_LINK_BASE_MOBILE,
+      web: env.NOTIFICATIONS_DEEP_LINK_BASE_WEB,
+    },
+    expoPush: createExpoPushAdapter({ accessToken: env.EXPO_ACCESS_TOKEN }),
+    resend: env.RESEND_API_KEY
+      ? createResendAdapter({ apiKey: env.RESEND_API_KEY, from: env.RESEND_FROM })
+      : undefined,
+    twilio:
+      env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_FROM_NUMBER
+        ? createTwilioAdapter({
+            accountSid: env.TWILIO_ACCOUNT_SID,
+            authToken: env.TWILIO_AUTH_TOKEN,
+            fromNumber: env.TWILIO_FROM_NUMBER,
+          })
+        : undefined,
+    webPush: vapidConfigured
+      ? createWebPushAdapter({
+          publicKey: env.VAPID_PUBLIC_KEY!,
+          privateKey: env.VAPID_PRIVATE_KEY!,
+          subject: env.VAPID_SUBJECT,
+        })
+      : undefined,
+  });
+
+  // Dispatch chain: screening.invite → notifications → logging no-op.
+  const dispatcher = createScreeningInviteDispatcher({
+    db: dispatchDb,
+    checkr,
+    fallback: notificationsDispatcher,
+  });
   boot = { env, db, dispatcher };
 } catch (err) {
   bootError = err instanceof Error ? err.message : String(err);

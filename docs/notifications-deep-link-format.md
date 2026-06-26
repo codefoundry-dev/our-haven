@@ -1,6 +1,6 @@
 # Notification deep-link format
 
-**Status:** v1 (OH-116) — initial shipping format. Subject to revision when in-app deep-link routing lands in Phase 3 (apps/mobile, provider-web).
+**Status:** v1 (OH-116, implemented by OH-194) — initial shipping format. Subject to revision when in-app deep-link routing lands in Phase 3 (apps/mobile, provider-web). The `CHANNEL_MATRIX` referenced below now lives at `packages/domain/src/notifications/index.ts` (single self-contained module). `consultation_booked` (CONTEXT § Notifications SMS-mandatory set, absent from the original OH-116 table) reuses the `schedule/booking/{bookingId}` surface and is included.
 
 Every transactional notification dispatched by the OH-116 dispatcher carries **two parallel deep links**: one for mobile (custom URL scheme) and one for the Provider web portal. The recipient client picks the one it can open. Push notifications carry the mobile URL in `data.route`; SMS bodies and emails include both URLs inline.
 
@@ -24,12 +24,13 @@ A notification reaches multiple channels at once and each channel includes a tar
 
 ## Route paths per event kind
 
-The route template is encoded in `CHANNEL_MATRIX` (`packages/domain/src/notifications/channel-matrix.ts`). `{key}` placeholders are filled from the event payload at dispatch time.
+The route template is encoded in `CHANNEL_MATRIX` (`packages/domain/src/notifications/index.ts`). `{key}` placeholders are filled from the event payload at dispatch time.
 
 | Event kind | Route template | Param source |
 |---|---|---|
 | `booking_request_received` | `schedule/booking/{bookingId}` | `event.bookingId` |
 | `job_awarded` | `schedule/booking/{bookingId}` | `event.bookingId` |
+| `consultation_booked` | `schedule/booking/{bookingId}` | `event.bookingId` |
 | `cancellation_within_24h` | `booking/{bookingId}` | `event.bookingId` |
 | `session_start_reminder` | `schedule/booking/{bookingId}` | `event.bookingId` |
 | `application_received` | `job/{jobId}` | `event.jobId` |
@@ -70,7 +71,7 @@ For web push (VAPID) **v1 sends an empty payload** ("tickle"). The service worke
 - Lead with `Our Haven:` so the recipient identifies the sender.
 - Include the **mobile** link inline (no web link — see "Target priority" above).
 - Keep ≤160 GSM-7 chars where possible to avoid multi-segment billing.
-- Renderers live in `packages/domain/src/notifications/templates.ts`.
+- Renderers live in `packages/domain/src/notifications/index.ts`.
 
 Example: `Our Haven: Alex sent a booking request for Mon Jun 1, 3:00 PM. Open: ourhaven://schedule/booking/b-1`
 
