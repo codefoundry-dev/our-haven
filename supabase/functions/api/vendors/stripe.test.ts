@@ -205,3 +205,62 @@ describe('parseConnectWebhookEvent', () => {
     expect(adp.parseConnectWebhookEvent(JSON.stringify({ type: 'account.updated', data: { object: {} } }))).toBeNull();
   });
 });
+
+describe('createParentBillingCustomer (OH-193)', () => {
+  it('creates a Customer stamped with the auth uid + parent_subscription purpose', async () => {
+    const { impl, call } = fakeFetch({ id: 'cus_par' });
+    const res = await adapter(impl).createParentBillingCustomer({ email: 'p@example.com', uid: 'uid-par' });
+    expect(res.id).toBe('cus_par');
+    expect(call().url).toBe('https://api.stripe.test/v1/customers');
+    const body = formBody(call().init);
+    expect(body.get('email')).toBe('p@example.com');
+    expect(body.get('metadata[uid]')).toBe('uid-par');
+    expect(body.get('metadata[purpose]')).toBe('parent_subscription');
+  });
+});
+
+describe('createParentSubscriptionCheckoutSession (OH-193)', () => {
+  const baseInput = {
+    customerId: 'cus_par',
+    priceId: 'price_par',
+    successUrl: 'https://app/ok',
+    cancelUrl: 'https://app/no',
+    clientReferenceId: 'uid-par',
+  };
+
+  it('opens a subscription-mode Checkout stamped with uid + purpose, hosted promo field on by default', async () => {
+    const { impl, call } = fakeFetch({ id: 'cs_par', url: 'https://checkout/cs_par' });
+    const res = await adapter(impl).createParentSubscriptionCheckoutSession(baseInput);
+    expect(res.url).toBe('https://checkout/cs_par');
+    expect(call().url).toBe('https://api.stripe.test/v1/checkout/sessions');
+    const body = formBody(call().init);
+    expect(body.get('mode')).toBe('subscription');
+    expect(body.get('customer')).toBe('cus_par');
+    expect(body.get('line_items[0][price]')).toBe('price_par');
+    expect(body.get('line_items[0][quantity]')).toBe('1');
+    expect(body.get('client_reference_id')).toBe('uid-par');
+    expect(body.get('subscription_data[metadata][uid]')).toBe('uid-par');
+    expect(body.get('subscription_data[metadata][purpose]')).toBe('parent_subscription');
+    expect(body.get('metadata[uid]')).toBe('uid-par');
+    expect(body.get('metadata[purpose]')).toBe('parent_subscription');
+    // PRD story 9: the Parent can type a launch code on the hosted page.
+    expect(body.get('allow_promotion_codes')).toBe('true');
+    expect(body.has('discounts[0][promotion_code]')).toBe(false);
+  });
+
+  it('pre-applies a promotion code and drops the hosted field (mutually exclusive in Stripe)', async () => {
+    const { impl, call } = fakeFetch({ id: 'cs_par2', url: 'https://checkout/cs_par2' });
+    await adapter(impl).createParentSubscriptionCheckoutSession({ ...baseInput, promotionCode: 'promo_launch' });
+    const body = formBody(call().init);
+    expect(body.get('discounts[0][promotion_code]')).toBe('promo_launch');
+    expect(body.has('allow_promotion_codes')).toBe(false);
+  });
+
+  it('suppresses the hosted promo field when allowPromotionCodes is false', async () => {
+    const { impl, call } = fakeFetch({ id: 'cs_par3', url: 'https://checkout/cs_par3' });
+    await adapter(impl).createParentSubscriptionCheckoutSession({ ...baseInput, allowPromotionCodes: false });
+    const body = formBody(call().init);
+    expect(body.has('allow_promotion_codes')).toBe(false);
+    expect(body.has('discounts[0][promotion_code]')).toBe(false);
+  });
+});

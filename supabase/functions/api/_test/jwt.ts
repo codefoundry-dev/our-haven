@@ -21,6 +21,7 @@ export function buildTestEnv(overrides: Record<string, string | undefined> = {})
     STRIPE_PAYMENTS_WEBHOOK_SECRET: 'whsec_test_payments',
     STRIPE_BILLING_WEBHOOK_SECRET: 'whsec_test_billing',
     STRIPE_PROVIDER_SUBSCRIPTION_PRICE_ID: 'price_test_provider_sub',
+    STRIPE_PARENT_SUBSCRIPTION_PRICE_ID: 'price_test_parent_sub',
     CHECKR_WEBHOOK_SECRET: 'checkr_whsec_test',
     ...overrides,
   });

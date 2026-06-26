@@ -358,6 +358,52 @@ export interface BillingPortalSessionResult {
   [k: string]: unknown;
 }
 
+/* ────────────────────────────────────────────────────────────────────────
+ * Parent Subscription — Stripe Billing (OH-193)
+ *
+ * The demand-side analogue of the Provider Subscription: the Parent is a Stripe
+ * *Customer*, drives a Stripe-hosted Checkout Session in `subscription` mode
+ * (sold on web to dodge the iOS/Android IAP rules), and the same billing webhook
+ * mirrors the lifecycle — onto `parent_subscriptions` rather than
+ * `provider_subscriptions`. Two differences from the provider surface: the row
+ * is keyed by the auth `uid` (there is no Provider/account id — a Parent is just
+ * the auth user), and checkout supports **Stripe Promotion Codes** (PRD story 9
+ * — "apply a discount code to my Subscription"). The Billing Portal + webhook
+ * verify/parse helpers are shared with the provider flow (same Stripe account,
+ * same billing event family).
+ * ──────────────────────────────────────────────────────────────────────── */
+
+export interface CreateParentBillingCustomerInput {
+  email: string;
+  /** The Parent's Supabase auth uid — stamped as customer metadata for traceback. */
+  uid: string;
+  metadata?: Record<string, string>;
+}
+
+export interface CreateParentSubscriptionCheckoutSessionInput {
+  /** The Parent's Stripe Customer (cus_…). */
+  customerId: string;
+  /** The recurring Price (price_…) for the Parent Subscription. */
+  priceId: string;
+  successUrl: string;
+  cancelUrl: string;
+  /** The Parent's auth `uid` — surfaced as Checkout's `client_reference_id` + subscription metadata. */
+  clientReferenceId: string;
+  /**
+   * A Stripe Promotion Code id (`promo_…`) to pre-apply to the subscription (deep
+   * link from a launch promo). Mutually exclusive with the hosted promo-code
+   * field: when set, Stripe forbids `allow_promotion_codes`, so we drop it.
+   */
+  promotionCode?: string;
+  /**
+   * Render Stripe Checkout's "Add promotion code" field so the Parent can type a
+   * launch code on the hosted page (PRD story 9). Defaults to true; ignored when
+   * `promotionCode` is supplied (Stripe rejects both together).
+   */
+  allowPromotionCodes?: boolean;
+  metadata?: Record<string, string>;
+}
+
 /** The subset of a Stripe Subscription object the billing webhook mirrors. */
 export interface StripeSubscriptionObject {
   id: string;
@@ -427,6 +473,13 @@ export interface StripeAdapter {
   retrieveSubscription(subscriptionId: string): Promise<StripeSubscriptionObject>;
   verifyBillingWebhookSignature(rawBody: string, signatureHeader: string | null): boolean;
   parseBillingWebhookEvent(rawBody: string): ParsedBillingEvent | null;
+
+  // Parent Subscription — Stripe Billing (OH-193). Billing Portal + webhook
+  // verify/parse are shared with the provider flow above.
+  createParentBillingCustomer(input: CreateParentBillingCustomerInput): Promise<BillingCustomer>;
+  createParentSubscriptionCheckoutSession(
+    input: CreateParentSubscriptionCheckoutSessionInput,
+  ): Promise<CheckoutSessionResult>;
 }
 
 export function createStripeAdapter(config: StripeConfig): StripeAdapter {
@@ -702,6 +755,54 @@ export function createStripeAdapter(config: StripeConfig): StripeAdapter {
       body.set('customer', input.customerId);
       body.set('return_url', input.returnUrl);
       return stripeFetch<BillingPortalSessionResult>('/billing_portal/sessions', body);
+    },
+
+    async createParentBillingCustomer(
+      input: CreateParentBillingCustomerInput,
+    ): Promise<BillingCustomer> {
+      const body = new URLSearchParams();
+      body.set('email', input.email);
+      body.set('metadata[uid]', input.uid);
+      body.set('metadata[purpose]', 'parent_subscription');
+      for (const [k, v] of Object.entries(input.metadata ?? {})) {
+        body.set(`metadata[${k}]`, v);
+      }
+      return stripeFetch<BillingCustomer>('/customers', body);
+    },
+
+    async createParentSubscriptionCheckoutSession(
+      input: CreateParentSubscriptionCheckoutSessionInput,
+    ): Promise<CheckoutSessionResult> {
+      // Stripe-hosted Checkout in subscription mode (PRD stories 7–9). The Parent
+      // pays us the access fee; this is NOT a Connect/destination charge. We stamp
+      // the auth `uid` + purpose onto BOTH the session (`client_reference_id` +
+      // metadata) and the resulting subscription (`subscription_data[metadata]`)
+      // so the billing webhook can route the row to parent_subscriptions whichever
+      // event lands first.
+      const body = new URLSearchParams();
+      body.set('mode', 'subscription');
+      body.set('customer', input.customerId);
+      body.set('line_items[0][price]', input.priceId);
+      body.set('line_items[0][quantity]', '1');
+      body.set('success_url', input.successUrl);
+      body.set('cancel_url', input.cancelUrl);
+      body.set('client_reference_id', input.clientReferenceId);
+      body.set('subscription_data[metadata][uid]', input.clientReferenceId);
+      body.set('subscription_data[metadata][purpose]', 'parent_subscription');
+      body.set('metadata[uid]', input.clientReferenceId);
+      body.set('metadata[purpose]', 'parent_subscription');
+      // Discount-code support (Stripe Promotion Codes; PRD story 9). A pre-applied
+      // code and the hosted "add promotion code" field are mutually exclusive in
+      // Stripe Checkout — passing `discounts` forbids `allow_promotion_codes`.
+      if (input.promotionCode) {
+        body.set('discounts[0][promotion_code]', input.promotionCode);
+      } else if (input.allowPromotionCodes !== false) {
+        body.set('allow_promotion_codes', 'true');
+      }
+      for (const [k, v] of Object.entries(input.metadata ?? {})) {
+        body.set(`metadata[${k}]`, v);
+      }
+      return stripeFetch<CheckoutSessionResult>('/checkout/sessions', body);
     },
 
     async retrieveSubscription(subscriptionId: string): Promise<StripeSubscriptionObject> {

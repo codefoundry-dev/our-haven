@@ -236,6 +236,41 @@ export interface ProviderSubscriptionsTable {
 }
 
 /**
+ * Parent Subscription — the demand-side Stripe Billing relationship (OH-193;
+ * ADR-0011 / CONTEXT.md § Subscription). The Parent is a Stripe *Customer*; the
+ * subscription is sold on web (Stripe-hosted checkout) and unlocks full search,
+ * messaging, Book-requests, Job posting, and Provider-consultation booking. Unlike
+ * `provider_subscriptions` there is no `parents` table — a Parent is just the
+ * Supabase auth user — so the row is keyed by `uid` (the auth user uuid), no FK.
+ * Created at checkout-start so `stripe_customer_id` precedes the first webhook (the
+ * join key). `status` is mirrored from Stripe billing webhooks and is the live
+ * source for the paywall gate (via the domain `parent-subscription` module).
+ * `entitled_at` is a first-unlocked marker.
+ */
+export interface ParentSubscriptionsTable {
+  uid: string;
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+  status:
+    | 'incomplete'
+    | 'incomplete_expired'
+    | 'trialing'
+    | 'active'
+    | 'past_due'
+    | 'canceled'
+    | 'unpaid'
+    | 'paused'
+    | null;
+  price_id: string | null;
+  current_period_end: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  cancel_at_period_end: ColumnType<boolean, boolean | undefined, boolean>;
+  entitled_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  last_webhook_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  created_at: Generated<Date>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
+/**
  * Corporate "Contact Us" intake (OH-191; ADR-0011). v1 captures a sales lead for
  * the large-corporation custom-contract path — no self-serve org onboarding /
  * multi-seat model. Not keyed to a `providers` row (leads are pre-account); a
@@ -323,6 +358,7 @@ export interface Database {
   provider_home_childcare_registrations: ProviderHomeChildcareRegistrationsTable;
   provider_connect_accounts: ProviderConnectAccountsTable;
   provider_subscriptions: ProviderSubscriptionsTable;
+  parent_subscriptions: ParentSubscriptionsTable;
   provider_contact_intakes: ProviderContactIntakesTable;
   stripe_tax_calculations: StripeTaxCalculationsTable;
   messages: MessagesTable;
