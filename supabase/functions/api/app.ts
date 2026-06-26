@@ -1,7 +1,9 @@
 import { OpenAPIHono } from '@hono/zod-openapi';
+import { cors } from 'hono/cors';
 
 import type { AppEnv } from './context.ts';
 import type { AppDeps } from './deps.ts';
+import { NotConfiguredError } from './errors.ts';
 import { registerAdminStripeTaxRoutes } from './routes/admin/stripe-tax.ts';
 import { registerAuthRoutes } from './routes/auth.ts';
 import { registerCaregiverBadgeRoutes } from './routes/caregiver-badges.ts';
@@ -94,6 +96,23 @@ export const openApiInfo = {
 export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   const app = new OpenAPIHono<AppEnv>();
 
+  // CORS — the RN/Expo *web* bundle calls this API from a different origin than
+  // the Edge Functions host, so the browser sends a preflight (OPTIONS) and
+  // requires Access-Control-* on every response. Native has no CORS. Auth is a
+  // bearer token (no cookies), so reflecting the request origin is safe; lock
+  // this to an allow-list of known web origins if that ever changes. First in
+  // the chain so even error responses carry the headers and the preflight is
+  // answered before any route logic.
+  app.use(
+    '*',
+    cors({
+      origin: (origin) => origin ?? '*',
+      allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowHeaders: ['Authorization', 'Content-Type'],
+      maxAge: 86400,
+    }),
+  );
+
   // Inject collaborators into every request context (runs before all routes,
   // including mounted sub-apps).
   app.use('*', async (c, next) => {
@@ -103,6 +122,11 @@ export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
 
   // Uniform error envelope — never leak internals (mirrors the Fastify posture).
   app.onError((err, c) => {
+    // A route reached for an unconfigured vendor feature (e.g. Stripe not set up
+    // yet) is a 503 not_configured, not a 500 — the rest of the API is healthy.
+    if (err instanceof NotConfiguredError) {
+      return c.json({ error: 'not_configured', detail: err.message }, 503);
+    }
     console.error('[api] unhandled error', err);
     return c.json({ error: 'internal_error' }, 500);
   });

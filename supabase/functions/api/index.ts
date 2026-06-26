@@ -46,17 +46,28 @@ function boot(): (req: Request) => Response | Promise<Response> {
 // JWT_SECRET). Surface it as a readable 503 instead of an opaque WORKER_ERROR
 // so misconfiguration is self-diagnosing without digging through logs. The
 // detail is config-validation text only (zod messages, never secret values).
+//
+// CRITICAL: the fallback emits CORS headers (and answers the preflight) too —
+// otherwise a browser hitting a boot-failed function sees an opaque "CORS error"
+// that masks the real 503 detail (exactly the symptom that hid this very bug).
 let handler: (req: Request) => Response | Promise<Response>;
 try {
   handler = boot();
 } catch (err) {
   const detail = err instanceof Error ? err.message : String(err);
   console.error('[api] boot failed:', detail);
-  handler = () =>
-    new Response(JSON.stringify({ error: 'boot_failed', detail }), {
+  handler = (req) => {
+    const cors: Record<string, string> = {
+      'access-control-allow-origin': req.headers.get('origin') ?? '*',
+      'access-control-allow-headers': 'authorization, content-type',
+      'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS',
+    };
+    if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+    return new Response(JSON.stringify({ error: 'boot_failed', detail }), {
       status: 503,
-      headers: { 'content-type': 'application/json' },
+      headers: { ...cors, 'content-type': 'application/json' },
     });
+  };
 }
 
 Deno.serve(handler);

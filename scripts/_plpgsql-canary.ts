@@ -16,7 +16,16 @@ export interface CanaryViolation {
  * permanently-green default; adding an entry is a deliberate ADR checkpoint,
  * never a routine edit.
  */
-export const REGISTERED_EXCEPTIONS: Readonly<Record<string, string>> = {};
+export const REGISTERED_EXCEPTIONS: Readonly<Record<string, string>> = {
+  // handle_new_user AFTER INSERT trigger on auth.users (migration
+  // 20260704000001_profiles): a mechanical, business-logic-free copy of sign-up
+  // metadata into public.profiles. Sign-up is a direct supabase.auth.signUp()
+  // against GoTrue with no application-server hop, so a TS-orchestrated Kysely
+  // write cannot observe the auth.users insert — a DB trigger is the only atomic
+  // mirror. Bounded (insert-one-row, ON CONFLICT DO NOTHING); not a write-path
+  // domain switch-trigger.
+  'profiles-mirror': 'auth.users → public.profiles sign-up mirror (20260704000001_profiles)',
+};
 
 const RULES: ReadonlyArray<{ name: string; re: RegExp }> = [
   { name: 'language plpgsql', re: /\blanguage\s+'?plpgsql'?/i },

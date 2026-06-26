@@ -204,6 +204,22 @@ describe('POST /v1/providers/me/subscription/checkout-link', () => {
     );
   });
 
+  it('503 not_configured when STRIPE_PROVIDER_SUBSCRIPTION_PRICE_ID is unset', async () => {
+    const stripe = makeStripe();
+    const { db } = makeDb({
+      provider: PROVIDER,
+      subscription: { provider_id: 'prov-1', stripe_customer_id: 'cus_existing', status: null },
+    });
+    // Boot the app with the price id absent — the rest of the API is unaffected.
+    const deps: AppDeps = { ...makeDeps({ db, stripe }), env: buildTestEnv({ STRIPE_PROVIDER_SUBSCRIPTION_PRICE_ID: undefined }) };
+    const app = buildApp(deps);
+    const res = await app.request(CHECKOUT, post(await providerToken()));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({ error: 'not_configured' });
+    // The guard short-circuits before Stripe is ever called.
+    expect(stripe.createSubscriptionCheckoutSession).not.toHaveBeenCalled();
+  });
+
   it('reuses an existing Stripe Customer (no second create)', async () => {
     const stripe = makeStripe();
     const { db } = makeDb({

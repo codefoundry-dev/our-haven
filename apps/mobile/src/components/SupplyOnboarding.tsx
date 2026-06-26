@@ -13,6 +13,7 @@ import { ApiError, roleClaim } from '@/api/client';
 import { useAuth } from '@/auth/AuthProvider';
 import { Icon } from '@/components/Icon';
 import { Notice } from '@/components/Notice';
+import { Screen } from '@/components/Screen';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { RolePill } from '@/components/ui/RolePill';
 import { SelectableCard } from '@/components/ui/SelectableCard';
@@ -84,7 +85,8 @@ export function SupplyOnboarding({ role }: { role: 'caregiver' | 'provider' }) {
   };
 
   return (
-    <View style={styles.wrap}>
+    <Screen scroll>
+      <View style={styles.wrap}>
       <View style={styles.pill}>
         <RolePill role={role} />
       </View>
@@ -138,7 +140,8 @@ export function SupplyOnboarding({ role }: { role: 'caregiver' | 'provider' }) {
       <View style={styles.notice}>
         <Notice>This sets your permanent role on Our Haven. You’ll verify your ID next.</Notice>
       </View>
-    </View>
+      </View>
+    </Screen>
   );
 }
 

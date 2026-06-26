@@ -29,10 +29,15 @@
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
+import { NotConfiguredError } from '../errors.ts';
+
 export interface StripeConfig {
-  secretKey: string;
-  /** Secret for the Stripe Connect webhook endpoint (account.updated). */
-  connectWebhookSecret: string;
+  /** Optional — the function boots without Stripe configured; any API call made
+   *  while this is unset throws NotConfiguredError (→ 503 not_configured). */
+  secretKey?: string;
+  /** Secret for the Stripe Connect webhook endpoint (account.updated). Optional;
+   *  webhook verification fails closed (returns false) when unset. */
+  connectWebhookSecret?: string;
   /**
    * OH-185: secret for the payments webhook endpoint (`payment_intent.succeeded`
    * for the screening charge). A DISTINCT endpoint + signing secret from the
@@ -519,6 +524,7 @@ export function createStripeAdapter(config: StripeConfig): StripeAdapter {
   }
 
   async function stripeFetch<T>(path: string, body: URLSearchParams): Promise<T> {
+    if (!config.secretKey) throw new NotConfiguredError('STRIPE_SECRET_KEY');
     const res = await doFetch(`${apiBase}${path}`, {
       method: 'POST',
       headers: {
@@ -535,6 +541,7 @@ export function createStripeAdapter(config: StripeConfig): StripeAdapter {
   }
 
   async function stripeGet<T>(path: string): Promise<T> {
+    if (!config.secretKey) throw new NotConfiguredError('STRIPE_SECRET_KEY');
     const res = await doFetch(`${apiBase}${path}`, {
       method: 'GET',
       headers: { Authorization: `Bearer ${config.secretKey}` },
@@ -585,6 +592,7 @@ export function createStripeAdapter(config: StripeConfig): StripeAdapter {
     },
 
     verifyConnectWebhookSignature(rawBody: string, signatureHeader: string | null): boolean {
+      if (!config.connectWebhookSecret) return false;
       return checkSignature(rawBody, signatureHeader, config.connectWebhookSecret);
     },
 

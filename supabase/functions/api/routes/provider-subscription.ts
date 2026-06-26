@@ -3,6 +3,7 @@ import { createRoute, type OpenAPIHono, z } from '@hono/zod-openapi';
 import { requireAuth } from '../auth/middleware.ts';
 import type { AppEnv } from '../context.ts';
 import type { Db } from '../db/kysely.ts';
+import { NotConfiguredError } from '../errors.ts';
 // Cross-tree, Deno-clean domain module (ADR-0019; the explicit-`.ts` pattern).
 // The listing gate lives in the domain so every surface (this summary, the
 // clinical-profile projection, the slot-publish gate, and the later Parent
@@ -250,6 +251,9 @@ export function registerProviderSubscriptionRoutes(app: OpenAPIHono<AppEnv>): vo
         .execute();
     }
 
+    if (!env.STRIPE_PROVIDER_SUBSCRIPTION_PRICE_ID) {
+      throw new NotConfiguredError('STRIPE_PROVIDER_SUBSCRIPTION_PRICE_ID');
+    }
     const session = await stripe.createSubscriptionCheckoutSession({
       customerId: stripeCustomerId,
       priceId: env.STRIPE_PROVIDER_SUBSCRIPTION_PRICE_ID,

@@ -3,13 +3,12 @@
  * M2.2 API (POST /v1/auth/role-claim), then refreshes the session so the new
  * app_metadata.role lands in the access token and the gate routes into the app.
  *
- * Reached when a session exists but has no role yet:
- *   - right after sign-up (intended role carried in user_metadata), or
- *   - an existing role-less account signs in (shows the role cards).
- *
- * Parent claims directly here (no extra permanent data). Caregiver and Provider
- * collect their permanent categories/specialty + resident state in
- * SupplyOnboarding (OH-183) before claiming.
+ * The role is INFERRED FROM AUTH: it's the role the user chose on role-pick,
+ * carried in user_metadata.intended_role from sign-up. The view shown is the
+ * pure derivation in lib/roleClaim → resolveRoleClaimView. A Parent claims
+ * directly; Caregiver and Provider collect their permanent categories/specialty
+ * + resident state in SupplyOnboarding (OH-183) before claiming. The role-pick
+ * cards only appear for a legacy account that has no intended role at all.
  */
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -19,21 +18,32 @@ import { useAuth } from '@/auth/AuthProvider';
 import { RolePickCards } from '@/components/RolePickCards';
 import { Screen } from '@/components/Screen';
 import { SupplyOnboarding } from '@/components/SupplyOnboarding';
+import { resolveRoleClaimView } from '@/lib/roleClaim';
 import { isRole, type Role } from '@/lib/roles';
 import { colors, fonts } from '@/theme/tokens';
 
 export default function RoleClaimScreen() {
-  const { session, refresh, signOut } = useAuth();
+  const { status, session, refresh, signOut } = useAuth();
+
+  // The role comes from auth — the choice made at sign-up. Deriving it from the
+  // live session each render (not a one-time useState capture) means a page
+  // refresh / late session hydration on web still resolves to the right
+  // onboarding instead of flashing the role picker.
   const intendedRaw = session?.user?.user_metadata?.intended_role;
   const intended = isRole(intendedRaw) ? intendedRaw : null;
 
-  const [picked, setPicked] = useState<Role | null>(intended);
+  // `override` only applies to a legacy account with no intended role that must
+  // pick one from the cards below.
+  const [override, setOverride] = useState<Role | null>(null);
+  const view = resolveRoleClaimView({ status, intended, override });
+
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
 
   // Parent is the only role with no extra permanent data — claim it directly.
+  const claimingParent = view.kind === 'claim-parent';
   useEffect(() => {
-    if (picked !== 'parent') return;
+    if (!claimingParent) return;
     let cancelled = false;
     (async () => {
       setError(null);
@@ -55,17 +65,15 @@ export default function RoleClaimScreen() {
     return () => {
       cancelled = true;
     };
-  }, [picked, attempt, refresh]);
+  }, [claimingParent, attempt, refresh]);
 
-  if (picked === 'caregiver' || picked === 'provider') {
-    return (
-      <Screen scroll>
-        <SupplyOnboarding role={picked} />
-      </Screen>
-    );
+  // SupplyOnboarding owns its own page shell so the web variant can render the
+  // full-viewport two-pane desktop layout (not the phone-width Screen column).
+  if (view.kind === 'onboarding') {
+    return <SupplyOnboarding role={view.role} />;
   }
 
-  if (picked === 'parent') {
+  if (view.kind === 'claim-parent') {
     return (
       <Screen>
         <View style={styles.center}>
@@ -90,13 +98,25 @@ export default function RoleClaimScreen() {
     );
   }
 
-  // Authenticated but no intended role (e.g. legacy account) — choose one.
+  // Session still resolving — show a spinner rather than flashing the picker at
+  // a user who already has a role.
+  if (view.kind === 'loading') {
+    return (
+      <Screen>
+        <View style={styles.center}>
+          <ActivityIndicator color={colors.brand} />
+        </View>
+      </Screen>
+    );
+  }
+
+  // Authenticated but genuinely no intended role (e.g. legacy account) — choose one.
   return (
     <Screen scroll contentStyle={styles.content}>
       <Text style={styles.title}>One more thing.</Text>
       <Text style={styles.subtitle}>Who are you on Our Haven? This is permanent.</Text>
       <View style={styles.cards}>
-        <RolePickCards onPick={setPicked} />
+        <RolePickCards onPick={setOverride} />
       </View>
       <Pressable onPress={signOut} hitSlop={8} style={styles.signOutRow}>
         <Text style={styles.signOut}>Sign out</Text>

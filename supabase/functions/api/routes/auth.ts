@@ -248,6 +248,18 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>): void {
       console.error('[auth] supabase updateUserById failed', error);
       throw new Error('failed_to_set_role_claim');
     }
+
+    // Mirror the now-permanent role + state into the public.profiles directory
+    // (the queryable uid → role projection). The handle_new_user trigger created
+    // the row at sign-up; upsert so a user predating the trigger still converges.
+    await db
+      .insertInto('profiles')
+      .values({ id: principal.uid, email: principal.email ?? null, role: body.role, state: desiredState })
+      .onConflict((oc) =>
+        oc.column('id').doUpdateSet({ role: body.role, state: desiredState, updated_at: new Date() }),
+      )
+      .execute();
+
     return c.json(
       { role: body.role, categories: desiredCategories, specialty: desiredSpecialty, state: desiredState },
       200,
