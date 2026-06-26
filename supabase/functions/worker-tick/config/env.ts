@@ -54,6 +54,60 @@ const EnvSchema = z.object({
     .url()
     .default('https://api.checkr.com/v1')
     .describe('Checkr API base URL. Overridable for staging / sandbox; tests inject a fetch stub instead.'),
+
+  // ── Notifications dispatcher (OH-194; CONTEXT § Notifications) ────────────
+  // ALL optional so the function still boots with only DB + secret + Checkr set:
+  // an unconfigured channel is simply skipped (best-effort) or, for the four
+  // SMS-mandatory event kinds, makes the row fail loudly (so a misconfigured prod
+  // can never silently drop a mandatory SMS). The dispatcher builds an adapter
+  // only when its secrets are present.
+  NOTIFICATIONS_DEEP_LINK_BASE_MOBILE: z
+    .string()
+    .min(1)
+    .default('ourhaven://')
+    .describe('Mobile custom-scheme base for deep links (docs/notifications-deep-link-format.md).'),
+  NOTIFICATIONS_DEEP_LINK_BASE_WEB: z
+    .string()
+    .url()
+    .default('https://provider.ourhaven.com/')
+    .describe('Web portal base for deep links (used in web-push + email bodies).'),
+
+  // Resend (email) — both required together to enable the email channel.
+  RESEND_API_KEY: z.string().min(1).optional().describe('Resend API key (re_…).'),
+  RESEND_FROM: z
+    .string()
+    .min(1)
+    .default('Our Haven <notifications@ourhaven.com>')
+    .describe('Verified Resend From address.'),
+
+  // Twilio (SMS) — all three required together to enable the SMS channel.
+  TWILIO_ACCOUNT_SID: z.string().min(1).optional().describe('Twilio Account SID (AC…).'),
+  TWILIO_AUTH_TOKEN: z.string().min(1).optional().describe('Twilio auth token.'),
+  TWILIO_FROM_NUMBER: z.string().min(1).optional().describe('Twilio sender number (E.164).'),
+
+  // Expo Push (mobile) — access token optional (only needed with Enhanced Security).
+  EXPO_ACCESS_TOKEN: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Expo access token; required only when the project enables push Enhanced Security.'),
+
+  // VAPID (web push) — public + private required together to enable web push.
+  VAPID_PUBLIC_KEY: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('VAPID public key (base64url uncompressed P-256 point).'),
+  VAPID_PRIVATE_KEY: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('VAPID private key (base64url 32-byte P-256 scalar).'),
+  VAPID_SUBJECT: z
+    .string()
+    .min(1)
+    .default('mailto:notifications@ourhaven.com')
+    .describe('VAPID sub claim — a contact URI for the push service.'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

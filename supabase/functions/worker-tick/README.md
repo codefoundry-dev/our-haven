@@ -9,6 +9,11 @@ Every minute, `pg_cron` + `pg_net` POST to this function, which:
    `FOR UPDATE SKIP LOCKED`, dispatches each, and marks `sent_at` (success) or
    bumps `attempts` + backs off `next_attempt_at` (failure), giving up at
    `max_attempts`. Overlapping ticks skip locked rows, so nothing is sent twice.
+   The dispatch chain is **screening.invite → notifications → logging**: the
+   OH-185 screening dispatcher handles its event, the OH-194 notifications
+   dispatcher fans every known notification event out to Expo Push / VAPID web
+   push / Resend email / Twilio SMS (channel matrix in `@our-haven/domain`
+   `notifications/`), and anything unrecognised falls through to the logging no-op.
 2. **Runs every due-row sweep** (`sweeps.ts`) — FCRA screening disposal today;
    Booking 24h-expiry, Session auto-confirm, Offer 72h-expiry and retention land
    here as OH-177 / OH-179 / OH-182 add the `bookings` / `offers` tables and
@@ -23,13 +28,21 @@ This replaces `pgmq` + the always-on drain worker. No in-process timers.
 | `index.ts` | Deno entrypoint — auth + one `runTick`. The only Deno-coupled file (excluded from the Node typecheck). |
 | `tick.ts` | `runTick`: drain then sweeps, each isolated. |
 | `outbox.ts` | Drain orchestrator + Kysely `SKIP LOCKED` store + dispatcher seam. |
+| `dispatchers/screening.ts` | OH-185 `screening.invite` → deferred Checkr call. |
+| `dispatchers/notifications.ts` | OH-194 channel fan-out + recipient resolver. |
 | `sweeps.ts` | `Sweep` registry; the screening-disposal sweep. |
 | `auth.ts` | Constant-time shared-secret check. |
 | `db/kysely.ts` | postgres.js + Supavisor (shares `apps/backend` schema). |
-| `config/env.ts` | `DATABASE_URL`, `DATABASE_SSL`, `WORKER_TICK_SECRET`. |
+| `config/env.ts` | DB + `WORKER_TICK_SECRET` + Checkr + notification vendor secrets. |
 
-The dispatcher in `outbox.ts` is a no-op logger for now — **OH-194** wires the
-real channel matrix (Expo Push / VAPID / Resend / Twilio) against that seam.
+The notifications dispatcher (OH-194) is the real channel matrix behind the
+dispatcher seam (Expo Push / VAPID / Resend / Twilio). Its vendor secrets are
+**all optional** — the function still boots with only DB + secret + Checkr set;
+an unconfigured channel is skipped (best-effort), except a missing Twilio makes
+the four SMS-mandatory event kinds fail loudly rather than silently drop. The
+recipient's email + phone come from `auth.users`; push destinations come from the
+`notification_push_tokens` / `notification_web_push_subscriptions` tables (the
+app-side registration write path lands with the apps/mobile push-setup ticket).
 
 ## Deploy & wire the tick (one-time per environment)
 
