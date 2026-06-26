@@ -1,0 +1,21 @@
+# .vercelignore — extra files excluded from Vercel deployment uploads.
+# Vercel's default exclusions (node_modules, .git, .vercel, etc.) still apply on
+# top of this list. Build-time config (EXPO_PUBLIC_*) comes from the Vercel
+# project's Environment Variables, NOT from these local files.
+
+# Local env files — never upload secrets. apps/mobile/.env carries tooling creds
+# (JIRA_*) and would otherwise be loaded into the build.
+.env
+.env.*
+**/.env
+**/.env.*
+
+# Local Vercel CLI state (link + pulled env), in case it isn't default-excluded
+**/.vercel
+
+# Non-build assets — not needed to build apps/mobile, just slows the upload
+docs
+.github
+.vscode
+.design-bundle
+.claude

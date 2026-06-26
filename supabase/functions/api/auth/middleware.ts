@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from 'hono';
-import { jwtVerify } from 'jose';
+import { createRemoteJWKSet, decodeProtectedHeader, jwtVerify, type JWTVerifyGetKey } from 'jose';
 
+import type { Env } from '../config/env.ts';
 import type { AppEnv } from '../context.ts';
 import type { Principal, SecondFactor, SupabaseJwtPayload } from './principal.ts';
 import { isRole, type Role } from './roles.ts';
@@ -11,10 +12,56 @@ export interface RequireAuthOptions {
 }
 
 /**
+ * Memoized JWKS resolvers, one per project (keyed by the JWKS URL). Supabase
+ * now signs access tokens with ASYMMETRIC JWT signing keys (ES256, published at
+ * `/auth/v1/.well-known/jwks.json`) by default — the legacy symmetric HS256 JWT
+ * secret only signs tokens on older projects and the local CLI stack. `jose`'s
+ * createRemoteJWKSet fetches + caches the public keys and resolves the right one
+ * by `kid` (handling rotation), so it MUST be built once and reused across
+ * requests, never per-request.
+ */
+const jwksByUrl = new Map<string, JWTVerifyGetKey>();
+
+function jwksFor(supabaseUrl: string): JWTVerifyGetKey {
+  const url = `${supabaseUrl.replace(/\/$/, '')}/auth/v1/.well-known/jwks.json`;
+  let jwks = jwksByUrl.get(url);
+  if (!jwks) {
+    jwks = createRemoteJWKSet(new URL(url));
+    jwksByUrl.set(url, jwks);
+  }
+  return jwks;
+}
+
+/**
+ * Verify a Supabase access token, dispatching on its own `alg` header so both
+ * signing schemes work: prod ES256/RS256 against the project JWKS, and the
+ * local/test HS256 secret against `env.JWT_SECRET`. The audience is pinned to
+ * `authenticated` (GoTrue's user audience) in both branches. Throws on any
+ * malformed/forged/expired token; the caller maps that to a 401.
+ */
+async function verifyAccessToken(token: string, env: Env): Promise<SupabaseJwtPayload> {
+  const { alg } = decodeProtectedHeader(token);
+  if (alg === 'HS256') {
+    const { payload } = await jwtVerify(token, new TextEncoder().encode(env.JWT_SECRET), {
+      algorithms: ['HS256'],
+      audience: 'authenticated',
+    });
+    return payload as SupabaseJwtPayload;
+  }
+  const { payload } = await jwtVerify(token, jwksFor(env.SUPABASE_URL), {
+    algorithms: ['ES256', 'RS256'],
+    audience: 'authenticated',
+  });
+  return payload as SupabaseJwtPayload;
+}
+
+/**
  * Port of the Fastify `requireAuth` (apps/backend/src/plugins/auth.ts) to a
  * Hono middleware factory (ADR-0019 § Decision 1 — one auth chain on the fat
- * function). Verifies the Supabase HS256 access token locally, attaches the
- * Principal to the context, and enforces role + optional step-up-MFA gates.
+ * function). Verifies the Supabase access token (asymmetric ES256 via the
+ * project JWKS, or legacy/local HS256 via the shared secret — see
+ * verifyAccessToken), attaches the Principal to the context, and enforces
+ * role + optional step-up-MFA gates.
  * Reads collaborators from `c.var.deps` (set by the root middleware in
  * `buildApp`), so it needs no closure state.
  */
@@ -29,11 +76,7 @@ export function requireAuth(opts: RequireAuthOptions = {}): MiddlewareHandler<Ap
 
     let payload: SupabaseJwtPayload;
     try {
-      const verified = await jwtVerify(token, new TextEncoder().encode(env.JWT_SECRET), {
-        algorithms: ['HS256'],
-        audience: 'authenticated',
-      });
-      payload = verified.payload as SupabaseJwtPayload;
+      payload = await verifyAccessToken(token, env);
     } catch {
       return c.json({ error: 'invalid_token' }, 401);
     }

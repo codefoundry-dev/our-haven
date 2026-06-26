@@ -233,6 +233,12 @@ describe('GET /v1/providers/me/profile', () => {
       agesServed: [],
       behaviourComfort: [],
       credentials: [],
+      zip: null,
+      yearsExperience: null,
+      languages: [],
+      specialties: [],
+      photoObjectPath: null,
+      photoUrl: null,
     });
   });
 });
@@ -341,6 +347,49 @@ describe('PATCH /v1/providers/me/profile', () => {
     expect(json.paused).toBe(true);
     // false cells are normalised away
     expect(json.availabilityGrid).toEqual({ mon: { morning: true } });
+  });
+
+  it('persists zip, years, languages + specialties (trimmed/de-duped) and the photo URL', async () => {
+    const { db } = makeDb({ providers: [BABYSITTER] });
+    const app = buildApp(makeDeps({ db }));
+    const res = await app.request(
+      PROFILE,
+      body('PATCH', await caregiverToken(BABYSITTER.uid, BABYSITTER.categories), {
+        zip: '90210',
+        yearsExperience: 4,
+        languages: ['English', 'english', '  Spanish '],
+        specialties: ['Math', 'Test  prep', ''],
+        photoObjectPath: `avatar/${BABYSITTER.uid}/abc-123`,
+      }),
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Record<string, unknown>;
+    expect(json.zip).toBe('90210');
+    expect(json.yearsExperience).toBe(4);
+    expect(json.languages).toEqual(['English', 'Spanish']);
+    expect(json.specialties).toEqual(['Math', 'Test prep']);
+    expect(json.photoObjectPath).toBe(`avatar/${BABYSITTER.uid}/abc-123`);
+    expect(json.photoUrl).toContain(`/storage/v1/object/public/avatars/avatar/${BABYSITTER.uid}/abc-123`);
+  });
+
+  it('rejects a photoObjectPath outside the caller’s avatar namespace → 400', async () => {
+    const app = buildApp(makeDeps({ db: makeDb({ providers: [BABYSITTER] }).db }));
+    const res = await app.request(
+      PROFILE,
+      body('PATCH', await caregiverToken(BABYSITTER.uid, BABYSITTER.categories), {
+        photoObjectPath: 'avatar/someone-else/x',
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a non-5-digit zip at the schema → 400', async () => {
+    const app = buildApp(makeDeps({ db: makeDb({ providers: [BABYSITTER] }).db }));
+    const res = await app.request(
+      PROFILE,
+      body('PATCH', await caregiverToken(BABYSITTER.uid, BABYSITTER.categories), { zip: '9021' }),
+    );
+    expect(res.status).toBe(400);
   });
 });
 

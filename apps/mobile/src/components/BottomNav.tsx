@@ -31,6 +31,10 @@ export function BottomNav({ state, navigation, role }: TabBarProps) {
   const items = ROLE_TABS[role];
   const activeName = state.routes[state.index]?.name;
 
+  // The supply onboarding wizard is a full-takeover flow (its own CAREGIVER SETUP
+  // rail + sticky Back/Continue footer), so the floating tab bar is suppressed there.
+  if (activeName === 'onboarding') return null;
+
   return (
     <View style={[styles.bar, shadow.e2, { paddingBottom: Math.max(insets.bottom, 20) }]}>
       {items.map((item) => {

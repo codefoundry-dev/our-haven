@@ -30,20 +30,28 @@ function makeDb(opts: { stepUpGrant?: { granted_at: Date } | null } = {}): AppDe
   } as unknown as AppDeps['db'];
 }
 
-/** Db stub for the role-claim providers insert. Captures each `.values(...)` so
- *  tests can assert the persisted supply identity. The handler calls
- *  `insertInto('providers').values(row).onConflict(...).execute()`. */
-function makeProvidersDb(): { db: AppDeps['db']; inserts: Array<Record<string, unknown>> } {
-  const inserts: Array<Record<string, unknown>> = [];
-  const insertChain = {
-    values: (row: Record<string, unknown>) => {
-      inserts.push(row);
-      return insertChain;
-    },
-    onConflict: () => insertChain,
-    execute: async () => [],
+/** Db stub for the role-claim inserts. Captures each `insertInto(table).values(row)`
+ *  WITH its table so tests can assert both the supply identity (`providers`) and
+ *  the queryable directory mirror (`profiles`). The handler calls
+ *  `insertInto('providers').values(row).onConflict(...).execute()` (supply only)
+ *  then `insertInto('profiles').values(row).onConflict(...).execute()` (always). */
+function makeProvidersDb(): {
+  db: AppDeps['db'];
+  inserts: Array<{ table: string; row: Record<string, unknown> }>;
+} {
+  const inserts: Array<{ table: string; row: Record<string, unknown> }> = [];
+  const chain = (table: string) => {
+    const c: Record<string, unknown> = {
+      values: (row: Record<string, unknown>) => {
+        inserts.push({ table, row });
+        return c;
+      },
+      onConflict: () => c,
+      execute: async () => [],
+    };
+    return c;
   };
-  return { db: { insertInto: () => insertChain } as unknown as AppDeps['db'], inserts };
+  return { db: { insertInto: (table: string) => chain(table) } as unknown as AppDeps['db'], inserts };
 }
 
 function makeDeps(opts: {
@@ -103,7 +111,11 @@ describe('POST /v1/auth/role-claim', () => {
       }),
     );
     expect(inserts).toEqual([
-      { uid: 'uid-1', role: 'caregiver', categories: ['babysitter', 'nanny'], specialty: null, state: 'CA' },
+      {
+        table: 'providers',
+        row: { uid: 'uid-1', role: 'caregiver', categories: ['babysitter', 'nanny'], specialty: null, state: 'CA' },
+      },
+      { table: 'profiles', row: { id: 'uid-1', email: 'cg@example.com', role: 'caregiver', state: 'CA' } },
     ]);
   });
 
@@ -123,7 +135,8 @@ describe('POST /v1/auth/role-claim', () => {
       expect.objectContaining({ app_metadata: expect.objectContaining({ role: 'provider', specialty: 'slp', state: 'TX' }) }),
     );
     expect(inserts).toEqual([
-      { uid: 'uid-2', role: 'provider', categories: null, specialty: 'slp', state: 'TX' },
+      { table: 'providers', row: { uid: 'uid-2', role: 'provider', categories: null, specialty: 'slp', state: 'TX' } },
+      { table: 'profiles', row: { id: 'uid-2', email: 'pv@example.com', role: 'provider', state: 'TX' } },
     ]);
   });
 

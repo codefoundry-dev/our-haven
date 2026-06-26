@@ -20,6 +20,39 @@ export interface AuthStepUpGrantsTable {
   expires_at: ColumnType<Date, Date | string, Date | string>;
 }
 
+/**
+ * public.profiles — the queryable user directory (uid → role) the app and admin
+ * tools read. ADR-0011 keeps `app_metadata.role` authoritative for the JWT/RLS;
+ * this table is its queryable projection (auth.users / app_metadata live in the
+ * protected `auth` schema and cannot be joined from the public API).
+ *
+ * Every auth user gets exactly one row, created synchronously by the
+ * `handle_new_user` AFTER INSERT trigger on auth.users (migration
+ * 20260704000001_profiles). There is NO FK to auth.users — it lives in the
+ * protected auth schema (matches `providers.uid` / `parent_subscriptions.uid`).
+ *
+ *   intended_role — the sign-up choice (provisional), copied from user_metadata.
+ *   role          — the permanent claimed role; null until POST /auth/role-claim
+ *                   sets it (alongside app_metadata.role). Read it as
+ *                   coalesce(role, intended_role) for "what flow to show".
+ *   state         — resident state (supply roles); set at role-claim, null parent.
+ */
+export interface ProfilesTable {
+  id: string; // the Supabase auth user uuid (auth.users.id)
+  email: ColumnType<string | null, string | null | undefined, string | null>;
+  first_name: ColumnType<string | null, string | null | undefined, string | null>;
+  last_name: ColumnType<string | null, string | null | undefined, string | null>;
+  intended_role: ColumnType<string | null, string | null | undefined, string | null>;
+  role: ColumnType<
+    'parent' | 'caregiver' | 'provider' | 'admin' | null,
+    'parent' | 'caregiver' | 'provider' | 'admin' | null | undefined,
+    'parent' | 'caregiver' | 'provider' | 'admin' | null
+  >;
+  state: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: Generated<Date>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
 export interface ProvidersTable {
   id: Generated<string>;
   uid: string;
@@ -57,6 +90,10 @@ export interface ProviderProfilesTable {
   display_name: string | null;
   headline: string | null;
   bio: string | null;
+  // Caregiver public-profile fields (OH-188 follow-up): 5-digit ZIP + whole years
+  // of experience. Both API-layer-validated, with DB-check backstops.
+  zip: string | null;
+  years_experience: number | null;
   languages: ColumnType<string[], string[] | undefined, string[]>;
   specialty_tags: ColumnType<string[], string[] | undefined, string[]>;
   photo_object_path: string | null;
@@ -378,6 +415,7 @@ export interface NotificationWebPushSubscriptionsTable {
 export interface Database {
   auth_email_otps: AuthEmailOtpsTable;
   auth_step_up_grants: AuthStepUpGrantsTable;
+  profiles: ProfilesTable;
   providers: ProvidersTable;
   provider_verifications: ProviderVerificationsTable;
   provider_profiles: ProviderProfilesTable;

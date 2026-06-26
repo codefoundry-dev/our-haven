@@ -1259,6 +1259,26 @@ components:
         bio:
           type: string
           nullable: true
+        zip:
+          type: string
+          nullable: true
+        yearsExperience:
+          type: integer
+          nullable: true
+        languages:
+          type: array
+          items:
+            type: string
+        specialties:
+          type: array
+          items:
+            type: string
+        photoObjectPath:
+          type: string
+          nullable: true
+        photoUrl:
+          type: string
+          nullable: true
         categoryRates:
           type: array
           items:
@@ -1292,7 +1312,7 @@ components:
             enum:
               - aggression
               - self-injury
-              - elopement
+              - wandering
               - meltdowns
               - property-destruction
               - pica
@@ -1310,6 +1330,12 @@ components:
         - displayName
         - headline
         - bio
+        - zip
+        - yearsExperience
+        - languages
+        - specialties
+        - photoObjectPath
+        - photoUrl
         - categoryRates
         - fromRateCents
         - availabilityGrid
@@ -1404,6 +1430,30 @@ components:
           type: string
           nullable: true
           maxLength: 600
+        zip:
+          type: string
+          nullable: true
+          pattern: ^\d{5}$
+        yearsExperience:
+          type: integer
+          nullable: true
+          minimum: 0
+          maximum: 75
+        languages:
+          type: array
+          items:
+            type: string
+            maxLength: 40
+          maxItems: 30
+        specialties:
+          type: array
+          items:
+            type: string
+            maxLength: 40
+          maxItems: 30
+        photoObjectPath:
+          type: string
+          nullable: true
         categoryRates:
           type: array
           items:
@@ -1435,7 +1485,7 @@ components:
             enum:
               - aggression
               - self-injury
-              - elopement
+              - wandering
               - meltdowns
               - property-destruction
               - pica
@@ -1998,6 +2048,7 @@ components:
             - license-doc
             - insurance-doc
             - state-childcare-registration
+            - avatar
       required:
         - kind
     StripeConnectWebhookAck:
@@ -4230,17 +4281,19 @@ paths:
     post:
       tags:
         - uploads
-      summary: Mint a one-time signed URL for a client-direct private Storage upload
+      summary: Mint a one-time signed URL for a client-direct Storage upload
       description: Returns a signed upload URL + token for a server-chosen,
-        uid-namespaced object key in a private Supabase Storage bucket. The
-        client PUTs the file with
+        uid-namespaced object key in a Supabase Storage bucket (private id-docs
+        for documents; public avatars for the profile photo). The client PUTs
+        the file with
         supabase.storage.from(bucket).uploadToSignedUrl(objectPath, token,
         file), then confirms the objectPath to the owning resource (id-doc →
         POST /v1/providers/me/verification/id-doc; license-doc → POST
         /v1/providers/me/credentials/license; insurance-doc → POST
         /v1/providers/me/credentials/insurance; state-childcare-registration →
-        POST /v1/providers/me/home-childcare-registration). Supply-scoped
-        (caregiver / provider).
+        POST /v1/providers/me/home-childcare-registration; avatar → PATCH
+        /v1/providers/me/profile { photoObjectPath }). Supply-scoped (caregiver
+        / provider).
       security:
         - supabaseAccessToken: []
       requestBody:

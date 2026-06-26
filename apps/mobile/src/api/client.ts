@@ -31,6 +31,10 @@ export type CaregiverCategoryRate = CaregiverProfile['categoryRates'][number];
 export type CaregiverCredential = CaregiverProfile['credentials'][number];
 export type CredentialCreateBody = paths['/v1/providers/me/credentials']['post']['requestBody']['content']['application/json'];
 
+// Caregiver Stripe Connect Express (OH-190) — the Bank & payouts onboarding step.
+export type CaregiverConnectSummary = paths['/v1/caregiver/connect/summary']['get']['responses'][200]['content']['application/json'];
+export type CaregiverConnectOnboardingLink = paths['/v1/caregiver/connect/onboarding-link']['post']['responses'][200]['content']['application/json'];
+
 // Provider (clinical) profile builder (OH-189).
 export type ProviderClinicalProfile = paths['/v1/providers/me/clinical-profile']['get']['responses'][200]['content']['application/json'];
 export type ProviderClinicalProfilePatch = paths['/v1/providers/me/clinical-profile']['patch']['requestBody']['content']['application/json'];
@@ -136,6 +140,21 @@ export function addCaregiverCredential(body: CredentialCreateBody): Promise<{ cr
 
 export function deleteCaregiverCredential(credentialId: string): Promise<{ deleted: true }> {
   return del<{ deleted: true }>(`/v1/providers/me/credentials/${credentialId}`);
+}
+
+/**
+ * Caregiver Stripe Connect Express (OH-190) — the Bank & payouts onboarding step.
+ * `summary` mirrors the account's capability state (from account.updated webhooks);
+ * `onboarding-link` creates/reuses the Express account and returns a Stripe-hosted
+ * KYC URL to open. Precondition (enforced server-side): Checkr screening cleared.
+ */
+
+export function getConnectSummary(): Promise<CaregiverConnectSummary> {
+  return get<CaregiverConnectSummary>('/v1/caregiver/connect/summary');
+}
+
+export function createConnectOnboardingLink(): Promise<CaregiverConnectOnboardingLink> {
+  return post<CaregiverConnectOnboardingLink>('/v1/caregiver/connect/onboarding-link', undefined);
 }
 
 /**

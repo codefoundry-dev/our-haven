@@ -39,7 +39,7 @@ A single **family-level** record under a Parent account (ADR-0012 — replaces t
 
 - **Bio** — free-text family info.
 - **Preferences** — a checklist of desired Caregiver traits (e.g. non-smoker, pet-friendly).
-- **Safety Behaviors** — a **fixed checklist** of atypical behaviour patterns (aggression, self-injurious behaviour, wandering / elopement, etc. — final list from Ci'erro) the family wants supply to be aware of. **Sensitive child data:** stored only after an explicit, timestamped consent (see § Sensitive-data consent); `safety_behaviors_consent_at` is held alongside.
+- **Safety Behaviors** — a **fixed checklist** of atypical behaviour patterns (aggression, self-injurious behaviour, wandering, etc. — final list from Ci'erro) the family wants supply to be aware of. **Sensitive child data:** stored only after an explicit, timestamped consent (see § Sensitive-data consent); `safety_behaviors_consent_at` is held alongside.
 - **`default_address`** (optional) — pre-fills the per-transaction `service_address` (see § Service address & distance).
 
 There is **no persisted neurodivergence/diagnosis field** anywhere — the only persisted sensitive child data is the consented Safety Behaviors checklist. The number and ages of children appear only as ad-hoc `child_count` + `child_ages` on Offers / Bookings / Jobs. Profile **visibility** to supply is progressive (see § Parent-profile visibility).

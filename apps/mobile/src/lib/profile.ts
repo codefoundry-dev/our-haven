@@ -52,7 +52,7 @@ export const AGE_BAND_OPTIONS: Option<AgeBand>[] = [
 export const BEHAVIOUR_OPTIONS: Option<SafetyBehavior>[] = [
   { value: 'aggression', label: 'Aggression' },
   { value: 'self-injury', label: 'Self-injurious behaviour' },
-  { value: 'elopement', label: 'Wandering / elopement' },
+  { value: 'wandering', label: 'Wandering' },
   { value: 'meltdowns', label: 'Meltdowns' },
   { value: 'property-destruction', label: 'Property destruction' },
   { value: 'pica', label: 'Pica' },
@@ -61,6 +61,54 @@ export const BEHAVIOUR_OPTIONS: Option<SafetyBehavior>[] = [
   { value: 'transition-difficulty', label: 'Difficulty with transitions' },
   { value: 'sleep-disturbance', label: 'Sleep disturbance' },
 ];
+
+/**
+ * Suggested chips for the free-text `languages` / `specialties` profile fields.
+ * These are NOT a fixed taxonomy — the backend stores arbitrary strings (trimmed
+ * + de-duped server-side), so the stored value equals the label. The UI renders
+ * the union of these suggestions and any already-stored value, so a custom entry
+ * made elsewhere still appears as a toggleable chip.
+ */
+export const LANGUAGE_OPTIONS: string[] = [
+  'English',
+  'Spanish',
+  'Mandarin',
+  'French',
+  'Portuguese',
+  'Arabic',
+  'Hindi',
+  'Vietnamese',
+  'Tagalog',
+  'ASL',
+];
+
+export const SPECIALTY_OPTIONS: string[] = [
+  'Math',
+  'Science',
+  'Reading',
+  'Writing',
+  'Test prep',
+  'Homework help',
+  'Early literacy',
+  'STEM',
+  'Music',
+  'Art',
+  'Special needs',
+  'Newborn care',
+];
+
+/** Union of suggested chips with any already-selected values (keeps custom entries visible). */
+export function tagChips(suggested: readonly string[], selected: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const t of [...suggested, ...selected]) {
+    const key = t.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
+  }
+  return out;
+}
 
 export const CREDENTIAL_TYPE_OPTIONS: Option<CredentialType>[] = [
   { value: 'title', label: 'Title' },

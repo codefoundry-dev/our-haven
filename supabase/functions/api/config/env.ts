@@ -49,18 +49,28 @@ const EnvSchema = z.object({
       'Supabase service-role key — server-only, full Auth admin access (writes role claims to app_metadata). NEVER ship to clients. Auto-injected into deployed Edge Functions.',
     ),
 
+  // ── Vendor secrets (Stripe / Checkr) — OPTIONAL by design ─────────────────
+  // None of these gate boot. The fat function's core surface (auth, role-claim,
+  // verification, uploads) must come up without any payment config — a missing
+  // Stripe key or price id used to throw in loadEnv and 503 the WHOLE function,
+  // including routes that never touch Stripe (the role-claim outage). Now each is
+  // optional, and the route that actually needs one throws NotConfiguredError →
+  // a clean 503 `not_configured` (see errors.ts). Set via `supabase secrets set`.
+
   // ── Stripe Connect Express (OH-190) ──────────────────────────────────────
   // Caregiver-only payment rail (ADR-0001 / ADR-0011): hosted KYC onboarding,
   // the `account.updated` Connect webhook, and the destination-charge
   // application_fee skim. Providers carry no Connect (clinical fees are
-  // off-platform). Set via `supabase secrets set` — never auto-injected.
+  // off-platform).
   STRIPE_SECRET_KEY: z
     .string()
     .min(1)
+    .optional()
     .describe('Stripe secret API key (sk_test_… in dev, sk_live_… in prod). Server-only.'),
   STRIPE_CONNECT_WEBHOOK_SECRET: z
     .string()
     .min(1)
+    .optional()
     .describe(
       'Stripe Connect webhook signing secret (whsec_…) for `account.updated` events on Caregiver Connect Express accounts. Distinct endpoint + secret from the screening webhook (OH-106).',
     ),
@@ -95,12 +105,14 @@ const EnvSchema = z.object({
   STRIPE_PAYMENTS_WEBHOOK_SECRET: z
     .string()
     .min(1)
+    .optional()
     .describe(
       'Stripe webhook signing secret (whsec_…) for the payments endpoint that delivers `payment_intent.succeeded` for the screening charge. Distinct endpoint + secret from the Connect webhook (OH-190).',
     ),
   CHECKR_WEBHOOK_SECRET: z
     .string()
     .min(1)
+    .optional()
     .describe(
       'Checkr webhook signing secret. The Checkr webhook route HMAC-verifies the raw body against it (X-Checkr-Signature). Server-only; set via `supabase secrets set`.',
     ),
@@ -143,6 +155,13 @@ const EnvSchema = z.object({
     .describe(
       'Private Supabase Storage bucket holding government-ID uploads. Signed upload URLs are minted by the service-role admin client (POST /v1/uploads/signed-url); objects are namespaced id-doc/<uid>/<uuid>. Provisioned by migration 20260627000001.',
     ),
+  AVATAR_BUCKET: z
+    .string()
+    .min(1)
+    .default('avatars')
+    .describe(
+      'PUBLIC Supabase Storage bucket holding Caregiver/Provider profile photos. Unlike ID_DOC_BUCKET it is public (avatars are shown to Parents in search) so photo_object_path resolves to a stable /storage/v1/object/public/<bucket>/<path> URL. Uploads are still client-direct via a one-time signed upload URL (kind `avatar`, namespaced avatar/<uid>/<uuid>). Provisioned by migration 20260705000001.',
+    ),
 
   // ── Stripe Tax (OH-192) ──────────────────────────────────────────────────
   // Per-state taxability on the Parent Subscription + the platform Commission
@@ -183,14 +202,16 @@ const EnvSchema = z.object({
   STRIPE_BILLING_WEBHOOK_SECRET: z
     .string()
     .min(1)
+    .optional()
     .describe(
       'Stripe webhook signing secret (whsec_…) for the billing endpoint that delivers checkout.session.completed + customer.subscription.* for the Provider Subscription. Distinct endpoint + secret from the Connect + payments webhooks. Server-only; set via `supabase secrets set`.',
     ),
   STRIPE_PROVIDER_SUBSCRIPTION_PRICE_ID: z
     .string()
     .min(1)
+    .optional()
     .describe(
-      'Stripe recurring Price id (price_…) for the self-serve Provider Subscription. Not a secret, but no sensible default — required so a misconfigured deploy fails fast rather than minting broken checkouts.',
+      'Stripe recurring Price id (price_…) for the self-serve Provider Subscription. No sensible default; the provider-subscription checkout route throws NotConfiguredError (503) if a Provider tries to subscribe while this is unset.',
     ),
   STRIPE_SUBSCRIPTION_SUCCESS_URL: z
     .string()
@@ -217,8 +238,9 @@ const EnvSchema = z.object({
   STRIPE_PARENT_SUBSCRIPTION_PRICE_ID: z
     .string()
     .min(1)
+    .optional()
     .describe(
-      'Stripe recurring Price id (price_…) for the self-serve Parent Subscription. Not a secret, but no sensible default — required so a misconfigured deploy fails fast rather than minting broken checkouts.',
+      'Stripe recurring Price id (price_…) for the self-serve Parent Subscription. No sensible default; the parent-subscription checkout route throws NotConfiguredError (503) if a Parent tries to subscribe while this is unset.',
     ),
   STRIPE_PARENT_SUBSCRIPTION_SUCCESS_URL: z
     .string()

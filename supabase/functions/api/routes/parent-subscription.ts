@@ -3,6 +3,7 @@ import { createRoute, type OpenAPIHono, z } from '@hono/zod-openapi';
 import { requireAuth } from '../auth/middleware.ts';
 import type { AppEnv } from '../context.ts';
 import type { Db } from '../db/kysely.ts';
+import { NotConfiguredError } from '../errors.ts';
 // Cross-tree, Deno-clean domain module (ADR-0019; the explicit-`.ts` pattern).
 // The access gate lives in the domain so every surface (this summary today, and
 // the M3 search-unblur / messaging / Book-request / Job-posting / consultation
@@ -253,6 +254,9 @@ export function registerParentSubscriptionRoutes(app: OpenAPIHono<AppEnv>): void
         .execute();
     }
 
+    if (!env.STRIPE_PARENT_SUBSCRIPTION_PRICE_ID) {
+      throw new NotConfiguredError('STRIPE_PARENT_SUBSCRIPTION_PRICE_ID');
+    }
     const session = await stripe.createParentSubscriptionCheckoutSession({
       customerId: stripeCustomerId,
       priceId: env.STRIPE_PARENT_SUBSCRIPTION_PRICE_ID,

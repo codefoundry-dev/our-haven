@@ -24,6 +24,9 @@ export default function AppLayout() {
       <Tabs.Screen name="verification" options={{ href: null }} />
       <Tabs.Screen name="profile-builder" options={{ href: null }} />
       <Tabs.Screen name="provider-profile" options={{ href: null }} />
+      {/* Supply onboarding hub — landed on after role-claim (web), reached from the
+          dashboard "Finish your setup" banner; never a tab. */}
+      <Tabs.Screen name="onboarding" options={{ href: null }} />
     </Tabs>
   );
 }

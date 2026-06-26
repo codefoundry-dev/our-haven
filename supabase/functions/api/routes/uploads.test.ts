@@ -132,6 +132,19 @@ describe('POST /v1/uploads/signed-url', () => {
     expect(calledPath.startsWith('state-childcare-registration/uid-1/')).toBe(true);
   });
 
+  it('mints an avatar upload against the PUBLIC avatars bucket, uid-namespaced under avatar/', async () => {
+    const { supabase, from, createSignedUploadUrl } = makeStorage({
+      data: { signedUrl: 'https://storage/sign/av', token: 'av-token', path: 'avatar/uid-1/generated' },
+    });
+    const app = buildApp(makeDeps({ supabase }));
+    const res = await app.request('/v1/uploads/signed-url', post(await caregiverToken(), { kind: 'avatar' }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ bucket: 'avatars', objectPath: 'avatar/uid-1/generated' });
+    expect(from).toHaveBeenCalledWith('avatars');
+    const calledPath = createSignedUploadUrl.mock.calls[0]?.[0] as string;
+    expect(calledPath.startsWith('avatar/uid-1/')).toBe(true);
+  });
+
   it('502 when Storage returns an error', async () => {
     const { supabase } = makeStorage({ data: null, error: { message: 'bucket missing' } });
     const app = buildApp(makeDeps({ supabase }));

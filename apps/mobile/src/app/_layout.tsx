@@ -11,6 +11,7 @@ import { Stack, useRouter, useSegments, type Href } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
+import { Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -64,7 +65,13 @@ function RootNavigator() {
  * Auth gate. Keeps the user in the right top-level group for their state:
  *   anon                  → (auth)      (welcome / role-pick / sign-in / sign-up)
  *   authed, no role yet   → role-claim  (set the permanent role)
- *   authed, role set      → (app)/<role landing tab>
+ *   authed, role set      → (app)/<role landing tab>, EXCEPT a Caregiver/Provider
+ *                           who just claimed their role (entering from role-claim)
+ *                           lands on the onboarding hub on web. Sign-ins enter from
+ *                           (auth) and so go straight to the dashboard — which is the
+ *                           "hub once after signup, dashboard on every later sign-in"
+ *                           rule, decided by where the user is leaving from (no extra
+ *                           state, no backend call).
  */
 function useAuthRedirect(status: ReturnType<typeof useAuth>['status'], role: Role | null) {
   const segments = useSegments();
@@ -86,6 +93,13 @@ function useAuthRedirect(status: ReturnType<typeof useAuth>['status'], role: Rol
       if (!inRoleClaim) router.replace('/role-claim' as Href);
       return;
     }
-    if (!inApp) router.replace(`/(app)/${landingTab(role)}` as Href);
+    if (!inApp) {
+      // The role lands in the token while still on role-claim (SupplyOnboarding's
+      // refresh), so root === 'role-claim' here means "just onboarded".
+      const justClaimed = inRoleClaim && (role === 'caregiver' || role === 'provider');
+      const dest =
+        justClaimed && Platform.OS === 'web' ? '/(app)/onboarding' : `/(app)/${landingTab(role)}`;
+      router.replace(dest as Href);
+    }
   }, [status, role, segments, router]);
 }

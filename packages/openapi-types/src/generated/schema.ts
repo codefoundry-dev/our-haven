@@ -2947,8 +2947,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Mint a one-time signed URL for a client-direct private Storage upload
-         * @description Returns a signed upload URL + token for a server-chosen, uid-namespaced object key in a private Supabase Storage bucket. The client PUTs the file with supabase.storage.from(bucket).uploadToSignedUrl(objectPath, token, file), then confirms the objectPath to the owning resource (id-doc → POST /v1/providers/me/verification/id-doc; license-doc → POST /v1/providers/me/credentials/license; insurance-doc → POST /v1/providers/me/credentials/insurance; state-childcare-registration → POST /v1/providers/me/home-childcare-registration). Supply-scoped (caregiver / provider).
+         * Mint a one-time signed URL for a client-direct Storage upload
+         * @description Returns a signed upload URL + token for a server-chosen, uid-namespaced object key in a Supabase Storage bucket (private id-docs for documents; public avatars for the profile photo). The client PUTs the file with supabase.storage.from(bucket).uploadToSignedUrl(objectPath, token, file), then confirms the objectPath to the owning resource (id-doc → POST /v1/providers/me/verification/id-doc; license-doc → POST /v1/providers/me/credentials/license; insurance-doc → POST /v1/providers/me/credentials/insurance; state-childcare-registration → POST /v1/providers/me/home-childcare-registration; avatar → PATCH /v1/providers/me/profile { photoObjectPath }). Supply-scoped (caregiver / provider).
          */
         post: {
             parameters: {
@@ -3715,6 +3715,12 @@ export interface components {
             displayName: string | null;
             headline: string | null;
             bio: string | null;
+            zip: string | null;
+            yearsExperience: number | null;
+            languages: string[];
+            specialties: string[];
+            photoObjectPath: string | null;
+            photoUrl: string | null;
             categoryRates: components["schemas"]["CaregiverCategoryRate"][];
             fromRateCents: number | null;
             availabilityGrid: components["schemas"]["CaregiverAvailabilityGrid"];
@@ -3722,7 +3728,7 @@ export interface components {
             paused: boolean;
             negotiable: boolean;
             agesServed: ("infant" | "toddler" | "preschool" | "school-age" | "teen")[];
-            behaviourComfort: ("aggression" | "self-injury" | "elopement" | "meltdowns" | "property-destruction" | "pica" | "sensory-sensitivity" | "communication-support" | "transition-difficulty" | "sleep-disturbance")[];
+            behaviourComfort: ("aggression" | "self-injury" | "wandering" | "meltdowns" | "property-destruction" | "pica" | "sensory-sensitivity" | "communication-support" | "transition-difficulty" | "sleep-disturbance")[];
             credentials: components["schemas"]["CaregiverCredential"][];
         };
         CaregiverCategoryRate: {
@@ -3756,13 +3762,18 @@ export interface components {
             displayName?: string | null;
             headline?: string | null;
             bio?: string | null;
+            zip?: string | null;
+            yearsExperience?: number | null;
+            languages?: string[];
+            specialties?: string[];
+            photoObjectPath?: string | null;
             categoryRates?: components["schemas"]["CaregiverCategoryRate"][];
             availabilityGrid?: components["schemas"]["CaregiverAvailabilityGrid"];
             availabilityNote?: string | null;
             paused?: boolean;
             negotiable?: boolean;
             agesServed?: ("infant" | "toddler" | "preschool" | "school-age" | "teen")[];
-            behaviourComfort?: ("aggression" | "self-injury" | "elopement" | "meltdowns" | "property-destruction" | "pica" | "sensory-sensitivity" | "communication-support" | "transition-difficulty" | "sleep-disturbance")[];
+            behaviourComfort?: ("aggression" | "self-injury" | "wandering" | "meltdowns" | "property-destruction" | "pica" | "sensory-sensitivity" | "communication-support" | "transition-difficulty" | "sleep-disturbance")[];
         };
         CaregiverCredentialCreateResponse: {
             credential: components["schemas"]["CaregiverCredential"];
@@ -3949,7 +3960,7 @@ export interface components {
         };
         SignedUploadUrlRequest: {
             /** @enum {string} */
-            kind: "id-doc" | "license-doc" | "insurance-doc" | "state-childcare-registration";
+            kind: "id-doc" | "license-doc" | "insurance-doc" | "state-childcare-registration" | "avatar";
         };
         StripeConnectWebhookAck: {
             /** @enum {boolean} */

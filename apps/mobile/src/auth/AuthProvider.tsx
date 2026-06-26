@@ -4,9 +4,21 @@
  */
 import type { Session } from '@supabase/supabase-js';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Platform } from 'react-native';
 
 import { isSupabaseConfigured, supabase } from '@/auth/supabase';
 import { isRole, type Role } from '@/lib/roles';
+
+/**
+ * Where the email-confirmation link returns the user. On web, back to the
+ * running origin (localhost in dev, the deployed domain in prod) so the auth
+ * gate picks up the new session and routes to role-claim. Native uses the Site
+ * URL default (deep-link handling lands with the mobile confirmation ticket).
+ * NOTE: every origin used here must be in Supabase Auth → URL Configuration →
+ * Redirect URLs, or GoTrue ignores it and falls back to the Site URL.
+ */
+const emailRedirectTo =
+  Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : undefined;
 
 type Status = 'loading' | 'authed' | 'anon';
 
@@ -77,6 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           password,
           options: {
             data: { first_name: firstName.trim(), last_name: lastName.trim(), intended_role: chosenRole },
+            emailRedirectTo,
           },
         });
         if (error) return { error: error.message };
