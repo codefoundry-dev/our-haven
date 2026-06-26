@@ -2226,7 +2226,7 @@ export interface paths {
         put?: never;
         /**
          * Publish a bookable consultation slot
-         * @description Lists a new consultation window (born `open`, immediately bookable). The date must be YYYY-MM-DD and the window 0 ≤ startMin < endMin ≤ 1440. Rejected with 409 if it overlaps an existing active slot on the same day (a Provider cannot double-book a window).
+         * @description Lists a new consultation window (born `open`, immediately bookable). The date must be YYYY-MM-DD and the window 0 ≤ startMin < endMin ≤ 1440. Requires an active Provider Subscription (OH-191) — publishing a bookable slot is what "enables consultation Bookings", so a Provider who is not listed is rejected with 402. Rejected with 409 if it overlaps an existing active slot on the same day (a Provider cannot double-book a window).
          */
         post: {
             parameters: {
@@ -2261,6 +2261,15 @@ export interface paths {
                 };
                 /** @description Unauthenticated */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderProfileError"];
+                    };
+                };
+                /** @description No active Provider Subscription — listing gated */
+                402: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -2378,6 +2387,274 @@ export interface paths {
                 };
             };
         };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers/me/subscription": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the authenticated Provider's subscription + listing state
+         * @description Returns the Provider Subscription state mirrored from Stripe billing webhooks: the lifecycle `status`, whether the Provider is currently `listed` (search-visible + bookable — true iff status is active/trialing), the cancel-at-period-end flag and current period end, and the price id. Caregivers are rejected by the provider-only role guard (403).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Subscription summary */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderSubscriptionSummary"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderSubscriptionError"];
+                    };
+                };
+                /** @description Wrong role (caregiver / parent / admin) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderSubscriptionError"];
+                    };
+                };
+                /** @description Supply (provider) row not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderSubscriptionError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers/me/subscription/checkout-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create / reuse a Stripe Customer and return a hosted subscription Checkout URL
+         * @description Idempotent on the Customer: if the Provider already has a `provider_subscriptions` row with a `stripe_customer_id`, reuses it; otherwise creates a Stripe Customer (Provider as Customer — NOT Connect) and stamps it onto the row before returning. Returns a Stripe-hosted Checkout Session URL in subscription mode (STRIPE_PROVIDER_SUBSCRIPTION_PRICE_ID). On completion Stripe redirects to STRIPE_SUBSCRIPTION_SUCCESS_URL and the billing webhook activates the listing.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Checkout link issued */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderSubscriptionCheckoutLink"];
+                    };
+                };
+                /** @description No email on file */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderSubscriptionError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderSubscriptionError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderSubscriptionError"];
+                    };
+                };
+                /** @description Supply (provider) row not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderSubscriptionError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers/me/subscription/portal-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue a Stripe Billing Portal login link — manage / cancel the subscription
+         * @description Returns a one-time Stripe Billing Portal URL where the Provider can update their payment method or cancel the Provider Subscription. A cancellation flows back through the billing webhook, which clears the listing once the subscription ends. Requires an existing Stripe Customer (start checkout first).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Billing Portal link issued */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderSubscriptionPortalLink"];
+                    };
+                };
+                /** @description No Stripe Customer (start checkout first) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderSubscriptionError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderSubscriptionError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderSubscriptionError"];
+                    };
+                };
+                /** @description Supply (provider) row not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderSubscriptionError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers/contact-us": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit a corporate Provider "Contact Us" intake (public)
+         * @description Captures a sales-led custom-contract lead for the large-corporation Provider path (v1 intake only — no self-serve org onboarding / multi-seat model). Public route — corporate leads are pre-account. The lead is persisted and, when a sales recipient is configured, routed via a notification-outbox handoff in the same transaction.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ContactUsRequest"];
+                };
+            };
+            responses: {
+                /** @description Intake captured (+ routed when a sales recipient is configured) */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ContactUsResponse"];
+                    };
+                };
+                /** @description Invalid intake payload */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ContactUsError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2623,6 +2900,54 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["StripePaymentsWebhookError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/webhooks/stripe-billing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stripe Billing webhook — mirrors the Provider Subscription lifecycle onto provider_subscriptions
+         * @description Receives Stripe Billing webhook deliveries (separate endpoint + signing secret from the Connect + payments webhooks). Verifies the `Stripe-Signature` header with STRIPE_BILLING_WEBHOOK_SECRET, then on checkout.session.completed links the subscription id and on customer.subscription.* mirrors status / current_period_end / cancel_at_period_end / price onto the row keyed by stripe_customer_id, stamping listed_at on the first listed transition. Public route — the Stripe signature is the authentication.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Acknowledged */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StripeBillingWebhookAck"];
+                    };
+                };
+                /** @description Invalid signature or payload */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StripeBillingWebhookError"];
                     };
                 };
             };
@@ -3277,6 +3602,7 @@ export interface components {
             bio: string | null;
             perSessionRateCents: number | null;
             credentialStatus: components["schemas"]["ProviderCredentialStatus"];
+            listing: components["schemas"]["ProviderListingState"];
             bookableSlotCount: number;
         };
         ProviderCredentialStatus: {
@@ -3289,6 +3615,13 @@ export interface components {
             /** @enum {string} */
             screening: "passed" | "pending";
             publiclyVerified: boolean;
+        };
+        ProviderListingState: {
+            /** @enum {string|null} */
+            subscriptionStatus: "incomplete" | "incomplete_expired" | "trialing" | "active" | "past_due" | "canceled" | "unpaid" | "paused" | null;
+            listedInSearch: boolean;
+            /** @enum {string} */
+            listingReason: "active" | "trialing" | "none" | "inactive";
         };
         ProviderProfileError: {
             error: string;
@@ -3318,6 +3651,54 @@ export interface components {
             date: string;
             startMin: number;
             endMin: number;
+        };
+        ProviderSubscriptionSummary: {
+            /** @enum {string|null} */
+            status: "incomplete" | "incomplete_expired" | "trialing" | "active" | "past_due" | "canceled" | "unpaid" | "paused" | null;
+            listed: boolean;
+            /** @enum {string} */
+            listingReason: "active" | "trialing" | "none" | "inactive";
+            hasCustomer: boolean;
+            hasSubscription: boolean;
+            cancelAtPeriodEnd: boolean;
+            /** Format: date-time */
+            currentPeriodEnd: string | null;
+            priceId: string | null;
+            /** Format: date-time */
+            listedAt: string | null;
+        };
+        ProviderSubscriptionError: {
+            error: string;
+            reason?: string;
+        };
+        ProviderSubscriptionCheckoutLink: {
+            /** Format: uri */
+            url: string;
+            sessionId: string;
+            stripeCustomerId: string;
+        };
+        ProviderSubscriptionPortalLink: {
+            /** Format: uri */
+            url: string;
+        };
+        ContactUsResponse: {
+            id: string;
+            /** @enum {string} */
+            status: "new" | "routed";
+        };
+        ContactUsError: {
+            error: string;
+            reason?: string;
+        };
+        ContactUsRequest: {
+            organizationName: string;
+            contactName: string;
+            /** Format: email */
+            contactEmail: string;
+            contactPhone?: string;
+            estimatedSeats?: number;
+            state?: string;
+            message?: string;
         };
         ScreeningInitiateResponse: {
             /** Format: uuid */
@@ -3357,6 +3738,14 @@ export interface components {
             received: true;
         };
         StripePaymentsWebhookError: {
+            error: string;
+            reason?: string;
+        };
+        StripeBillingWebhookAck: {
+            /** @enum {boolean} */
+            received: true;
+        };
+        StripeBillingWebhookError: {
             error: string;
             reason?: string;
         };

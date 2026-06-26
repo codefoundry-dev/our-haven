@@ -29,6 +29,11 @@ tags:
       (OH-189): specialty + per-session display Rate, consultation-slot
       publishing, and the read-only license/insurance/screening
       credential-status badge."
+  - name: subscription
+    description: Provider Subscription (OH-191) — Stripe Billing checkout + portal
+      (Provider as Customer, not Connect); listing gated on an active
+      subscription. Plus the public corporate "Contact Us" intake (sales-led
+      custom contract; v1 intake only).
   - name: verification
     description: Supply verification — state + email/phone/ID-doc facts (OH-184)
   - name: screening
@@ -37,7 +42,8 @@ tags:
     description: Signed URLs for client-direct private Storage uploads (OH-184)
   - name: webhooks
     description: Vendor webhooks — Stripe Connect account.updated (OH-190), Stripe
-      payments payment_intent.succeeded + Checkr report.* (OH-185)
+      payments payment_intent.succeeded + Checkr report.* (OH-185), Stripe
+      Billing checkout.session.completed + customer.subscription.* (OH-191)
   - name: admin
     description: Admin-only surfaces (Stripe Tax registrations + calculation audit, etc.)
   - name: tax
@@ -1526,6 +1532,8 @@ components:
           nullable: true
         credentialStatus:
           $ref: "#/components/schemas/ProviderCredentialStatus"
+        listing:
+          $ref: "#/components/schemas/ProviderListingState"
         bookableSlotCount:
           type: integer
       required:
@@ -1537,6 +1545,7 @@ components:
         - bio
         - perSessionRateCents
         - credentialStatus
+        - listing
         - bookableSlotCount
     ProviderCredentialStatus:
       type: object
@@ -1573,6 +1582,35 @@ components:
         - insurance
         - screening
         - publiclyVerified
+    ProviderListingState:
+      type: object
+      properties:
+        subscriptionStatus:
+          type: string
+          nullable: true
+          enum:
+            - incomplete
+            - incomplete_expired
+            - trialing
+            - active
+            - past_due
+            - canceled
+            - unpaid
+            - paused
+            - null
+        listedInSearch:
+          type: boolean
+        listingReason:
+          type: string
+          enum:
+            - active
+            - trialing
+            - none
+            - inactive
+      required:
+        - subscriptionStatus
+        - listedInSearch
+        - listingReason
     ProviderProfileError:
       type: object
       properties:
@@ -1662,6 +1700,145 @@ components:
         - date
         - startMin
         - endMin
+    ProviderSubscriptionSummary:
+      type: object
+      properties:
+        status:
+          type: string
+          nullable: true
+          enum:
+            - incomplete
+            - incomplete_expired
+            - trialing
+            - active
+            - past_due
+            - canceled
+            - unpaid
+            - paused
+            - null
+        listed:
+          type: boolean
+        listingReason:
+          type: string
+          enum:
+            - active
+            - trialing
+            - none
+            - inactive
+        hasCustomer:
+          type: boolean
+        hasSubscription:
+          type: boolean
+        cancelAtPeriodEnd:
+          type: boolean
+        currentPeriodEnd:
+          type: string
+          nullable: true
+          format: date-time
+        priceId:
+          type: string
+          nullable: true
+        listedAt:
+          type: string
+          nullable: true
+          format: date-time
+      required:
+        - status
+        - listed
+        - listingReason
+        - hasCustomer
+        - hasSubscription
+        - cancelAtPeriodEnd
+        - currentPeriodEnd
+        - priceId
+        - listedAt
+    ProviderSubscriptionError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
+    ProviderSubscriptionCheckoutLink:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+        sessionId:
+          type: string
+        stripeCustomerId:
+          type: string
+      required:
+        - url
+        - sessionId
+        - stripeCustomerId
+    ProviderSubscriptionPortalLink:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+      required:
+        - url
+    ContactUsResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum:
+            - new
+            - routed
+      required:
+        - id
+        - status
+    ContactUsError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
+    ContactUsRequest:
+      type: object
+      properties:
+        organizationName:
+          type: string
+          minLength: 1
+          maxLength: 160
+        contactName:
+          type: string
+          minLength: 1
+          maxLength: 120
+        contactEmail:
+          type: string
+          maxLength: 254
+          format: email
+        contactPhone:
+          type: string
+          maxLength: 40
+        estimatedSeats:
+          type: integer
+          minimum: 0
+          maximum: 100000
+        state:
+          type: string
+          minLength: 2
+          maxLength: 2
+          pattern: ^[A-Za-z]{2}$
+        message:
+          type: string
+          maxLength: 4000
+      required:
+        - organizationName
+        - contactName
+        - contactEmail
     ScreeningInitiateResponse:
       type: object
       properties:
@@ -1755,6 +1932,24 @@ components:
       required:
         - received
     StripePaymentsWebhookError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
+    StripeBillingWebhookAck:
+      type: object
+      properties:
+        received:
+          type: boolean
+          enum:
+            - true
+      required:
+        - received
+    StripeBillingWebhookError:
       type: object
       properties:
         error:
@@ -3494,8 +3689,11 @@ paths:
       summary: Publish a bookable consultation slot
       description: Lists a new consultation window (born `open`, immediately
         bookable). The date must be YYYY-MM-DD and the window 0 ≤ startMin <
-        endMin ≤ 1440. Rejected with 409 if it overlaps an existing active slot
-        on the same day (a Provider cannot double-book a window).
+        endMin ≤ 1440. Requires an active Provider Subscription (OH-191) —
+        publishing a bookable slot is what "enables consultation Bookings", so a
+        Provider who is not listed is rejected with 402. Rejected with 409 if it
+        overlaps an existing active slot on the same day (a Provider cannot
+        double-book a window).
       security:
         - supabaseAccessToken: []
       requestBody:
@@ -3519,6 +3717,12 @@ paths:
                 $ref: "#/components/schemas/ProviderProfileError"
         "401":
           description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderProfileError"
+        "402":
+          description: No active Provider Subscription — listing gated
           content:
             application/json:
               schema:
@@ -3596,6 +3800,164 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProviderProfileError"
+  /v1/providers/me/subscription:
+    get:
+      tags:
+        - subscription
+      summary: Read the authenticated Provider's subscription + listing state
+      description: "Returns the Provider Subscription state mirrored from Stripe
+        billing webhooks: the lifecycle `status`, whether the Provider is
+        currently `listed` (search-visible + bookable — true iff status is
+        active/trialing), the cancel-at-period-end flag and current period end,
+        and the price id. Caregivers are rejected by the provider-only role
+        guard (403)."
+      security:
+        - supabaseAccessToken: []
+      responses:
+        "200":
+          description: Subscription summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderSubscriptionSummary"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderSubscriptionError"
+        "403":
+          description: Wrong role (caregiver / parent / admin)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderSubscriptionError"
+        "404":
+          description: Supply (provider) row not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderSubscriptionError"
+  /v1/providers/me/subscription/checkout-link:
+    post:
+      tags:
+        - subscription
+      summary: Create / reuse a Stripe Customer and return a hosted subscription
+        Checkout URL
+      description: "Idempotent on the Customer: if the Provider already has a
+        `provider_subscriptions` row with a `stripe_customer_id`, reuses it;
+        otherwise creates a Stripe Customer (Provider as Customer — NOT Connect)
+        and stamps it onto the row before returning. Returns a Stripe-hosted
+        Checkout Session URL in subscription mode
+        (STRIPE_PROVIDER_SUBSCRIPTION_PRICE_ID). On completion Stripe redirects
+        to STRIPE_SUBSCRIPTION_SUCCESS_URL and the billing webhook activates the
+        listing."
+      security:
+        - supabaseAccessToken: []
+      responses:
+        "200":
+          description: Checkout link issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderSubscriptionCheckoutLink"
+        "400":
+          description: No email on file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderSubscriptionError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderSubscriptionError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderSubscriptionError"
+        "404":
+          description: Supply (provider) row not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderSubscriptionError"
+  /v1/providers/me/subscription/portal-link:
+    post:
+      tags:
+        - subscription
+      summary: Issue a Stripe Billing Portal login link — manage / cancel the
+        subscription
+      description: Returns a one-time Stripe Billing Portal URL where the Provider can
+        update their payment method or cancel the Provider Subscription. A
+        cancellation flows back through the billing webhook, which clears the
+        listing once the subscription ends. Requires an existing Stripe Customer
+        (start checkout first).
+      security:
+        - supabaseAccessToken: []
+      responses:
+        "200":
+          description: Billing Portal link issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderSubscriptionPortalLink"
+        "400":
+          description: No Stripe Customer (start checkout first)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderSubscriptionError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderSubscriptionError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderSubscriptionError"
+        "404":
+          description: Supply (provider) row not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderSubscriptionError"
+  /v1/providers/contact-us:
+    post:
+      tags:
+        - subscription
+      summary: Submit a corporate Provider "Contact Us" intake (public)
+      description: Captures a sales-led custom-contract lead for the large-corporation
+        Provider path (v1 intake only — no self-serve org onboarding /
+        multi-seat model). Public route — corporate leads are pre-account. The
+        lead is persisted and, when a sales recipient is configured, routed via
+        a notification-outbox handoff in the same transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContactUsRequest"
+      responses:
+        "201":
+          description: Intake captured (+ routed when a sales recipient is configured)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContactUsResponse"
+        "400":
+          description: Invalid intake payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContactUsError"
   /v1/providers/me/verification/screening/initiate:
     post:
       tags:
@@ -3750,6 +4112,33 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StripePaymentsWebhookError"
+  /v1/webhooks/stripe-billing:
+    post:
+      tags:
+        - webhooks
+      summary: Stripe Billing webhook — mirrors the Provider Subscription lifecycle
+        onto provider_subscriptions
+      description: Receives Stripe Billing webhook deliveries (separate endpoint +
+        signing secret from the Connect + payments webhooks). Verifies the
+        `Stripe-Signature` header with STRIPE_BILLING_WEBHOOK_SECRET, then on
+        checkout.session.completed links the subscription id and on
+        customer.subscription.* mirrors status / current_period_end /
+        cancel_at_period_end / price onto the row keyed by stripe_customer_id,
+        stamping listed_at on the first listed transition. Public route — the
+        Stripe signature is the authentication.
+      responses:
+        "200":
+          description: Acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StripeBillingWebhookAck"
+        "400":
+          description: Invalid signature or payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StripeBillingWebhookError"
   /v1/webhooks/checkr:
     post:
       tags:

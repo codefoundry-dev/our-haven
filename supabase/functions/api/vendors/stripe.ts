@@ -47,6 +47,12 @@ export interface StripeConfig {
   webhookToleranceSec?: number;
   /** OH-192: per-purpose tax-code defaults + optional origin state for Stripe Tax. */
   tax?: StripeTaxDefaults;
+  /**
+   * OH-191: secret for the Stripe BILLING webhook endpoint (subscription
+   * lifecycle — checkout.session.completed + customer.subscription.*). A DISTINCT
+   * endpoint + signing secret from both the Connect and the payments webhooks.
+   */
+  billingWebhookSecret?: string;
 }
 
 /* ────────────────────────────────────────────────────────────────────────
@@ -297,6 +303,96 @@ export interface StripeTaxDefaults {
   originState?: string;
 }
 
+/* ────────────────────────────────────────────────────────────────────────
+ * Provider Subscription — Stripe Billing (OH-191)
+ *
+ * The clinical tier's listing fee (ADR-0011 / CONTEXT § Subscription). The
+ * Provider is a Stripe *Customer* (NOT a Connect account — Providers receive no
+ * Payouts): we create a Customer, drive a Stripe-hosted Checkout Session in
+ * `subscription` mode (sold on web to dodge the iOS/Android IAP rules), and
+ * mirror the subscription lifecycle from a dedicated billing webhook. The
+ * Billing Portal session lets the Provider manage / cancel off-app.
+ *
+ * Still SDK-free — `fetch` + `URLSearchParams`, Deno-clean — exactly like the
+ * Connect + Tax surfaces above.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+export interface CreateBillingCustomerInput {
+  email: string;
+  /** `providers.id` of the Provider this customer belongs to (stamped as metadata). */
+  providerId: string;
+  metadata?: Record<string, string>;
+}
+
+export interface BillingCustomer {
+  id: string;
+  [k: string]: unknown;
+}
+
+export interface CreateSubscriptionCheckoutSessionInput {
+  /** The Provider's Stripe Customer (cus_…). */
+  customerId: string;
+  /** The recurring Price (price_…) for the Provider Subscription. */
+  priceId: string;
+  successUrl: string;
+  cancelUrl: string;
+  /** `providers.id` — surfaced as Checkout's `client_reference_id` + subscription metadata. */
+  clientReferenceId: string;
+  metadata?: Record<string, string>;
+}
+
+export interface CheckoutSessionResult {
+  id: string;
+  url: string;
+  [k: string]: unknown;
+}
+
+export interface CreateBillingPortalSessionInput {
+  customerId: string;
+  returnUrl: string;
+}
+
+export interface BillingPortalSessionResult {
+  id: string;
+  url: string;
+  [k: string]: unknown;
+}
+
+/** The subset of a Stripe Subscription object the billing webhook mirrors. */
+export interface StripeSubscriptionObject {
+  id: string;
+  customer: string;
+  status: string;
+  current_period_end?: number;
+  cancel_at_period_end?: boolean;
+  items?: { data?: Array<{ price?: { id?: string | null } | null }> };
+  metadata?: Record<string, string>;
+  [k: string]: unknown;
+}
+
+/** The subset of a Stripe Checkout Session object the billing webhook reads. */
+export interface StripeCheckoutSessionObject {
+  id: string;
+  mode?: string;
+  customer?: string | null;
+  subscription?: string | null;
+  client_reference_id?: string | null;
+  metadata?: Record<string, string>;
+  [k: string]: unknown;
+}
+
+/**
+ * A parsed billing webhook event. The `data.object` shape varies by `type`
+ * (Checkout Session for `checkout.session.completed`, Subscription for
+ * `customer.subscription.*`), so it is left generic and the route narrows it.
+ */
+export interface ParsedBillingEvent {
+  id: string;
+  type: string;
+  created: number;
+  data: { object: Record<string, unknown> };
+}
+
 export interface StripeAdapter {
   // Connect Express
   createConnectAccount(input: CreateConnectAccountInput): Promise<RetrievedConnectAccount>;
@@ -321,6 +417,16 @@ export interface StripeAdapter {
     limit?: number;
   }): Promise<StripeTaxRegistrationList>;
   createUsStateRegistration(input: CreateUsStateRegistrationInput): Promise<StripeTaxRegistration>;
+
+  // Provider Subscription — Stripe Billing (OH-191)
+  createBillingCustomer(input: CreateBillingCustomerInput): Promise<BillingCustomer>;
+  createSubscriptionCheckoutSession(
+    input: CreateSubscriptionCheckoutSessionInput,
+  ): Promise<CheckoutSessionResult>;
+  createBillingPortalSession(input: CreateBillingPortalSessionInput): Promise<BillingPortalSessionResult>;
+  retrieveSubscription(subscriptionId: string): Promise<StripeSubscriptionObject>;
+  verifyBillingWebhookSignature(rawBody: string, signatureHeader: string | null): boolean;
+  parseBillingWebhookEvent(rawBody: string): ParsedBillingEvent | null;
 }
 
 export function createStripeAdapter(config: StripeConfig): StripeAdapter {
@@ -552,6 +658,71 @@ export function createStripeAdapter(config: StripeConfig): StripeAdapter {
       body.set('country_options[us][state]', input.state);
       body.set('country_options[us][type]', input.registrationType);
       return stripeFetch<StripeTaxRegistration>('/tax/registrations', body);
+    },
+
+    async createBillingCustomer(input: CreateBillingCustomerInput): Promise<BillingCustomer> {
+      const body = new URLSearchParams();
+      body.set('email', input.email);
+      body.set('metadata[provider_id]', input.providerId);
+      body.set('metadata[purpose]', 'provider_subscription');
+      for (const [k, v] of Object.entries(input.metadata ?? {})) {
+        body.set(`metadata[${k}]`, v);
+      }
+      return stripeFetch<BillingCustomer>('/customers', body);
+    },
+
+    async createSubscriptionCheckoutSession(
+      input: CreateSubscriptionCheckoutSessionInput,
+    ): Promise<CheckoutSessionResult> {
+      // Stripe-hosted Checkout in subscription mode (PRD story 49a). The Provider
+      // pays us a listing fee; this is NOT a Connect/destination charge. We stamp
+      // provider_id onto BOTH the session (`client_reference_id`) and the
+      // resulting subscription (`subscription_data[metadata]`) so the billing
+      // webhook can locate the row whichever event lands first.
+      const body = new URLSearchParams();
+      body.set('mode', 'subscription');
+      body.set('customer', input.customerId);
+      body.set('line_items[0][price]', input.priceId);
+      body.set('line_items[0][quantity]', '1');
+      body.set('success_url', input.successUrl);
+      body.set('cancel_url', input.cancelUrl);
+      body.set('client_reference_id', input.clientReferenceId);
+      body.set('subscription_data[metadata][provider_id]', input.clientReferenceId);
+      body.set('metadata[provider_id]', input.clientReferenceId);
+      for (const [k, v] of Object.entries(input.metadata ?? {})) {
+        body.set(`metadata[${k}]`, v);
+      }
+      return stripeFetch<CheckoutSessionResult>('/checkout/sessions', body);
+    },
+
+    async createBillingPortalSession(
+      input: CreateBillingPortalSessionInput,
+    ): Promise<BillingPortalSessionResult> {
+      const body = new URLSearchParams();
+      body.set('customer', input.customerId);
+      body.set('return_url', input.returnUrl);
+      return stripeFetch<BillingPortalSessionResult>('/billing_portal/sessions', body);
+    },
+
+    async retrieveSubscription(subscriptionId: string): Promise<StripeSubscriptionObject> {
+      return stripeGet<StripeSubscriptionObject>(
+        `/subscriptions/${encodeURIComponent(subscriptionId)}`,
+      );
+    },
+
+    verifyBillingWebhookSignature(rawBody: string, signatureHeader: string | null): boolean {
+      if (!config.billingWebhookSecret) return false;
+      return checkSignature(rawBody, signatureHeader, config.billingWebhookSecret);
+    },
+
+    parseBillingWebhookEvent(rawBody: string): ParsedBillingEvent | null {
+      try {
+        const parsed = JSON.parse(rawBody) as ParsedBillingEvent;
+        if (!parsed?.type || !parsed.data?.object) return null;
+        return parsed;
+      } catch {
+        return null;
+      }
     },
   };
 }

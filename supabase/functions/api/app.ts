@@ -7,13 +7,16 @@ import { registerAuthRoutes } from './routes/auth.ts';
 import { registerCaregiverBadgeRoutes } from './routes/caregiver-badges.ts';
 import { registerCaregiverConnectRoutes } from './routes/caregiver-connect.ts';
 import { registerCaregiverProfileRoutes } from './routes/caregiver-profile.ts';
+import { registerContactUsRoutes } from './routes/contact-us.ts';
 import { registerHealthRoutes } from './routes/health.ts';
 import { registerProviderCredentialsRoutes } from './routes/provider-credentials.ts';
 import { registerProviderProfileRoutes } from './routes/provider-profile.ts';
+import { registerProviderSubscriptionRoutes } from './routes/provider-subscription.ts';
 import { registerScreeningRoutes } from './routes/screening.ts';
 import { registerUploadRoutes } from './routes/uploads.ts';
 import { registerVerificationRoutes } from './routes/verification.ts';
 import { registerCheckrWebhookRoutes } from './routes/webhooks/checkr.ts';
+import { registerStripeBillingWebhookRoutes } from './routes/webhooks/stripe-billing.ts';
 import { registerStripeConnectWebhookRoutes } from './routes/webhooks/stripe-connect.ts';
 import { registerStripePaymentsWebhookRoutes } from './routes/webhooks/stripe-payments.ts';
 
@@ -56,6 +59,11 @@ export const openApiInfo = {
       description:
         'Supply profile builders — Caregiver (OH-188): per-category Rate + surcharge, availability, negotiable toggle, ages-served + behaviour-comfort, and the Credentials umbrella (admin-reviewed). Provider (OH-189): specialty + per-session display Rate, consultation-slot publishing, and the read-only license/insurance/screening credential-status badge.',
     },
+    {
+      name: 'subscription',
+      description:
+        'Provider Subscription (OH-191) — Stripe Billing checkout + portal (Provider as Customer, not Connect); listing gated on an active subscription. Plus the public corporate "Contact Us" intake (sales-led custom contract; v1 intake only).',
+    },
     { name: 'verification', description: 'Supply verification — state + email/phone/ID-doc facts (OH-184)' },
     {
       name: 'screening',
@@ -65,7 +73,7 @@ export const openApiInfo = {
     {
       name: 'webhooks',
       description:
-        'Vendor webhooks — Stripe Connect account.updated (OH-190), Stripe payments payment_intent.succeeded + Checkr report.* (OH-185)',
+        'Vendor webhooks — Stripe Connect account.updated (OH-190), Stripe payments payment_intent.succeeded + Checkr report.* (OH-185), Stripe Billing checkout.session.completed + customer.subscription.* (OH-191)',
     },
     { name: 'admin', description: 'Admin-only surfaces (Stripe Tax registrations + calculation audit, etc.)' },
     {
@@ -109,10 +117,13 @@ export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerCaregiverBadgeRoutes(v1);
   registerCaregiverProfileRoutes(v1);
   registerProviderProfileRoutes(v1);
+  registerProviderSubscriptionRoutes(v1);
+  registerContactUsRoutes(v1);
   registerScreeningRoutes(v1);
   registerUploadRoutes(v1);
   registerStripeConnectWebhookRoutes(v1);
   registerStripePaymentsWebhookRoutes(v1);
+  registerStripeBillingWebhookRoutes(v1);
   registerCheckrWebhookRoutes(v1);
   registerAdminStripeTaxRoutes(v1);
   app.route('/v1', v1);

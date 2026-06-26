@@ -23,6 +23,14 @@ import {
   type ConsultationSlot,
   type SlotState,
 } from '../../../../packages/domain/src/provider-slot-scheduler/index.ts';
+// The listing gate (OH-191): an active Provider Subscription is what makes a
+// Provider search-visible AND able to take consultation Bookings. The
+// clinical-profile surfaces the listing state, and publishing a bookable slot
+// (the act that "enables consultation Bookings") is gated on it.
+import {
+  deriveListingDecision,
+  type StripeSubscriptionStatus,
+} from '../../../../packages/domain/src/provider-subscription/index.ts';
 
 /**
  * Provider (clinical tier) profile builder (OH-189) — PRD-0001 v1.7 stories 46,
@@ -78,6 +86,18 @@ const CredentialStatusSchema = z
   })
   .openapi('ProviderCredentialStatus');
 
+const ListingStateSchema = z
+  .object({
+    /** Stripe Billing subscription status, or null before checkout (OH-191). */
+    subscriptionStatus: z
+      .enum(['incomplete', 'incomplete_expired', 'trialing', 'active', 'past_due', 'canceled', 'unpaid', 'paused'])
+      .nullable(),
+    /** True iff an active subscription lists the Provider in search + enables bookings. */
+    listedInSearch: z.boolean(),
+    listingReason: z.enum(['active', 'trialing', 'none', 'inactive']),
+  })
+  .openapi('ProviderListingState');
+
 const ClinicalProfileResponse = z
   .object({
     providerId: z.string(),
@@ -89,6 +109,8 @@ const ClinicalProfileResponse = z
     /** Display-only per-session Rate, integer cents. Provider payment is off-platform. */
     perSessionRateCents: z.number().int().nullable(),
     credentialStatus: CredentialStatusSchema,
+    /** Provider Subscription listing gate (OH-191) — search-visibility + bookability. */
+    listing: ListingStateSchema,
     /** How many of this Provider's published slots are currently bookable (open). */
     bookableSlotCount: z.number().int(),
   })
@@ -186,6 +208,20 @@ async function loadProviderByUid(db: Db, uid: string): Promise<ProviderRow | nul
   return row ? (row as ProviderRow) : null;
 }
 
+/**
+ * The Provider's listing decision (OH-191), derived from the mirrored Stripe
+ * subscription status. The single gate the slot-publish path + the (future)
+ * Parent search both honour.
+ */
+async function loadListing(db: Db, providerId: string) {
+  const row = (await db
+    .selectFrom('provider_subscriptions')
+    .select(['status'])
+    .where('provider_id', '=', providerId)
+    .executeTakeFirst()) as { status: StripeSubscriptionStatus | null } | undefined;
+  return deriveListingDecision({ status: row?.status ?? null });
+}
+
 async function ensureProfileRow(db: Db, providerId: string): Promise<void> {
   const existing = await db
     .selectFrom('provider_profiles')
@@ -241,6 +277,8 @@ async function buildProfile(db: Db, provider: ProviderRow) {
     .where('state', '=', 'open')
     .execute();
 
+  const listing = await loadListing(db, provider.id);
+
   const facts: ClinicalCredentialFacts = {
     licenseVerified: verif?.license_verified_at != null,
     insuranceVerified: verif?.insurance_verified_at != null,
@@ -259,6 +297,11 @@ async function buildProfile(db: Db, provider: ProviderRow) {
     bio: profile?.bio ?? null,
     perSessionRateCents: profile?.published_rate_cents ?? null,
     credentialStatus: deriveCredentialStatus(facts),
+    listing: {
+      subscriptionStatus: listing.status,
+      listedInSearch: listing.listed,
+      listingReason: listing.reason,
+    },
     bookableSlotCount: openSlots.length,
   };
 }
@@ -324,7 +367,7 @@ const createSlotRoute = createRoute({
   tags: ['profile'],
   summary: 'Publish a bookable consultation slot',
   description:
-    'Lists a new consultation window (born `open`, immediately bookable). The date must be YYYY-MM-DD and the window 0 ≤ startMin < endMin ≤ 1440. Rejected with 409 if it overlaps an existing active slot on the same day (a Provider cannot double-book a window).',
+    'Lists a new consultation window (born `open`, immediately bookable). The date must be YYYY-MM-DD and the window 0 ≤ startMin < endMin ≤ 1440. Requires an active Provider Subscription (OH-191) — publishing a bookable slot is what "enables consultation Bookings", so a Provider who is not listed is rejected with 402. Rejected with 409 if it overlaps an existing active slot on the same day (a Provider cannot double-book a window).',
   security: [{ supabaseAccessToken: [] }],
   middleware: [requireAuth({ roles: ['provider'] })] as const,
   request: { body: { content: json(SlotCreateRequest), required: true } },
@@ -332,6 +375,7 @@ const createSlotRoute = createRoute({
     201: { description: 'Slot published', content: json(ConsultationSlotSchema) },
     400: { description: 'Invalid date / window', content: json(ErrorResponse) },
     401: { description: 'Unauthenticated', content: json(ErrorResponse) },
+    402: { description: 'No active Provider Subscription — listing gated', content: json(ErrorResponse) },
     403: { description: 'Wrong role', content: json(ErrorResponse) },
     404: { description: 'Supply (provider) row not found', content: json(ErrorResponse) },
     409: { description: 'Overlaps an existing slot', content: json(ErrorResponse) },
@@ -444,6 +488,20 @@ export function registerProviderProfileRoutes(app: OpenAPIHono<AppEnv>): void {
 
     const provider = await loadProviderByUid(db, principal.uid);
     if (!provider) return c.json({ error: 'provider_not_found' }, 404);
+
+    // Listing gate (OH-191 AC #2): publishing a bookable consultation slot is the
+    // act that "enables consultation Bookings", so it requires an active Provider
+    // Subscription. A not-listed Provider is rejected with 402 Payment Required.
+    const listing = await loadListing(db, provider.id);
+    if (!listing.listed) {
+      return c.json(
+        {
+          error: 'subscription_inactive',
+          reason: 'an active Provider Subscription is required to publish bookable consultation slots',
+        },
+        402,
+      );
+    }
 
     // Domain validation (date + window) — refuses bad input the zod schema can't
     // express (e.g. a non-existent calendar date like 2026-02-30).

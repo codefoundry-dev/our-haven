@@ -21,6 +21,7 @@ export * from './rating-reveal/index.js';
 export * from './caregiver-availability/index.js';
 export * from './caregiver-profile/index.js';
 export * from './provider-profile/index.js';
+export * from './provider-subscription/index.js';
 export * from './provider-slot-scheduler/index.js';
 export * from './verification-workflow/index.js';
 export * from './credentials/index.js';
