@@ -23,9 +23,12 @@ tags:
       self-attest + per-state home-childcare (FCCH) registration; neither gates
       activation.
   - name: profile
-    description: Caregiver profile builder (OH-188) — per-category Rate + surcharge,
-      availability, negotiable toggle, ages-served + behaviour-comfort, and the
-      Credentials umbrella (admin-reviewed).
+    description: "Supply profile builders — Caregiver (OH-188): per-category Rate +
+      surcharge, availability, negotiable toggle, ages-served +
+      behaviour-comfort, and the Credentials umbrella (admin-reviewed). Provider
+      (OH-189): specialty + per-session display Rate, consultation-slot
+      publishing, and the read-only license/insurance/screening
+      credential-status badge."
   - name: verification
     description: Supply verification — state + email/phone/ID-doc facts (OH-184)
   - name: screening
@@ -1492,6 +1495,173 @@ components:
           maxLength: 2000
       required:
         - decision
+    ProviderClinicalProfile:
+      type: object
+      properties:
+        providerId:
+          type: string
+        specialty:
+          type: string
+          nullable: true
+          enum:
+            - slp
+            - ot
+            - aba
+            - psychology
+            - other
+            - null
+        residentState:
+          type: string
+        displayName:
+          type: string
+          nullable: true
+        headline:
+          type: string
+          nullable: true
+        bio:
+          type: string
+          nullable: true
+        perSessionRateCents:
+          type: integer
+          nullable: true
+        credentialStatus:
+          $ref: "#/components/schemas/ProviderCredentialStatus"
+        bookableSlotCount:
+          type: integer
+      required:
+        - providerId
+        - specialty
+        - residentState
+        - displayName
+        - headline
+        - bio
+        - perSessionRateCents
+        - credentialStatus
+        - bookableSlotCount
+    ProviderCredentialStatus:
+      type: object
+      properties:
+        overall:
+          type: string
+          enum:
+            - verified
+            - in-review
+            - rejected
+            - unverified
+        license:
+          type: string
+          enum:
+            - verified
+            - uploaded
+            - missing
+        insurance:
+          type: string
+          enum:
+            - verified
+            - uploaded
+            - missing
+        screening:
+          type: string
+          enum:
+            - passed
+            - pending
+        publiclyVerified:
+          type: boolean
+      required:
+        - overall
+        - license
+        - insurance
+        - screening
+        - publiclyVerified
+    ProviderProfileError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
+    ProviderClinicalProfilePatchRequest:
+      type: object
+      properties:
+        displayName:
+          type: string
+          nullable: true
+          maxLength: 80
+        headline:
+          type: string
+          nullable: true
+          maxLength: 120
+        bio:
+          type: string
+          nullable: true
+          maxLength: 600
+        specialty:
+          type: string
+          enum:
+            - slp
+            - ot
+            - aba
+            - psychology
+            - other
+        perSessionRateCents:
+          type: integer
+          nullable: true
+          minimum: 0
+    ConsultationSlotList:
+      type: object
+      properties:
+        slots:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConsultationSlot"
+      required:
+        - slots
+    ConsultationSlot:
+      type: object
+      properties:
+        id:
+          type: string
+        date:
+          type: string
+        startMin:
+          type: integer
+        endMin:
+          type: integer
+        state:
+          type: string
+          enum:
+            - open
+            - held
+            - released
+        bookable:
+          type: boolean
+      required:
+        - id
+        - date
+        - startMin
+        - endMin
+        - state
+        - bookable
+    ConsultationSlotCreateRequest:
+      type: object
+      properties:
+        date:
+          type: string
+          pattern: ^\d{4}-\d{2}-\d{2}$
+        startMin:
+          type: integer
+          minimum: 0
+          maximum: 1439
+        endMin:
+          type: integer
+          minimum: 1
+          maximum: 1440
+      required:
+        - date
+        - startMin
+        - endMin
     ScreeningInitiateResponse:
       type: object
       properties:
@@ -3198,6 +3368,234 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CaregiverProfileError"
+  /v1/providers/me/clinical-profile:
+    get:
+      tags:
+        - profile
+      summary: Read the authenticated Provider's editable clinical profile
+      description: "Returns the Provider profile: specialty, the per-session display
+        Rate (display-only — Provider payment is off-platform), identity
+        (display name / headline / bio), the read-only
+        license/insurance/screening credential-status badge, and the count of
+        currently-bookable consultation slots. Caregivers are rejected by the
+        provider-only role guard (403)."
+      security:
+        - supabaseAccessToken: []
+      responses:
+        "200":
+          description: The editable clinical profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderClinicalProfile"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderProfileError"
+        "403":
+          description: Wrong role (caregiver / parent / admin)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderProfileError"
+        "404":
+          description: Supply (provider) row not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderProfileError"
+    patch:
+      tags:
+        - profile
+      summary: Update the authenticated Provider's clinical profile (partial)
+      description: Partial update — only the supplied fields change. `specialty` (one
+        of slp/ot/aba/psychology/other) writes through to the providers row (it
+        drives the license-board resolution). `perSessionRateCents` is the
+        display-only per-session Rate in integer cents, or null to clear it.
+      security:
+        - supabaseAccessToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderClinicalProfilePatchRequest"
+      responses:
+        "200":
+          description: The updated clinical profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderClinicalProfile"
+        "400":
+          description: Invalid specialty / rate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderProfileError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderProfileError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderProfileError"
+        "404":
+          description: Supply (provider) row not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderProfileError"
+  /v1/providers/me/consultation-slots:
+    get:
+      tags:
+        - profile
+      summary: List the authenticated Provider's published consultation slots
+      description: Returns the Provider's active consultation slots (open + held;
+        withdrawn/released ones are omitted), each with its bookable flag. Open
+        slots are what the M2.7 scheduler surfaces to Parents.
+      security:
+        - supabaseAccessToken: []
+      responses:
+        "200":
+          description: The published slots
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsultationSlotList"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderProfileError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderProfileError"
+        "404":
+          description: Supply (provider) row not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderProfileError"
+    post:
+      tags:
+        - profile
+      summary: Publish a bookable consultation slot
+      description: Lists a new consultation window (born `open`, immediately
+        bookable). The date must be YYYY-MM-DD and the window 0 ≤ startMin <
+        endMin ≤ 1440. Rejected with 409 if it overlaps an existing active slot
+        on the same day (a Provider cannot double-book a window).
+      security:
+        - supabaseAccessToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConsultationSlotCreateRequest"
+      responses:
+        "201":
+          description: Slot published
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsultationSlot"
+        "400":
+          description: Invalid date / window
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderProfileError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderProfileError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderProfileError"
+        "404":
+          description: Supply (provider) row not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderProfileError"
+        "409":
+          description: Overlaps an existing slot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderProfileError"
+  /v1/providers/me/consultation-slots/{slotId}:
+    delete:
+      tags:
+        - profile
+      summary: Withdraw an open consultation slot
+      description: Un-publishes an open slot (open → released). A held slot (a Parent
+        has booked it) cannot be withdrawn — cancel the consultation Booking
+        first, which releases it (409).
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: slotId
+          in: path
+      responses:
+        "200":
+          description: Slot withdrawn
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  withdrawn:
+                    type: boolean
+                    enum:
+                      - true
+                required:
+                  - withdrawn
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderProfileError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderProfileError"
+        "404":
+          description: Slot not found (or not owned)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderProfileError"
+        "409":
+          description: Slot is held — cancel the booking first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderProfileError"
   /v1/providers/me/verification/screening/initiate:
     post:
       tags:

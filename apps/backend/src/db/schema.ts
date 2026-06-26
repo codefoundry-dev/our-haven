@@ -115,6 +115,25 @@ export interface CaregiverCredentialsTable {
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
 }
 
+/**
+ * Provider consultation slots (OH-189 / CONTEXT.md § Booking — slot-pick). One
+ * row per dated window a Provider publishes. `state` follows the
+ * `provider-slot-scheduler` lifecycle (open → held → released); `start_min` /
+ * `end_min` are minutes-since-midnight (0..1440). `held_by_booking_id` names the
+ * holding Booking while `held` (no FK yet — Booking is pure-domain).
+ */
+export interface ProviderSlotsTable {
+  id: Generated<string>;
+  provider_id: string;
+  slot_date: ColumnType<string, string, string>;
+  start_min: number;
+  end_min: number;
+  state: ColumnType<'open' | 'held' | 'released', 'open' | 'held' | 'released' | undefined, 'open' | 'held' | 'released'>;
+  held_by_booking_id: string | null;
+  created_at: Generated<Date>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
 export interface ProviderScreeningsTable {
   id: Generated<string>;
   provider_id: string;
@@ -246,6 +265,7 @@ export interface Database {
   provider_profiles: ProviderProfilesTable;
   provider_category_rates: ProviderCategoryRatesTable;
   caregiver_credentials: CaregiverCredentialsTable;
+  provider_slots: ProviderSlotsTable;
   provider_screenings: ProviderScreeningsTable;
   specialist_credentials: SpecialistCredentialsTable;
   provider_home_childcare_registrations: ProviderHomeChildcareRegistrationsTable;
