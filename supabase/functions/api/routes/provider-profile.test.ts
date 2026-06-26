@@ -29,6 +29,7 @@ function makeDb(seed: Partial<Record<string, Row[]>> = {}) {
     provider_verifications: seed.provider_verifications ?? [],
     specialist_credentials: seed.specialist_credentials ?? [],
     provider_slots: seed.provider_slots ?? [],
+    provider_subscriptions: seed.provider_subscriptions ?? [],
   };
   const captures = {
     inserts: [] as Array<{ table: string; values: Row }>,
@@ -143,6 +144,9 @@ function makeDeps(opts: { db?: AppDeps['db'] } = {}): AppDeps {
 const PROVIDER_ID = '44444444-4444-4444-8444-444444444444';
 const PROVIDER = { id: PROVIDER_ID, uid: 'uid-prov', role: 'provider', categories: null, specialty: 'ot', state: 'FL' };
 const SLOT_ID = '55555555-5555-4555-8555-555555555551';
+// An active Provider Subscription lists the Provider — the OH-191 gate that the
+// slot-publish path requires. Seeded into the publish tests below.
+const ACTIVE_SUB = { provider_id: PROVIDER_ID, status: 'active' };
 
 function providerToken(uid = 'uid-prov', specialty = 'ot') {
   return mintAccessToken({ sub: uid, email: `${uid}@example.com`, appMetadata: { role: 'provider', specialty } });
@@ -191,6 +195,7 @@ describe('GET /v1/providers/me/clinical-profile', () => {
       residentState: 'FL',
       perSessionRateCents: null,
       bookableSlotCount: 0,
+      listing: { subscriptionStatus: null, listedInSearch: false, listingReason: 'none' },
       credentialStatus: {
         overall: 'unverified',
         license: 'missing',
@@ -199,6 +204,15 @@ describe('GET /v1/providers/me/clinical-profile', () => {
         publiclyVerified: false,
       },
     });
+  });
+
+  it('reflects an active subscription as listed-in-search', async () => {
+    const app = buildApp(
+      makeDeps({ db: makeDb({ providers: [PROVIDER], provider_subscriptions: [ACTIVE_SUB] }).db }),
+    );
+    const res = await app.request(PROFILE, get(await providerToken()));
+    const json = (await res.json()) as Record<string, unknown>;
+    expect(json.listing).toMatchObject({ subscriptionStatus: 'active', listedInSearch: true, listingReason: 'active' });
   });
 
   it('shows a verified badge once license + insurance + screening are cleared', async () => {
@@ -267,7 +281,7 @@ describe('PATCH /v1/providers/me/clinical-profile', () => {
 
 describe('consultation slots', () => {
   it('publishes a bookable open slot', async () => {
-    const { db, tables } = makeDb({ providers: [PROVIDER] });
+    const { db, tables } = makeDb({ providers: [PROVIDER], provider_subscriptions: [ACTIVE_SUB] });
     const app = buildApp(makeDeps({ db }));
     const res = await app.request(SLOTS, body('POST', await providerToken(), { date: '2026-07-01', startMin: 540, endMin: 600 }));
     expect(res.status).toBe(201);
@@ -276,8 +290,23 @@ describe('consultation slots', () => {
     expect(tables.provider_slots).toHaveLength(1);
   });
 
-  it('rejects an impossible calendar date via the domain → 400', async () => {
+  it('402 publishing a slot without an active Provider Subscription', async () => {
     const app = buildApp(makeDeps({ db: makeDb({ providers: [PROVIDER] }).db }));
+    const res = await app.request(SLOTS, body('POST', await providerToken(), { date: '2026-07-01', startMin: 540, endMin: 600 }));
+    expect(res.status).toBe(402);
+    expect((await res.json()) as Record<string, unknown>).toMatchObject({ error: 'subscription_inactive' });
+  });
+
+  it('402 when the subscription exists but is past_due (not listed)', async () => {
+    const app = buildApp(
+      makeDeps({ db: makeDb({ providers: [PROVIDER], provider_subscriptions: [{ provider_id: PROVIDER_ID, status: 'past_due' }] }).db }),
+    );
+    const res = await app.request(SLOTS, body('POST', await providerToken(), { date: '2026-07-01', startMin: 540, endMin: 600 }));
+    expect(res.status).toBe(402);
+  });
+
+  it('rejects an impossible calendar date via the domain → 400', async () => {
+    const app = buildApp(makeDeps({ db: makeDb({ providers: [PROVIDER], provider_subscriptions: [ACTIVE_SUB] }).db }));
     const res = await app.request(SLOTS, body('POST', await providerToken(), { date: '2026-02-30', startMin: 540, endMin: 600 }));
     expect(res.status).toBe(400);
   });
@@ -285,6 +314,7 @@ describe('consultation slots', () => {
   it('rejects an overlapping slot on the same day → 409', async () => {
     const { db } = makeDb({
       providers: [PROVIDER],
+      provider_subscriptions: [ACTIVE_SUB],
       provider_slots: [
         { id: 'slot-1', provider_id: PROVIDER_ID, slot_date: '2026-07-01', start_min: 540, end_min: 600, state: 'open', held_by_booking_id: null },
       ],
@@ -297,6 +327,7 @@ describe('consultation slots', () => {
   it('allows a non-overlapping slot on the same day', async () => {
     const { db, tables } = makeDb({
       providers: [PROVIDER],
+      provider_subscriptions: [ACTIVE_SUB],
       provider_slots: [
         { id: 'slot-1', provider_id: PROVIDER_ID, slot_date: '2026-07-01', start_min: 540, end_min: 600, state: 'open', held_by_booking_id: null },
       ],

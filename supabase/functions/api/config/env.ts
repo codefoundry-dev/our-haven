@@ -173,6 +173,53 @@ const EnvSchema = z.object({
     .describe(
       "2-letter US state where Our Haven is registered as the seller. Stripe Tax uses it alongside the customer address to decide nexus; omitted falls back to the account's primary address.",
     ),
+
+  // ── Provider Subscription — Stripe Billing (OH-191; ADR-0011) ─────────────
+  // The clinical tier's listing fee: the Provider is a Stripe Customer (NOT a
+  // Connect account), drives a Stripe-hosted Checkout Session in subscription
+  // mode (sold on web to dodge iOS/Android IAP), and the billing webhook mirrors
+  // the lifecycle onto provider_subscriptions. Distinct endpoint + secret from
+  // the Connect (OH-190) and payments (OH-185) webhooks.
+  STRIPE_BILLING_WEBHOOK_SECRET: z
+    .string()
+    .min(1)
+    .describe(
+      'Stripe webhook signing secret (whsec_…) for the billing endpoint that delivers checkout.session.completed + customer.subscription.* for the Provider Subscription. Distinct endpoint + secret from the Connect + payments webhooks. Server-only; set via `supabase secrets set`.',
+    ),
+  STRIPE_PROVIDER_SUBSCRIPTION_PRICE_ID: z
+    .string()
+    .min(1)
+    .describe(
+      'Stripe recurring Price id (price_…) for the self-serve Provider Subscription. Not a secret, but no sensible default — required so a misconfigured deploy fails fast rather than minting broken checkouts.',
+    ),
+  STRIPE_SUBSCRIPTION_SUCCESS_URL: z
+    .string()
+    .url()
+    .default('http://localhost:8081/provider/subscription?checkout=success')
+    .describe('Where Stripe Checkout redirects a Provider after a completed subscription checkout.'),
+  STRIPE_SUBSCRIPTION_CANCEL_URL: z
+    .string()
+    .url()
+    .default('http://localhost:8081/provider/subscription?checkout=cancel')
+    .describe('Where Stripe Checkout redirects a Provider who abandons the subscription checkout.'),
+  STRIPE_BILLING_PORTAL_RETURN_URL: z
+    .string()
+    .url()
+    .default('http://localhost:8081/provider/subscription')
+    .describe('Where the Stripe Billing Portal returns a Provider after managing/cancelling their subscription.'),
+
+  // ── Corporate Contact-Us routing (OH-191) ────────────────────────────────
+  // The sales/ops Supabase user a captured corporate intake is "routed" to via a
+  // notification-outbox handoff. Optional: when unset the intake is still
+  // captured (the row persists for ops to read), it just is not enqueued. Set to
+  // the sales distribution user's uuid in prod.
+  CONTACT_INTAKE_NOTIFY_UID: z
+    .string()
+    .uuid()
+    .optional()
+    .describe(
+      'Supabase auth uid (uuid) the corporate Contact-Us intake is routed to via the notification outbox. Unset → the intake is captured but not enqueued.',
+    ),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

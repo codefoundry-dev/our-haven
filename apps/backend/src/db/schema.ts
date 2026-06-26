@@ -203,6 +203,58 @@ export interface ProviderConnectAccountsTable {
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
 }
 
+/**
+ * Provider Subscription — the clinical tier's Stripe Billing relationship
+ * (OH-191; ADR-0011 / CONTEXT.md § Subscription). The Provider is a Stripe
+ * *Customer* (NOT a Connect account — Providers receive no Payouts). One row per
+ * Provider; created at checkout-start so `stripe_customer_id` is stored before
+ * the first webhook (the join key). `status` is mirrored from Stripe billing
+ * webhooks and is the live source for the listing gate (via the domain
+ * `provider-subscription` module). `listed_at` is a first-listed marker.
+ */
+export interface ProviderSubscriptionsTable {
+  provider_id: string;
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+  status:
+    | 'incomplete'
+    | 'incomplete_expired'
+    | 'trialing'
+    | 'active'
+    | 'past_due'
+    | 'canceled'
+    | 'unpaid'
+    | 'paused'
+    | null;
+  price_id: string | null;
+  current_period_end: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  cancel_at_period_end: ColumnType<boolean, boolean | undefined, boolean>;
+  listed_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  last_webhook_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  created_at: Generated<Date>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
+/**
+ * Corporate "Contact Us" intake (OH-191; ADR-0011). v1 captures a sales lead for
+ * the large-corporation custom-contract path — no self-serve org onboarding /
+ * multi-seat model. Not keyed to a `providers` row (leads are pre-account); a
+ * captured row is what the intake "routes" a notification-outbox handoff against.
+ */
+export interface ProviderContactIntakesTable {
+  id: Generated<string>;
+  organization_name: string;
+  contact_name: string;
+  contact_email: string;
+  contact_phone: string | null;
+  estimated_seats: number | null;
+  state: string | null;
+  message: string | null;
+  status: ColumnType<'new' | 'routed' | 'closed', 'new' | 'routed' | 'closed' | undefined, 'new' | 'routed' | 'closed'>;
+  routed_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  created_at: Generated<Date>;
+}
+
 export interface StripeTaxCalculationsTable {
   id: Generated<string>;
   stripe_calculation_id: string;
@@ -270,6 +322,8 @@ export interface Database {
   specialist_credentials: SpecialistCredentialsTable;
   provider_home_childcare_registrations: ProviderHomeChildcareRegistrationsTable;
   provider_connect_accounts: ProviderConnectAccountsTable;
+  provider_subscriptions: ProviderSubscriptionsTable;
+  provider_contact_intakes: ProviderContactIntakesTable;
   stripe_tax_calculations: StripeTaxCalculationsTable;
   messages: MessagesTable;
   notification_outbox: NotificationOutboxTable;

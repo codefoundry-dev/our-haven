@@ -25,6 +25,7 @@ function boot(): (req: Request) => Response | Promise<Response> {
     secretKey: env.STRIPE_SECRET_KEY,
     connectWebhookSecret: env.STRIPE_CONNECT_WEBHOOK_SECRET,
     paymentsWebhookSecret: env.STRIPE_PAYMENTS_WEBHOOK_SECRET,
+    billingWebhookSecret: env.STRIPE_BILLING_WEBHOOK_SECRET,
     apiBase: env.STRIPE_API_BASE,
     tax: {
       subscriptionTaxCode: env.STRIPE_TAX_SUBSCRIPTION_TAX_CODE,
