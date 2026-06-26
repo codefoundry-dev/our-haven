@@ -31,8 +31,12 @@
 // zero-import `@our-haven/shared/safety-behaviors` module the Edge imports
 // directly.
 import type { CaregiverCategory } from '@our-haven/shared';
-
-import type { Credential, CredentialReviewState } from '../credentials/index.js';
+// Bare, type-only self-import (NOT a relative `../credentials/index.js`): the Edge
+// bundles this module via an explicit `.ts` specifier, and Deno file-resolves any
+// RELATIVE import in the graph — a `.js` specifier (only `.ts` exists on disk) warns
+// at bundle time. A bare `@our-haven/*` type import is erased before resolution
+// (same as the `@our-haven/shared` line above), so it stays Deno-clean. ADR-0019.
+import type { Credential, CredentialReviewState } from '@our-haven/domain';
 
 /** Canonical category order (CONTEXT.md § role-pick). Inlined to stay Deno-clean. */
 const CAREGIVER_CATEGORY_ORDER = ['babysitter', 'tutor', 'nanny'] as const satisfies readonly CaregiverCategory[];
