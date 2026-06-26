@@ -9,6 +9,7 @@ import { registerCaregiverConnectRoutes } from './routes/caregiver-connect.ts';
 import { registerCaregiverProfileRoutes } from './routes/caregiver-profile.ts';
 import { registerContactUsRoutes } from './routes/contact-us.ts';
 import { registerHealthRoutes } from './routes/health.ts';
+import { registerParentSubscriptionRoutes } from './routes/parent-subscription.ts';
 import { registerProviderCredentialsRoutes } from './routes/provider-credentials.ts';
 import { registerProviderProfileRoutes } from './routes/provider-profile.ts';
 import { registerProviderSubscriptionRoutes } from './routes/provider-subscription.ts';
@@ -62,7 +63,7 @@ export const openApiInfo = {
     {
       name: 'subscription',
       description:
-        'Provider Subscription (OH-191) — Stripe Billing checkout + portal (Provider as Customer, not Connect); listing gated on an active subscription. Plus the public corporate "Contact Us" intake (sales-led custom contract; v1 intake only).',
+        'Subscriptions (Stripe Billing, both web-sold to dodge IAP). Provider Subscription (OH-191) — checkout + portal (Provider as Customer, not Connect); listing gated on an active subscription; plus the public corporate "Contact Us" intake (sales-led custom contract; v1 intake only). Parent Subscription (OH-193) — checkout (with Stripe Promotion Codes) + portal; an active subscription unlocks the demand-side marketplace (the M3 paywall reads the access state).',
     },
     { name: 'verification', description: 'Supply verification — state + email/phone/ID-doc facts (OH-184)' },
     {
@@ -73,7 +74,7 @@ export const openApiInfo = {
     {
       name: 'webhooks',
       description:
-        'Vendor webhooks — Stripe Connect account.updated (OH-190), Stripe payments payment_intent.succeeded + Checkr report.* (OH-185), Stripe Billing checkout.session.completed + customer.subscription.* (OH-191)',
+        'Vendor webhooks — Stripe Connect account.updated (OH-190), Stripe payments payment_intent.succeeded + Checkr report.* (OH-185), Stripe Billing checkout.session.completed + customer.subscription.* for both Provider (OH-191) and Parent (OH-193) subscriptions',
     },
     { name: 'admin', description: 'Admin-only surfaces (Stripe Tax registrations + calculation audit, etc.)' },
     {
@@ -118,6 +119,7 @@ export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerCaregiverProfileRoutes(v1);
   registerProviderProfileRoutes(v1);
   registerProviderSubscriptionRoutes(v1);
+  registerParentSubscriptionRoutes(v1);
   registerContactUsRoutes(v1);
   registerScreeningRoutes(v1);
   registerUploadRoutes(v1);

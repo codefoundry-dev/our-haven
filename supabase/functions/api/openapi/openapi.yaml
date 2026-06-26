@@ -30,10 +30,13 @@ tags:
       publishing, and the read-only license/insurance/screening
       credential-status badge."
   - name: subscription
-    description: Provider Subscription (OH-191) — Stripe Billing checkout + portal
-      (Provider as Customer, not Connect); listing gated on an active
-      subscription. Plus the public corporate "Contact Us" intake (sales-led
-      custom contract; v1 intake only).
+    description: Subscriptions (Stripe Billing, both web-sold to dodge IAP).
+      Provider Subscription (OH-191) — checkout + portal (Provider as Customer,
+      not Connect); listing gated on an active subscription; plus the public
+      corporate "Contact Us" intake (sales-led custom contract; v1 intake only).
+      Parent Subscription (OH-193) — checkout (with Stripe Promotion Codes) +
+      portal; an active subscription unlocks the demand-side marketplace (the M3
+      paywall reads the access state).
   - name: verification
     description: Supply verification — state + email/phone/ID-doc facts (OH-184)
   - name: screening
@@ -43,7 +46,8 @@ tags:
   - name: webhooks
     description: Vendor webhooks — Stripe Connect account.updated (OH-190), Stripe
       payments payment_intent.succeeded + Checkr report.* (OH-185), Stripe
-      Billing checkout.session.completed + customer.subscription.* (OH-191)
+      Billing checkout.session.completed + customer.subscription.* for both
+      Provider (OH-191) and Parent (OH-193) subscriptions
   - name: admin
     description: Admin-only surfaces (Stripe Tax registrations + calculation audit, etc.)
   - name: tax
@@ -1776,6 +1780,98 @@ components:
         - sessionId
         - stripeCustomerId
     ProviderSubscriptionPortalLink:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+      required:
+        - url
+    ParentSubscriptionSummary:
+      type: object
+      properties:
+        status:
+          type: string
+          nullable: true
+          enum:
+            - incomplete
+            - incomplete_expired
+            - trialing
+            - active
+            - past_due
+            - canceled
+            - unpaid
+            - paused
+            - null
+        entitled:
+          type: boolean
+        accessReason:
+          type: string
+          enum:
+            - active
+            - trialing
+            - none
+            - inactive
+        hasCustomer:
+          type: boolean
+        hasSubscription:
+          type: boolean
+        cancelAtPeriodEnd:
+          type: boolean
+        currentPeriodEnd:
+          type: string
+          nullable: true
+          format: date-time
+        priceId:
+          type: string
+          nullable: true
+        entitledAt:
+          type: string
+          nullable: true
+          format: date-time
+      required:
+        - status
+        - entitled
+        - accessReason
+        - hasCustomer
+        - hasSubscription
+        - cancelAtPeriodEnd
+        - currentPeriodEnd
+        - priceId
+        - entitledAt
+    ParentSubscriptionError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
+    ParentSubscriptionCheckoutLink:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+        sessionId:
+          type: string
+        stripeCustomerId:
+          type: string
+      required:
+        - url
+        - sessionId
+        - stripeCustomerId
+    ParentSubscriptionCheckoutLinkRequest:
+      type: object
+      properties:
+        promotionCode:
+          type: string
+          minLength: 1
+          maxLength: 255
+        allowPromotionCodes:
+          type: boolean
+    ParentSubscriptionPortalLink:
       type: object
       properties:
         url:
@@ -3929,6 +4025,126 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProviderSubscriptionError"
+  /v1/parents/me/subscription:
+    get:
+      tags:
+        - subscription
+      summary: Read the authenticated Parent's subscription + access state
+      description: "Returns the Parent Subscription state mirrored from Stripe billing
+        webhooks: the lifecycle `status`, whether the Parent is currently
+        `entitled` (the marketplace is unlocked — true iff status is
+        active/trialing; this is the state the M3 paywall reads), the
+        cancel-at-period-end flag and current period end, and the price id.
+        Supply roles are rejected by the parent-only role guard (403)."
+      security:
+        - supabaseAccessToken: []
+      responses:
+        "200":
+          description: Subscription summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentSubscriptionSummary"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentSubscriptionError"
+        "403":
+          description: Wrong role (caregiver / provider / admin)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentSubscriptionError"
+  /v1/parents/me/subscription/checkout-link:
+    post:
+      tags:
+        - subscription
+      summary: Create / reuse a Stripe Customer and return a hosted subscription
+        Checkout URL
+      description: 'Idempotent on the Customer: if the Parent already has a
+        `parent_subscriptions` row with a `stripe_customer_id`, reuses it;
+        otherwise creates a Stripe Customer and stamps it onto the row before
+        returning. Returns a Stripe-hosted Checkout Session URL in subscription
+        mode (STRIPE_PARENT_SUBSCRIPTION_PRICE_ID). Supports Stripe Promotion
+        Codes: by default the hosted "Add promotion code" field is shown; an
+        optional `promotionCode` (promo_…) pre-applies a launch promo instead.
+        The request body is optional — a bodyless POST starts a standard
+        checkout. On completion Stripe redirects to
+        STRIPE_PARENT_SUBSCRIPTION_SUCCESS_URL and the billing webhook unlocks
+        access.'
+      security:
+        - supabaseAccessToken: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ParentSubscriptionCheckoutLinkRequest"
+      responses:
+        "200":
+          description: Checkout link issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentSubscriptionCheckoutLink"
+        "400":
+          description: No email on file / invalid body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentSubscriptionError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentSubscriptionError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentSubscriptionError"
+  /v1/parents/me/subscription/portal-link:
+    post:
+      tags:
+        - subscription
+      summary: Issue a Stripe Billing Portal login link — manage / cancel the
+        subscription
+      description: Returns a one-time Stripe Billing Portal URL where the Parent can
+        update their payment method or cancel the Parent Subscription. A
+        cancellation flows back through the billing webhook, which walls access
+        once the subscription ends. Requires an existing Stripe Customer (start
+        checkout first).
+      security:
+        - supabaseAccessToken: []
+      responses:
+        "200":
+          description: Billing Portal link issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentSubscriptionPortalLink"
+        "400":
+          description: No Stripe Customer (start checkout first)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentSubscriptionError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentSubscriptionError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentSubscriptionError"
   /v1/providers/contact-us:
     post:
       tags:
@@ -4116,16 +4332,20 @@ paths:
     post:
       tags:
         - webhooks
-      summary: Stripe Billing webhook — mirrors the Provider Subscription lifecycle
-        onto provider_subscriptions
+      summary: Stripe Billing webhook — mirrors the Provider + Parent Subscription
+        lifecycles onto their tables
       description: Receives Stripe Billing webhook deliveries (separate endpoint +
-        signing secret from the Connect + payments webhooks). Verifies the
-        `Stripe-Signature` header with STRIPE_BILLING_WEBHOOK_SECRET, then on
-        checkout.session.completed links the subscription id and on
-        customer.subscription.* mirrors status / current_period_end /
-        cancel_at_period_end / price onto the row keyed by stripe_customer_id,
-        stamping listed_at on the first listed transition. Public route — the
-        Stripe signature is the authentication.
+        signing secret from the Connect + payments webhooks) for BOTH the
+        Provider Subscription (OH-191) and the Parent Subscription (OH-193).
+        Verifies the `Stripe-Signature` header with
+        STRIPE_BILLING_WEBHOOK_SECRET, then routes each event by its metadata
+        (`purpose` + `uid`/`provider_id`, falling back to a customer-id probe)
+        to provider_subscriptions or parent_subscriptions — on
+        checkout.session.completed linking the subscription id and on
+        customer.subscription.* mirroring status / current_period_end /
+        cancel_at_period_end / price, stamping the first-access marker on the
+        first active/trialing transition. Public route — the Stripe signature is
+        the authentication.
       responses:
         "200":
           description: Acknowledged

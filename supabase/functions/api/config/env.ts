@@ -208,6 +208,34 @@ const EnvSchema = z.object({
     .default('http://localhost:8081/provider/subscription')
     .describe('Where the Stripe Billing Portal returns a Provider after managing/cancelling their subscription.'),
 
+  // ── Parent Subscription — Stripe Billing (OH-193; ADR-0011) ──────────────
+  // The demand-side access fee: the Parent is a Stripe Customer, drives a
+  // Stripe-hosted Checkout Session in subscription mode (sold on web to dodge
+  // iOS/Android IAP), and the SAME billing webhook (STRIPE_BILLING_WEBHOOK_SECRET
+  // above — one endpoint, one secret per Stripe billing event family) mirrors the
+  // lifecycle onto parent_subscriptions. Checkout supports Stripe Promotion Codes.
+  STRIPE_PARENT_SUBSCRIPTION_PRICE_ID: z
+    .string()
+    .min(1)
+    .describe(
+      'Stripe recurring Price id (price_…) for the self-serve Parent Subscription. Not a secret, but no sensible default — required so a misconfigured deploy fails fast rather than minting broken checkouts.',
+    ),
+  STRIPE_PARENT_SUBSCRIPTION_SUCCESS_URL: z
+    .string()
+    .url()
+    .default('http://localhost:8081/parent/subscription?checkout=success')
+    .describe('Where Stripe Checkout redirects a Parent after a completed subscription checkout.'),
+  STRIPE_PARENT_SUBSCRIPTION_CANCEL_URL: z
+    .string()
+    .url()
+    .default('http://localhost:8081/parent/subscription?checkout=cancel')
+    .describe('Where Stripe Checkout redirects a Parent who abandons the subscription checkout.'),
+  STRIPE_PARENT_BILLING_PORTAL_RETURN_URL: z
+    .string()
+    .url()
+    .default('http://localhost:8081/parent/subscription')
+    .describe('Where the Stripe Billing Portal returns a Parent after managing/cancelling their subscription.'),
+
   // ── Corporate Contact-Us routing (OH-191) ────────────────────────────────
   // The sales/ops Supabase user a captured corporate intake is "routed" to via a
   // notification-outbox handoff. Optional: when unset the intake is still

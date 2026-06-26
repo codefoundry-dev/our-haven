@@ -22,6 +22,18 @@ export * from './caregiver-availability/index.js';
 export * from './caregiver-profile/index.js';
 export * from './provider-profile/index.js';
 export * from './provider-subscription/index.js';
+// parent-subscription mirrors the Stripe-lifecycle primitives (StripeSubscriptionStatus,
+// STRIPE_SUBSCRIPTION_STATUSES, isStripeSubscriptionStatus) so it can stay
+// Deno-clean for the Edge tree; re-export only its parent-specific surface here so
+// those shared names resolve to provider-subscription's single canonical copy.
+export {
+  ACCESS_GRANTING_STATUSES,
+  deriveAccessDecision,
+  isAccessGrantingStatus,
+  PARENT_SUBSCRIPTION_MODULE_VERSION,
+  type ParentAccessDecision,
+  type ParentAccessReason,
+} from './parent-subscription/index.js';
 export * from './provider-slot-scheduler/index.js';
 export * from './verification-workflow/index.js';
 export * from './credentials/index.js';
