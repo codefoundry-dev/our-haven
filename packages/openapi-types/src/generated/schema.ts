@@ -2036,6 +2036,353 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/providers/me/clinical-profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the authenticated Provider's editable clinical profile
+         * @description Returns the Provider profile: specialty, the per-session display Rate (display-only — Provider payment is off-platform), identity (display name / headline / bio), the read-only license/insurance/screening credential-status badge, and the count of currently-bookable consultation slots. Caregivers are rejected by the provider-only role guard (403).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The editable clinical profile */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderClinicalProfile"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderProfileError"];
+                    };
+                };
+                /** @description Wrong role (caregiver / parent / admin) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderProfileError"];
+                    };
+                };
+                /** @description Supply (provider) row not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderProfileError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update the authenticated Provider's clinical profile (partial)
+         * @description Partial update — only the supplied fields change. `specialty` (one of slp/ot/aba/psychology/other) writes through to the providers row (it drives the license-board resolution). `perSessionRateCents` is the display-only per-session Rate in integer cents, or null to clear it.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ProviderClinicalProfilePatchRequest"];
+                };
+            };
+            responses: {
+                /** @description The updated clinical profile */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderClinicalProfile"];
+                    };
+                };
+                /** @description Invalid specialty / rate */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderProfileError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderProfileError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderProfileError"];
+                    };
+                };
+                /** @description Supply (provider) row not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderProfileError"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/v1/providers/me/consultation-slots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the authenticated Provider's published consultation slots
+         * @description Returns the Provider's active consultation slots (open + held; withdrawn/released ones are omitted), each with its bookable flag. Open slots are what the M2.7 scheduler surfaces to Parents.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The published slots */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ConsultationSlotList"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderProfileError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderProfileError"];
+                    };
+                };
+                /** @description Supply (provider) row not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderProfileError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Publish a bookable consultation slot
+         * @description Lists a new consultation window (born `open`, immediately bookable). The date must be YYYY-MM-DD and the window 0 ≤ startMin < endMin ≤ 1440. Rejected with 409 if it overlaps an existing active slot on the same day (a Provider cannot double-book a window).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ConsultationSlotCreateRequest"];
+                };
+            };
+            responses: {
+                /** @description Slot published */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ConsultationSlot"];
+                    };
+                };
+                /** @description Invalid date / window */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderProfileError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderProfileError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderProfileError"];
+                    };
+                };
+                /** @description Supply (provider) row not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderProfileError"];
+                    };
+                };
+                /** @description Overlaps an existing slot */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderProfileError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers/me/consultation-slots/{slotId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Withdraw an open consultation slot
+         * @description Un-publishes an open slot (open → released). A held slot (a Parent has booked it) cannot be withdrawn — cancel the consultation Booking first, which releases it (409).
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    slotId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Slot withdrawn */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            withdrawn: true;
+                        };
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderProfileError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderProfileError"];
+                    };
+                };
+                /** @description Slot not found (or not owned) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderProfileError"];
+                    };
+                };
+                /** @description Slot is held — cancel the booking first */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderProfileError"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/providers/me/verification/screening/initiate": {
         parameters: {
             query?: never;
@@ -2919,6 +3266,58 @@ export interface components {
             /** @enum {string} */
             decision: "approve" | "reject";
             reason?: string;
+        };
+        ProviderClinicalProfile: {
+            providerId: string;
+            /** @enum {string|null} */
+            specialty: "slp" | "ot" | "aba" | "psychology" | "other" | null;
+            residentState: string;
+            displayName: string | null;
+            headline: string | null;
+            bio: string | null;
+            perSessionRateCents: number | null;
+            credentialStatus: components["schemas"]["ProviderCredentialStatus"];
+            bookableSlotCount: number;
+        };
+        ProviderCredentialStatus: {
+            /** @enum {string} */
+            overall: "verified" | "in-review" | "rejected" | "unverified";
+            /** @enum {string} */
+            license: "verified" | "uploaded" | "missing";
+            /** @enum {string} */
+            insurance: "verified" | "uploaded" | "missing";
+            /** @enum {string} */
+            screening: "passed" | "pending";
+            publiclyVerified: boolean;
+        };
+        ProviderProfileError: {
+            error: string;
+            reason?: string;
+        };
+        ProviderClinicalProfilePatchRequest: {
+            displayName?: string | null;
+            headline?: string | null;
+            bio?: string | null;
+            /** @enum {string} */
+            specialty?: "slp" | "ot" | "aba" | "psychology" | "other";
+            perSessionRateCents?: number | null;
+        };
+        ConsultationSlotList: {
+            slots: components["schemas"]["ConsultationSlot"][];
+        };
+        ConsultationSlot: {
+            id: string;
+            date: string;
+            startMin: number;
+            endMin: number;
+            /** @enum {string} */
+            state: "open" | "held" | "released";
+            bookable: boolean;
+        };
+        ConsultationSlotCreateRequest: {
+            date: string;
+            startMin: number;
+            endMin: number;
         };
         ScreeningInitiateResponse: {
             /** Format: uuid */

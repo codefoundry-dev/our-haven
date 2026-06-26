@@ -31,6 +31,14 @@ export type CaregiverCategoryRate = CaregiverProfile['categoryRates'][number];
 export type CaregiverCredential = CaregiverProfile['credentials'][number];
 export type CredentialCreateBody = paths['/v1/providers/me/credentials']['post']['requestBody']['content']['application/json'];
 
+// Provider (clinical) profile builder (OH-189).
+export type ProviderClinicalProfile = paths['/v1/providers/me/clinical-profile']['get']['responses'][200]['content']['application/json'];
+export type ProviderClinicalProfilePatch = paths['/v1/providers/me/clinical-profile']['patch']['requestBody']['content']['application/json'];
+export type ProviderSpecialty = NonNullable<ProviderClinicalProfile['specialty']>;
+export type ProviderCredentialStatus = ProviderClinicalProfile['credentialStatus'];
+export type ConsultationSlot = paths['/v1/providers/me/consultation-slots']['get']['responses'][200]['content']['application/json']['slots'][number];
+export type ConsultationSlotCreateBody = paths['/v1/providers/me/consultation-slots']['post']['requestBody']['content']['application/json'];
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -128,4 +136,30 @@ export function addCaregiverCredential(body: CredentialCreateBody): Promise<{ cr
 
 export function deleteCaregiverCredential(credentialId: string): Promise<{ deleted: true }> {
   return del<{ deleted: true }>(`/v1/providers/me/credentials/${credentialId}`);
+}
+
+/**
+ * Provider (clinical) profile builder (OH-189). Read/update the clinical profile
+ * (specialty + per-session display Rate + identity + read-only credential status),
+ * and publish/list/withdraw consultation slots the M2.7 scheduler consumes.
+ */
+
+export function getProviderProfile(): Promise<ProviderClinicalProfile> {
+  return get<ProviderClinicalProfile>('/v1/providers/me/clinical-profile');
+}
+
+export function patchProviderProfile(patch: ProviderClinicalProfilePatch): Promise<ProviderClinicalProfile> {
+  return patchJson<ProviderClinicalProfile>('/v1/providers/me/clinical-profile', patch);
+}
+
+export function listConsultationSlots(): Promise<{ slots: ConsultationSlot[] }> {
+  return get<{ slots: ConsultationSlot[] }>('/v1/providers/me/consultation-slots');
+}
+
+export function publishConsultationSlot(body: ConsultationSlotCreateBody): Promise<ConsultationSlot> {
+  return post<ConsultationSlot>('/v1/providers/me/consultation-slots', body);
+}
+
+export function withdrawConsultationSlot(slotId: string): Promise<{ withdrawn: true }> {
+  return del<{ withdrawn: true }>(`/v1/providers/me/consultation-slots/${slotId}`);
 }
