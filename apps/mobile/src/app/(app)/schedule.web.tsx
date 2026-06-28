@@ -1,22 +1,39 @@
 /**
- * Schedule (WEB) — same stub as the native Schedule tab (the Provider's landing
- * tab), with the supply "Finish your setup" banner on top. The banner renders only
- * for a not-yet-activated Caregiver/Provider. Metro resolves this over schedule.tsx
- * on web; the native file is untouched.
+ * Schedule tab (WEB) — role-aware. Caregiver booking calendar vs the clinical
+ * Provider's consultation schedule.
+ *  - WIDE   → each inside the WebShell side-rail chrome.
+ *  - NARROW → the native mobile Schedule screens + BottomNav (mirrors
+ *    schedule.tsx), so phone-width web matches the native design.
+ * Metro resolves this over schedule.tsx on web; the native file is untouched.
  */
-import { View } from 'react-native';
+import { useAuth } from '@/auth/AuthProvider';
+import { WebShell } from '@/components/web/WebShell';
+import { useWebWide } from '@/lib/responsive';
+import { CaregiverScheduleWeb } from '@/screens/web/cp/Schedule';
+import { ProviderScheduleWeb } from '@/screens/web/cp/ProviderSchedule';
+import { CaregiverSchedule } from '@/screens/caregiver/Schedule';
+import { ProviderSchedule } from '@/screens/provider/Schedule';
 
-import { OnboardingBanner } from '@/components/OnboardingBanner';
-import { ScreenStub } from '@/components/ScreenStub';
-import { colors } from '@/theme/tokens';
+export default function ScheduleWeb() {
+  const { role } = useAuth();
+  const wide = useWebWide();
 
-export default function ScheduleScreen() {
+  // Phone-width web → native mobile UI/flow (same as schedule.tsx).
+  if (!wide) {
+    if (role === 'provider') return <ProviderSchedule />;
+    return <CaregiverSchedule />;
+  }
+
+  if (role === 'provider') {
+    return (
+      <WebShell role="provider" active="schedule">
+        <ProviderScheduleWeb />
+      </WebShell>
+    );
+  }
   return (
-    <View style={{ flex: 1, backgroundColor: colors.canvas }}>
-      <OnboardingBanner />
-      <View style={{ flex: 1 }}>
-        <ScreenStub title="Schedule" icon="calendar" subtitle="Your upcoming sessions and availability will appear here." />
-      </View>
-    </View>
+    <WebShell role="caregiver" active="schedule">
+      <CaregiverScheduleWeb />
+    </WebShell>
   );
 }

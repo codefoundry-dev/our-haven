@@ -37,7 +37,31 @@ export type IconName =
   | 'clock'
   | 'dollar'
   | 'sparkle'
-  | 'eye';
+  | 'eye'
+  | 'sliders'
+  | 'paperclip'
+  | 'dots'
+  | 'grid'
+  | 'phone'
+  | 'phone-off'
+  | 'users'
+  | 'heart'
+  | 'heart-fill'
+  | 'trash'
+  | 'download'
+  | 'upload'
+  | 'mic'
+  | 'mic-off'
+  | 'camera'
+  | 'camera-off'
+  | 'minus'
+  | 'flag'
+  | 'file'
+  | 'graduation'
+  | 'logout'
+  | 'settings'
+  | 'help'
+  | 'gift';
 
 export interface IconProps {
   name: IconName;
@@ -120,6 +144,54 @@ export function Icon({ name, size = 20, color = colors.ink, strokeWidth = 1.5 }:
       return <Svg {...base}><Path {...s} d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8L12 3z" /></Svg>;
     case 'eye':
       return <Svg {...base}><Circle {...s} cx="12" cy="12" r="3" /><Path {...s} d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /></Svg>;
+    case 'sliders':
+      return <Svg {...base}><Path {...s} d="M4 6h11M19 6h1M4 12h5M13 12h7M4 18h13M21 18h-1" /><Circle {...s} cx="17" cy="6" r="2" /><Circle {...s} cx="11" cy="12" r="2" /><Circle {...s} cx="19" cy="18" r="2" /></Svg>;
+    case 'paperclip':
+      return <Svg {...base}><Path {...s} d="M21 11l-9 9a5 5 0 0 1-7-7l9-9a3 3 0 0 1 4 4l-9 9a1 1 0 0 1-1.5-1.5L15 8" /></Svg>;
+    case 'dots':
+      return <Svg {...base}><Circle cx="6" cy="12" r="1.6" fill={color} /><Circle cx="12" cy="12" r="1.6" fill={color} /><Circle cx="18" cy="12" r="1.6" fill={color} /></Svg>;
+    case 'grid':
+      return <Svg {...base}><Rect {...s} x="3" y="3" width="7" height="7" rx="1.5" /><Rect {...s} x="14" y="3" width="7" height="7" rx="1.5" /><Rect {...s} x="3" y="14" width="7" height="7" rx="1.5" /><Rect {...s} x="14" y="14" width="7" height="7" rx="1.5" /></Svg>;
+    case 'phone':
+      return <Svg {...base}><Path {...s} d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z" /></Svg>;
+    case 'phone-off':
+      return <Svg {...base}><Path {...s} d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z" /><Path {...s} d="M3 3l18 18" /></Svg>;
+    case 'users':
+      return <Svg {...base}><Circle {...s} cx="9" cy="8" r="3.5" /><Path {...s} d="M3 21c0-3.3 2.7-6 6-6s6 2.7 6 6" /><Path {...s} d="M16 5a3.5 3.5 0 0 1 0 6.5M21 21c0-2.5-1.4-4.7-3.5-5.6" /></Svg>;
+    case 'heart':
+      return <Svg {...base}><Path {...s} d="M12 20s-7-4.5-9.5-9A5 5 0 0 1 12 6a5 5 0 0 1 9.5 5c-2.5 4.5-9.5 9-9.5 9z" /></Svg>;
+    case 'heart-fill':
+      return <Svg {...base}><Path fill={color} d="M12 20s-7-4.5-9.5-9A5 5 0 0 1 12 6a5 5 0 0 1 9.5 5c-2.5 4.5-9.5 9-9.5 9z" /></Svg>;
+    case 'trash':
+      return <Svg {...base}><Path {...s} d="M4 7h16M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13M10 11v6M14 11v6" /></Svg>;
+    case 'download':
+      return <Svg {...base}><Path {...s} d="M12 3v12M7 11l5 5 5-5M5 21h14" /></Svg>;
+    case 'upload':
+      return <Svg {...base}><Path {...s} d="M12 21V9M7 13l5-5 5 5M5 3h14" /></Svg>;
+    case 'mic':
+      return <Svg {...base}><Rect {...s} x="9" y="3" width="6" height="11" rx="3" /><Path {...s} d="M5 11a7 7 0 0 0 14 0M12 18v3" /></Svg>;
+    case 'mic-off':
+      return <Svg {...base}><Path {...s} d="M9 9V6a3 3 0 0 1 6 0v3M5 11a7 7 0 0 0 11 5.5M12 18v3M3 3l18 18" /></Svg>;
+    case 'camera':
+      return <Svg {...base}><Path {...s} d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" /><Circle {...s} cx="12" cy="13" r="3.5" /></Svg>;
+    case 'camera-off':
+      return <Svg {...base}><Path {...s} d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9M3 3l18 18M3 9v9a1 1 0 0 0 1 1h13" /></Svg>;
+    case 'minus':
+      return <Svg {...base}><Path {...s} d="M5 12h14" /></Svg>;
+    case 'flag':
+      return <Svg {...base}><Path {...s} d="M5 21V4M5 4h12l-2 4 2 4H5" /></Svg>;
+    case 'file':
+      return <Svg {...base}><Path {...s} d="M6 3h8l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" /><Path {...s} d="M14 3v5h5" /></Svg>;
+    case 'graduation':
+      return <Svg {...base}><Path {...s} d="M3 9l9-4 9 4-9 4-9-4z" /><Path {...s} d="M7 11v5c0 1.5 2.2 3 5 3s5-1.5 5-3v-5M21 9v5" /></Svg>;
+    case 'logout':
+      return <Svg {...base}><Path {...s} d="M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3M10 17l-5-5 5-5M5 12h12" /></Svg>;
+    case 'settings':
+      return <Svg {...base}><Circle {...s} cx="12" cy="12" r="3" /><Path {...s} d="M19.4 13a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.2A1.6 1.6 0 0 0 7 19.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.6 1.6 0 0 0 3 13a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.6 1.6 0 0 0 11 3.6V3a2 2 0 1 1 4 0v.1A1.6 1.6 0 0 0 17 4.6l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8" /></Svg>;
+    case 'help':
+      return <Svg {...base}><Circle {...s} cx="12" cy="12" r="9" /><Path {...s} d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.8.4-1 1-1 1.7M12 17v.5" /></Svg>;
+    case 'gift':
+      return <Svg {...base}><Rect {...s} x="4" y="9" width="16" height="11" rx="1" /><Path {...s} d="M2 9h20v3H2zM12 9v11M12 9S9 4 6.5 6S9 9 12 9zM12 9s3-5 5.5-3S15 9 12 9z" /></Svg>;
     default:
       return <Svg {...base}><Circle {...s} cx="12" cy="12" r="6" /></Svg>;
   }

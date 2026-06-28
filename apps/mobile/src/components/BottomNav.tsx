@@ -4,12 +4,21 @@
  * destinations show (and in what order) per role while React Navigation owns
  * the actual screen state.
  */
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon } from '@/components/Icon';
+import { WEB_WIDE_BREAKPOINT } from '@/lib/responsive';
 import { ROLE_TABS, type Role } from '@/lib/roles';
 import { colors, radii, shadow } from '@/theme/tokens';
+
+/**
+ * Above this width on the web, the desktop side-rail (WebShell / ParentWebShell)
+ * is the primary navigation, so the floating mobile tab bar is suppressed. It
+ * still shows on native and on narrow/mobile-web (where the rail collapses).
+ * Shared with the web shells via src/lib/responsive.ts.
+ */
+const WEB_RAIL_WIDTH = WEB_WIDE_BREAKPOINT;
 
 /**
  * Minimal structural shape of the React Navigation bottom-tab bar props we use.
@@ -28,8 +37,13 @@ interface TabBarProps {
 
 export function BottomNav({ state, navigation, role }: TabBarProps) {
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const items = ROLE_TABS[role];
   const activeName = state.routes[state.index]?.name;
+
+  // On desktop web the side-rail (WebShell / ParentWebShell) owns navigation, so
+  // the floating tab bar must not also render. Native + narrow web keep it.
+  if (Platform.OS === 'web' && width >= WEB_RAIL_WIDTH) return null;
 
   // The supply onboarding wizard is a full-takeover flow (its own CAREGIVER SETUP
   // rail + sticky Back/Continue footer), so the floating tab bar is suppressed there.

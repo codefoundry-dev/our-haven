@@ -1,5 +1,13 @@
-import { ScreenStub } from '@/components/ScreenStub';
+/**
+ * Bookings tab — role-aware. Parents see their Bookings across all Providers;
+ * Providers (clinical) see incoming consultation Bookings to act on.
+ */
+import { useAuth } from '@/auth/AuthProvider';
+import { ParentBookings } from '@/screens/parent/Bookings';
+import { ProviderBookings } from '@/screens/provider/Bookings';
 
-export default function BookingsScreen() {
-  return <ScreenStub title="Bookings" icon="calendar" subtitle="Your bookings and requests will appear here." />;
+export default function BookingsRoute() {
+  const { role } = useAuth();
+  if (role === 'provider') return <ProviderBookings />;
+  return <ParentBookings />;
 }

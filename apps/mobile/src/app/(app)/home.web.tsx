@@ -1,22 +1,44 @@
 /**
- * Home (WEB) — same stub as the native Home tab, with the supply "Finish your
- * setup" banner on top. The banner renders only for a not-yet-activated
- * Caregiver/Provider (null for Parents), so Parents see the unchanged stub.
+ * Home tab (WEB) — role-aware dispatcher.
+ *  - WIDE viewport  → desktop chrome: caregiver gets the supply dashboard inside
+ *    the WebShell side-rail; parent gets marketplace discovery in ParentWebShell.
+ *  - NARROW (phone) → the native mobile Home screens + floating BottomNav, so the
+ *    mobile web view matches the native designs instead of cramming the desktop
+ *    dashboard into a phone column. Mirrors home.tsx exactly.
  * Metro resolves this over home.tsx on web; the native file is untouched.
  */
-import { View } from 'react-native';
+import { useAuth } from '@/auth/AuthProvider';
+import { WebShell } from '@/components/web/WebShell';
+import { ParentWebShell } from '@/components/web/ParentWebShell';
+import { useWebWide } from '@/lib/responsive';
+import { CaregiverDashboardWeb } from '@/screens/web/cp/Dashboard';
+import { ParentDiscoveryWeb } from '@/screens/web/parent/Discovery';
+import { CaregiverHome } from '@/screens/caregiver/Home';
+import { ParentHome } from '@/screens/parent/Home';
 
-import { OnboardingBanner } from '@/components/OnboardingBanner';
-import { ScreenStub } from '@/components/ScreenStub';
-import { colors } from '@/theme/tokens';
+export default function HomeWeb() {
+  const { role } = useAuth();
+  const wide = useWebWide();
 
-export default function HomeScreen() {
-  return (
-    <View style={{ flex: 1, backgroundColor: colors.canvas }}>
-      <OnboardingBanner />
-      <View style={{ flex: 1 }}>
-        <ScreenStub title="Home" icon="house" subtitle="Your personalized home feed lands in the next milestone." />
-      </View>
-    </View>
-  );
+  // Phone-width web → native mobile UI/flow (same as home.tsx).
+  if (!wide) {
+    if (role === 'caregiver') return <CaregiverHome />;
+    return <ParentHome />;
+  }
+
+  if (role === 'caregiver') {
+    return (
+      <WebShell role="caregiver" active="home">
+        <CaregiverDashboardWeb />
+      </WebShell>
+    );
+  }
+  if (role === 'parent') {
+    return (
+      <ParentWebShell active="home">
+        <ParentDiscoveryWeb />
+      </ParentWebShell>
+    );
+  }
+  return <ParentHome />;
 }
