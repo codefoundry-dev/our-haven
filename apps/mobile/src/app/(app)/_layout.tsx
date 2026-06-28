@@ -26,7 +26,10 @@ const ALL_TAB_IDS = new Set<string>(
 
 export default function AppLayout() {
   const { role } = useAuth();
-  const segments = useSegments();
+  // Cast to a plain string[]: expo-router types useSegments() as a route-derived
+  // tuple whose generated shape varies (CI regenerates .expo/types), which made
+  // segments[1] read as out-of-bounds in CI. We only need positional access.
+  const segments = useSegments() as string[];
   if (!role) return null; // the auth gate will redirect away
 
   // Redirect a role away from a tab destination it doesn't own (manual URL /
