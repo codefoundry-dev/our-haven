@@ -1,5 +1,8 @@
-import { ScreenStub } from '@/components/ScreenStub';
+/**
+ * Opportunities tab — Caregiver-only (open Jobs feed they can apply to).
+ */
+import { CaregiverOpportunities } from '@/screens/caregiver/Opportunities';
 
-export default function OpportunitiesScreen() {
-  return <ScreenStub title="Opportunities" icon="briefcase" subtitle="Open Jobs you can apply to will appear here." />;
+export default function OpportunitiesRoute() {
+  return <CaregiverOpportunities />;
 }
