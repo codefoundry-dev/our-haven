@@ -8,9 +8,12 @@
     "scheme": "ourhaven",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "dev.thecodefoundry.ourhaven",
+      "supportsTablet": true
     },
     "android": {
+      "package": "dev.thecodefoundry.ourhaven",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

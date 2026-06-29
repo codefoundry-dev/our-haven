@@ -59,6 +59,9 @@ export default function AppLayout() {
       <Tabs.Screen name="onboarding" options={{ href: null }} />
 
       {/* ── demand-side flow routes (parent) ──────────────────────── */}
+      {/* Ephemeral preview questionnaire — landed on once after Parent
+          role-claim (and re-openable from Home "Adjust"); never a tab. */}
+      <Tabs.Screen name="preview-questionnaire" options={{ href: null }} />
       <Tabs.Screen name="search" options={{ href: null }} />
       <Tabs.Screen name="provider-detail" options={{ href: null }} />
       <Tabs.Screen name="booking-compose" options={{ href: null }} />

@@ -16,6 +16,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AuthProvider, useAuth } from '@/auth/AuthProvider';
+import { PreviewProvider } from '@/preview/PreviewProvider';
 import { landingTab, type Role } from '@/lib/roles';
 import { colors } from '@/theme/tokens';
 
@@ -39,8 +40,10 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <AuthProvider>
-          <StatusBar style="dark" />
-          <RootNavigator />
+          <PreviewProvider>
+            <StatusBar style="dark" />
+            <RootNavigator />
+          </PreviewProvider>
         </AuthProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
@@ -96,9 +99,16 @@ function useAuthRedirect(status: ReturnType<typeof useAuth>['status'], role: Rol
     if (!inApp) {
       // The role lands in the token while still on role-claim (SupplyOnboarding's
       // refresh), so root === 'role-claim' here means "just onboarded".
-      const justClaimed = inRoleClaim && (role === 'caregiver' || role === 'provider');
-      const dest =
-        justClaimed && Platform.OS === 'web' ? '/(app)/onboarding' : `/(app)/${landingTab(role)}`;
+      const justClaimedSupply = inRoleClaim && (role === 'caregiver' || role === 'provider');
+      // A just-claimed Parent goes through the ephemeral preview questionnaire
+      // (story 111) once before landing on the shell; returning sign-ins enter
+      // from (auth), so inRoleClaim is false and they skip straight to Home.
+      const justClaimedParent = inRoleClaim && role === 'parent';
+      const dest = justClaimedSupply && Platform.OS === 'web'
+        ? '/(app)/onboarding'
+        : justClaimedParent
+          ? '/(app)/preview-questionnaire'
+          : `/(app)/${landingTab(role)}`;
       router.replace(dest as Href);
     }
   }, [status, role, segments, router]);

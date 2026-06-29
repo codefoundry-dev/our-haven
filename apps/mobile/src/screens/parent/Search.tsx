@@ -8,7 +8,7 @@
  * The desktop layout lives in `@/screens/web/parent/Search` and is chosen by
  * `search.web.tsx` at wide viewports; this body renders on native + narrow web.
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
@@ -21,6 +21,8 @@ import { IconButton } from '@/components/ui/IconButton';
 import { Portrait } from '@/components/ui/PhotoPlaceholder';
 import { RatingValue } from '@/components/ui/StarRating';
 import { SearchBar } from '@/components/ui/SearchBar';
+import { usePreview } from '@/preview/PreviewProvider';
+import { shapeBrowse } from '@/preview/questionnaire';
 import { colors, fonts, radii, shadow } from '@/theme/tokens';
 
 interface FilterDef {
@@ -29,7 +31,7 @@ interface FilterDef {
   removable?: boolean;
 }
 
-const FILTERS: FilterDef[] = [
+const DEFAULT_FILTERS: FilterDef[] = [
   { label: 'Tutor', active: true },
   { label: 'Babysitter' },
   { label: 'Top-rated', active: true, removable: true },
@@ -37,6 +39,18 @@ const FILTERS: FilterDef[] = [
   { label: 'Tax-credit' },
   { label: 'Available now' },
 ];
+
+/**
+ * Fold the ephemeral preview answers into the chip strip so the first browse
+ * opens on the shaped category (story 111). The leading category becomes the
+ * first, pre-activated chip; everything else keeps its default state.
+ */
+function filtersFor(chips: string[], leadCategory: string | null): FilterDef[] {
+  if (!leadCategory) return DEFAULT_FILTERS;
+  const rest = DEFAULT_FILTERS.filter((f) => f.label !== leadCategory);
+  const merged: FilterDef[] = [{ label: leadCategory, active: true }, ...rest];
+  return merged.map((f) => (chips.includes(f.label) ? { ...f, active: true } : f));
+}
 
 interface Provider {
   name: string;
@@ -56,8 +70,15 @@ const PROVIDERS: Provider[] = [
 
 export default function SearchScreen() {
   const router = useRouter();
+  const { answers } = usePreview();
+
+  // Seed the first browse from the ephemeral preview answers, if any.
+  const shape = shapeBrowse(answers);
+  const leadCategory = shape.shaped ? shape.categories[0] : null;
+  const filters = useMemo(() => filtersFor(shape.chips, leadCategory), [shape.chips, leadCategory]);
+
   const [active, setActive] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(FILTERS.map((f) => [f.label, !!f.active])),
+    Object.fromEntries(filters.map((f) => [f.label, !!f.active])),
   );
 
   return (
@@ -65,7 +86,11 @@ export default function SearchScreen() {
       {/* App bar */}
       <View style={styles.appBar}>
         <IconButton name="chevron-left" onPress={() => router.back()} accessibilityLabel="Back" />
-        <SearchBar value="Tutor · K–8 math" onPress={() => {}} style={styles.search} />
+        <SearchBar
+          value={leadCategory ? `${leadCategory} · near you` : 'Tutor · K–8 math'}
+          onPress={() => {}}
+          style={styles.search}
+        />
         <IconButton name="sliders" accessibilityLabel="Filters" style={styles.filterBtn} />
       </View>
 
@@ -76,7 +101,7 @@ export default function SearchScreen() {
         style={styles.chips}
         contentContainerStyle={styles.chipsContent}
       >
-        {FILTERS.map((f) => (
+        {filters.map((f) => (
           <FilterChip
             key={f.label}
             label={f.label}

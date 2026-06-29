@@ -6,7 +6,8 @@
  * and a "Find help for your family" 2×2 category grid that routes into search.
  * UI scaffold — inline sample data, no fetching.
  */
-import { useRouter } from 'expo-router';
+import { useRouter, type Href } from 'expo-router';
+import { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Icon, type IconName } from '@/components/Icon';
@@ -17,7 +18,11 @@ import { Chip } from '@/components/ui/Chip';
 import { IconButton } from '@/components/ui/IconButton';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { SectionHeader } from '@/components/ui/SectionHeader';
+import { usePreview } from '@/preview/PreviewProvider';
+import { shapeBrowse, summarizeAnswers } from '@/preview/questionnaire';
 import { colors, fonts, radii, shadow, type ColorToken } from '@/theme/tokens';
+
+const ADJUST_QUESTIONNAIRE = '/(app)/preview-questionnaire?adjust=1' as Href;
 
 interface OpenJob {
   cat: Category;
@@ -51,6 +56,21 @@ const APP_TONES: ColorToken[] = ['catTutor', 'catBaby', 'catNanny'];
 
 export function ParentHome() {
   const router = useRouter();
+  const { answers } = usePreview();
+
+  // The ephemeral preview answers re-order the category grid so the most relevant
+  // care leads the first browse (story 111). No answers → the default order.
+  const shape = shapeBrowse(answers);
+  const summary = summarizeAnswers(answers);
+  const categories = useMemo(() => {
+    const byName = new Map(CATEGORIES.map((c) => [c.name, c]));
+    const ordered = shape.categories
+      .map((name) => byName.get(name))
+      .filter((c): c is CategoryTile => Boolean(c));
+    // Keep any tiles the shaping didn't mention (defensive — currently none).
+    for (const c of CATEGORIES) if (!ordered.includes(c)) ordered.push(c);
+    return ordered;
+  }, [shape]);
 
   return (
     <Screen scroll edges={['top']} contentStyle={styles.content}>
@@ -62,7 +82,7 @@ export function ParentHome() {
         <View style={styles.cluster}>
           <IconButton name="bell" badge accessibilityLabel="Notifications" />
           <IconButton name="message" onPress={() => router.push('/messages')} accessibilityLabel="Messages" />
-          <IconButton name="calendar" onPress={() => router.push('/schedule')} accessibilityLabel="Schedule" />
+          <IconButton name="calendar" onPress={() => router.push('/bookings')} accessibilityLabel="Bookings" />
         </View>
       </View>
 
@@ -108,7 +128,7 @@ export function ParentHome() {
         Post a Job
       </PrimaryButton>
       <Text style={styles.postHelper}>
-        Can't find the right fit? Describe what you need — Caregivers apply to you.
+        Can&apos;t find the right fit? Describe what you need — Caregivers apply to you.
       </Text>
 
       {/* My open Jobs rail */}
@@ -149,6 +169,28 @@ export function ParentHome() {
         ))}
       </ScrollView>
 
+      {/* Personalised browse banner — shows when the ephemeral preview answers
+          actually re-shaped the grid; taps back into the questionnaire. */}
+      {summary && shape.shaped ? (
+        <Pressable
+          onPress={() => router.push(ADJUST_QUESTIONNAIRE)}
+          accessibilityRole="button"
+          accessibilityLabel="Adjust your browse preferences"
+          style={({ pressed }) => [styles.personalBanner, { opacity: pressed ? 0.92 : 1 }]}
+        >
+          <View style={styles.personalIcon}>
+            <Icon name="sparkle" size={16} color={colors.brand} />
+          </View>
+          <View style={styles.personalText}>
+            <Text style={styles.personalTitle}>Personalised for you</Text>
+            <Text style={styles.personalMeta} numberOfLines={1}>
+              {summary}
+            </Text>
+          </View>
+          <Text style={styles.personalAdjust}>Adjust</Text>
+        </Pressable>
+      ) : null}
+
       {/* Find help for your family */}
       <SectionHeader
         title="Find help for your family"
@@ -161,7 +203,7 @@ export function ParentHome() {
         style={styles.findHeader}
       />
       <View style={styles.grid}>
-        {CATEGORIES.map((cat) => (
+        {categories.map((cat) => (
           <Pressable
             key={cat.name}
             onPress={() => router.push('/search')}
@@ -238,6 +280,30 @@ const styles = StyleSheet.create({
   jobDesc: { fontFamily: fonts.semibold, fontSize: 14, lineHeight: 19, color: colors.ink },
   jobBottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 'auto' },
   jobDays: { fontFamily: fonts.regular, fontSize: 11, color: colors.ink3 },
+
+  personalBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 26,
+    padding: 12,
+    borderRadius: radii.lg,
+    backgroundColor: colors.brandSoft,
+    borderWidth: 1,
+    borderColor: colors.brand,
+  },
+  personalIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: radii.pill,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  personalText: { flex: 1, minWidth: 0 },
+  personalTitle: { fontFamily: fonts.semibold, fontSize: 14, color: colors.ink },
+  personalMeta: { fontFamily: fonts.regular, fontSize: 12, color: colors.ink2, marginTop: 2, textTransform: 'capitalize' },
+  personalAdjust: { fontFamily: fonts.semibold, fontSize: 13, color: colors.brand },
 
   findHeader: { marginTop: 26, marginBottom: 12 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 12 },
