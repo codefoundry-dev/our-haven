@@ -52,6 +52,15 @@ export type ProviderCredentialStatus = ProviderClinicalProfile['credentialStatus
 export type ConsultationSlot = paths['/v1/providers/me/consultation-slots']['get']['responses'][200]['content']['application/json']['slots'][number];
 export type ConsultationSlotCreateBody = paths['/v1/providers/me/consultation-slots']['post']['requestBody']['content']['application/json'];
 
+// Unified Search (OH-201) — one Parent-facing surface across Caregivers + Providers.
+export type SearchResponse = paths['/v1/search']['get']['responses'][200]['content']['application/json'];
+export type SearchQuery = NonNullable<paths['/v1/search']['get']['parameters']['query']>;
+export type SearchResultItem = SearchResponse['results'][number];
+export type SearchResultCard = Extract<SearchResultItem, { kind: 'full' }>['card'];
+export type SearchBlurredCard = Extract<SearchResultItem, { kind: 'blurred' }>['card'];
+export type SearchSupplyRole = SearchResultCard['role'];
+export type SearchCta = SearchResultCard['ctas'][number];
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -221,4 +230,21 @@ export function publishConsultationSlot(body: ConsultationSlotCreateBody): Promi
 
 export function withdrawConsultationSlot(slotId: string): Promise<{ withdrawn: true }> {
   return del<{ withdrawn: true }>(`/v1/providers/me/consultation-slots/${slotId}`);
+}
+
+/**
+ * Unified Search (OH-201). One Parent-facing query across both supply roles —
+ * filters + the OH-180 hybrid ranking + the blur-to-unblur preview wall. The
+ * response carries `entitled` (the Subscription gate) and a rank-ordered
+ * `results` list where each item is a `full` SupplyCard or a `blurred` teaser
+ * (locked until the Parent subscribes and re-fetches as entitled).
+ */
+export function getSearch(query: SearchQuery = {}): Promise<SearchResponse> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null || value === '') continue;
+    params.set(key, String(value));
+  }
+  const qs = params.toString();
+  return get<SearchResponse>(`/v1/search${qs ? `?${qs}` : ''}`);
 }

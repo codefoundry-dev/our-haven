@@ -17,6 +17,7 @@ import { registerProviderCredentialsRoutes } from './routes/provider-credentials
 import { registerProviderProfileRoutes } from './routes/provider-profile.ts';
 import { registerProviderSubscriptionRoutes } from './routes/provider-subscription.ts';
 import { registerScreeningRoutes } from './routes/screening.ts';
+import { registerSearchRoutes } from './routes/search.ts';
 import { registerUploadRoutes } from './routes/uploads.ts';
 import { registerVerificationRoutes } from './routes/verification.ts';
 import { registerCheckrWebhookRoutes } from './routes/webhooks/checkr.ts';
@@ -67,6 +68,11 @@ export const openApiInfo = {
       name: 'subscription',
       description:
         'Subscriptions (Stripe Billing, both web-sold to dodge IAP). Provider Subscription (OH-191) — checkout + portal (Provider as Customer, not Connect); listing gated on an active subscription; plus the public corporate "Contact Us" intake (sales-led custom contract; v1 intake only). Parent Subscription (OH-193) — checkout (with Stripe Promotion Codes) + portal; an active subscription unlocks the demand-side marketplace (the M3 paywall reads the access state).',
+    },
+    {
+      name: 'search',
+      description:
+        'Unified Search (OH-201) — one Parent-facing surface across Caregivers + clinical Providers: filters (category/specialty, ZIP+radius, date/time ∩ Availability, Rate ceiling, min Rating, Tax-credit-friendly, ages-served, behaviour-comfort), the OH-180 hybrid ranking, and the blur-to-unblur preview wall (1–2 full per category for non-entitled Parents; unblurs on Subscription).',
     },
     { name: 'verification', description: 'Supply verification — state + email/phone/ID-doc facts (OH-184)' },
     {
@@ -146,6 +152,7 @@ export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerProviderSubscriptionRoutes(v1);
   registerParentSubscriptionRoutes(v1);
   registerParentProfileRoutes(v1);
+  registerSearchRoutes(v1);
   registerContactUsRoutes(v1);
   registerScreeningRoutes(v1);
   registerUploadRoutes(v1);

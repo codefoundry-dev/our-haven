@@ -37,6 +37,13 @@ tags:
       Parent Subscription (OH-193) — checkout (with Stripe Promotion Codes) +
       portal; an active subscription unlocks the demand-side marketplace (the M3
       paywall reads the access state).
+  - name: search
+    description: "Unified Search (OH-201) — one Parent-facing surface across
+      Caregivers + clinical Providers: filters (category/specialty, ZIP+radius,
+      date/time ∩ Availability, Rate ceiling, min Rating, Tax-credit-friendly,
+      ages-served, behaviour-comfort), the OH-180 hybrid ranking, and the
+      blur-to-unblur preview wall (1–2 full per category for non-entitled
+      Parents; unblurs on Subscription)."
   - name: verification
     description: Supply verification — state + email/phone/ID-doc facts (OH-184)
   - name: screening
@@ -2087,6 +2094,240 @@ components:
               - sleep-disturbance
       required:
         - safetyBehaviors
+    SearchResponse:
+      type: object
+      properties:
+        entitled:
+          type: boolean
+        total:
+          type: integer
+        fullCount:
+          type: integer
+        blurredCount:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchResultItem"
+      required:
+        - entitled
+        - total
+        - fullCount
+        - blurredCount
+        - results
+    SearchResultItem:
+      oneOf:
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - full
+            card:
+              $ref: "#/components/schemas/SearchResultCard"
+          required:
+            - kind
+            - card
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - blurred
+            card:
+              $ref: "#/components/schemas/SearchBlurredCard"
+          required:
+            - kind
+            - card
+    SearchResultCard:
+      type: object
+      properties:
+        id:
+          type: string
+        role:
+          type: string
+          enum:
+            - caregiver
+            - provider
+        categoryKey:
+          type: string
+        displayName:
+          type: string
+          nullable: true
+        headline:
+          type: string
+          nullable: true
+        photoUrl:
+          type: string
+          nullable: true
+        zip:
+          type: string
+          nullable: true
+        areaLabel:
+          type: string
+          nullable: true
+        distanceMiles:
+          type: number
+          nullable: true
+        fromRateCents:
+          type: integer
+          nullable: true
+        negotiable:
+          type: boolean
+        categories:
+          type: array
+          items:
+            type: string
+            enum:
+              - babysitter
+              - tutor
+              - nanny
+        specialty:
+          type: string
+          nullable: true
+          enum:
+            - slp
+            - ot
+            - aba
+            - psychology
+            - other
+            - null
+        agesServed:
+          type: array
+          items:
+            type: string
+            enum:
+              - infant
+              - toddler
+              - preschool
+              - school-age
+              - teen
+        behaviourComfort:
+          type: array
+          items:
+            type: string
+            enum:
+              - aggression
+              - self-injury
+              - wandering
+              - meltdowns
+              - property-destruction
+              - pica
+              - sensory-sensitivity
+              - communication-support
+              - transition-difficulty
+              - sleep-disturbance
+        taxCreditFriendly:
+          type: boolean
+        fcchBadge:
+          type: boolean
+        availabilitySummary:
+          type: string
+          nullable: true
+        ratingAverage:
+          type: number
+        ratingCount:
+          type: integer
+        ctas:
+          type: array
+          items:
+            type: string
+            enum:
+              - message
+              - book
+              - book-consultation
+      required:
+        - id
+        - role
+        - categoryKey
+        - displayName
+        - headline
+        - photoUrl
+        - zip
+        - areaLabel
+        - distanceMiles
+        - fromRateCents
+        - negotiable
+        - categories
+        - specialty
+        - agesServed
+        - behaviourComfort
+        - taxCreditFriendly
+        - fcchBadge
+        - availabilitySummary
+        - ratingAverage
+        - ratingCount
+        - ctas
+    SearchBlurredCard:
+      type: object
+      properties:
+        id:
+          type: string
+        role:
+          type: string
+          enum:
+            - caregiver
+            - provider
+        categoryKey:
+          type: string
+        categories:
+          type: array
+          items:
+            type: string
+            enum:
+              - babysitter
+              - tutor
+              - nanny
+        specialty:
+          type: string
+          nullable: true
+          enum:
+            - slp
+            - ot
+            - aba
+            - psychology
+            - other
+            - null
+        areaLabel:
+          type: string
+          nullable: true
+        fromRateCents:
+          type: integer
+          nullable: true
+        ratingAverage:
+          type: number
+        ratingCount:
+          type: integer
+        taxCreditFriendly:
+          type: boolean
+        fcchBadge:
+          type: boolean
+        locked:
+          type: boolean
+          enum:
+            - true
+      required:
+        - id
+        - role
+        - categoryKey
+        - categories
+        - specialty
+        - areaLabel
+        - fromRateCents
+        - ratingAverage
+        - ratingCount
+        - taxCreditFriendly
+        - fcchBadge
+        - locked
+    SearchError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
     ContactUsResponse:
       type: object
       properties:
@@ -4529,6 +4770,196 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ParentProfileError"
+  /v1/search:
+    get:
+      tags:
+        - search
+      summary: Unified Search across Caregivers + Providers (filters, hybrid ranking,
+        preview wall)
+      description: Returns activated, listable supply matching the filters, ranked by
+        the hybrid scorer, with the blur-to-unblur preview wall applied for
+        non-entitled Parents (top 1–2 full per category, the rest blurred
+        teasers). An entitled Parent (active|trialing Subscription) sees
+        everything unblurred. Parent-only.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            enum:
+              - all
+              - caregiver
+              - provider
+            default: all
+            description: Which supply roles to search. Default both.
+          required: false
+          description: Which supply roles to search. Default both.
+          name: role
+          in: query
+        - schema:
+            type: string
+            description: CSV of Caregiver categories (babysitter,tutor,nanny). Caregiver
+              results matching ANY are kept.
+          required: false
+          description: CSV of Caregiver categories (babysitter,tutor,nanny). Caregiver
+            results matching ANY are kept.
+          name: category
+          in: query
+        - schema:
+            type: string
+            description: CSV of Provider specialties / "license type"
+              (slp,ot,aba,psychology,other).
+          required: false
+          description: CSV of Provider specialties / "license type"
+            (slp,ot,aba,psychology,other).
+          name: specialty
+          in: query
+        - schema:
+            type: string
+            pattern: ^\d{5}$
+            description: 5-digit US ZIP — the search origin for ZIP+radius.
+          required: false
+          description: 5-digit US ZIP — the search origin for ZIP+radius.
+          name: zip
+          in: query
+        - schema:
+            type: number
+            minimum: 0
+            exclusiveMinimum: true
+            maximum: 500
+            description: Search radius in miles (default 5). Applied only to candidates
+              whose ZIP resolves to a centroid.
+          required: false
+          description: Search radius in miles (default 5). Applied only to candidates
+            whose ZIP resolves to a centroid.
+          name: radiusMiles
+          in: query
+        - schema:
+            type: string
+            pattern: ^\d{4}-\d{2}-\d{2}$
+            description: ISO date for the date/time filter (with startMin+endMin).
+          required: false
+          description: ISO date for the date/time filter (with startMin+endMin).
+          name: date
+          in: query
+        - schema:
+            type: integer
+            nullable: true
+            minimum: 0
+            maximum: 1440
+            description: Window start, minutes since midnight (0–1440).
+          required: false
+          description: Window start, minutes since midnight (0–1440).
+          name: startMin
+          in: query
+        - schema:
+            type: integer
+            nullable: true
+            minimum: 0
+            maximum: 1440
+            description: Window end, minutes since midnight (start < end ≤ 1440).
+          required: false
+          description: Window end, minutes since midnight (start < end ≤ 1440).
+          name: endMin
+          in: query
+        - schema:
+            type: integer
+            nullable: true
+            minimum: 0
+            description: Hourly Rate ceiling in cents, matched against the "from $X" lowest
+              published rate.
+          required: false
+          description: Hourly Rate ceiling in cents, matched against the "from $X" lowest
+            published rate.
+          name: maxRateCents
+          in: query
+        - schema:
+            type: number
+            nullable: true
+            minimum: 0
+            maximum: 5
+            description: "Minimum star Rating (0–5). Cold start: unrated supply passes."
+          required: false
+          description: "Minimum star Rating (0–5). Cold start: unrated supply passes."
+          name: minRating
+          in: query
+        - schema:
+            type: string
+            enum:
+              - "true"
+              - "false"
+            description: When "true", only W-10 Tax-credit-friendly Caregivers
+              (Babysitter/Nanny).
+          required: false
+          description: When "true", only W-10 Tax-credit-friendly Caregivers
+            (Babysitter/Nanny).
+          name: taxCreditFriendly
+          in: query
+        - schema:
+            type: string
+            description: CSV of age bands (infant,toddler,preschool,school-age,teen).
+              Matches on overlap.
+          required: false
+          description: CSV of age bands (infant,toddler,preschool,school-age,teen).
+            Matches on overlap.
+          name: agesServed
+          in: query
+        - schema:
+            type: string
+            description: CSV of Safety-Behaviors (Caregiver behaviour-comfort). Matches on
+              overlap.
+          required: false
+          description: CSV of Safety-Behaviors (Caregiver behaviour-comfort). Matches on
+            overlap.
+          name: behaviourComfort
+          in: query
+        - schema:
+            type: string
+            enum:
+              - in_person
+              - telehealth
+            description: Provider delivery mode. Accepted but NOT YET applied (no backing
+              column).
+          required: false
+          description: Provider delivery mode. Accepted but NOT YET applied (no backing
+            column).
+          name: delivery
+          in: query
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 60
+            description: Max results returned (the top-ranked page). Default 60.
+          required: false
+          description: Max results returned (the top-ranked page). Default 60.
+          name: limit
+          in: query
+      responses:
+        "200":
+          description: Ranked, preview-walled search results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponse"
+        "400":
+          description: Invalid date/time window
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchError"
+        "403":
+          description: Wrong role (caregiver / provider / admin)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchError"
   /v1/providers/contact-us:
     post:
       tags:
