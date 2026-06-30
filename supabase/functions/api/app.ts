@@ -12,6 +12,7 @@ import { registerCaregiverProfileRoutes } from './routes/caregiver-profile.ts';
 import { registerConsultationBookingRoutes } from './routes/consultation-bookings.ts';
 import { registerContactUsRoutes } from './routes/contact-us.ts';
 import { registerHealthRoutes } from './routes/health.ts';
+import { registerMessagingRoutes } from './routes/messaging.ts';
 import { registerParentProfileRoutes } from './routes/parent-profile.ts';
 import { registerParentSubscriptionRoutes } from './routes/parent-subscription.ts';
 import { registerProviderCredentialsRoutes } from './routes/provider-credentials.ts';
@@ -80,6 +81,11 @@ export const openApiInfo = {
       name: 'bookings',
       description:
         'Provider consultation booking (OH-203) — a Parent books an open consultation slot (slot-pick); the per-session Booking is born `accepted` with NULL payment (off-platform; no Job/Offer/payment-intent), holds the slot, shows on both schedules, and auto-completes after the slot. Parent-Subscription-gated.',
+    },
+    {
+      name: 'messaging',
+      description:
+        'In-app Messaging (OH-205) — pre-acceptance Parent↔Caregiver Direct-Message threads (Caregiver-only, ADR-0011), Supabase Realtime delivery, and disintermediation redaction at write time (the unredacted original is queued to the service-role-only Trust & Safety flag table). Opening a thread + a Parent send are Parent-Subscription-gated.',
     },
     { name: 'verification', description: 'Supply verification — state + email/phone/ID-doc facts (OH-184)' },
     {
@@ -162,6 +168,7 @@ export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerSearchRoutes(v1);
   registerSupplyProfileRoutes(v1);
   registerConsultationBookingRoutes(v1);
+  registerMessagingRoutes(v1);
   registerContactUsRoutes(v1);
   registerScreeningRoutes(v1);
   registerUploadRoutes(v1);

@@ -50,6 +50,12 @@ tags:
       with NULL payment (off-platform; no Job/Offer/payment-intent), holds the
       slot, shows on both schedules, and auto-completes after the slot.
       Parent-Subscription-gated.
+  - name: messaging
+    description: In-app Messaging (OH-205) — pre-acceptance Parent↔Caregiver
+      Direct-Message threads (Caregiver-only, ADR-0011), Supabase Realtime
+      delivery, and disintermediation redaction at write time (the unredacted
+      original is queued to the service-role-only Trust & Safety flag table).
+      Opening a thread + a Parent send are Parent-Subscription-gated.
   - name: verification
     description: Supply verification — state + email/phone/ID-doc facts (OH-184)
   - name: screening
@@ -2713,6 +2719,109 @@ components:
       required:
         - id
         - state
+    MessageThreadSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        providerId:
+          type: string
+        counterpartyName:
+          type: string
+          nullable: true
+        counterpartyRole:
+          type: string
+          enum:
+            - parent
+            - caregiver
+            - provider
+        anchor:
+          type: string
+          enum:
+            - thread
+            - job
+        lastMessagePreview:
+          type: string
+          nullable: true
+        lastMessageAt:
+          type: string
+        lastMessageRedacted:
+          type: boolean
+      required:
+        - id
+        - providerId
+        - counterpartyName
+        - counterpartyRole
+        - anchor
+        - lastMessagePreview
+        - lastMessageAt
+        - lastMessageRedacted
+    MessagingError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
+    OpenThreadRequest:
+      type: object
+      properties:
+        providerId:
+          type: string
+          format: uuid
+      required:
+        - providerId
+    MessageThreadList:
+      type: object
+      properties:
+        threads:
+          type: array
+          items:
+            $ref: "#/components/schemas/MessageThreadSummary"
+      required:
+        - threads
+    MessageList:
+      type: object
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/Message"
+      required:
+        - messages
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+        threadId:
+          type: string
+        senderUid:
+          type: string
+        body:
+          type: string
+        redacted:
+          type: boolean
+        createdAt:
+          type: string
+      required:
+        - id
+        - threadId
+        - senderUid
+        - body
+        - redacted
+        - createdAt
+    SendMessageRequest:
+      type: object
+      properties:
+        body:
+          type: string
+          minLength: 1
+          maxLength: 4000
+      required:
+        - body
     ContactUsResponse:
       type: object
       properties:
@@ -5547,6 +5656,194 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ConsultationBookingError"
+  /v1/threads:
+    post:
+      tags:
+        - messaging
+      summary: Open (get-or-create) a Direct-Message thread with a Caregiver — OH-205
+      description: Parent-only, idempotent get-or-create of the pre-acceptance
+        Direct-Message thread with a listable Caregiver (ADR-0011 — DM is
+        Caregiver-only). Parent-Subscription-gated (402 on the free browse
+        account). 404 if the supply member is unknown, not a Caregiver, or not
+        listable (paused/unverified) — never reveal hidden supply.
+      security:
+        - supabaseAccessToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpenThreadRequest"
+      responses:
+        "200":
+          description: Thread (existing or newly created)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageThreadSummary"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessagingError"
+        "402":
+          description: No active Parent Subscription — messaging gated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessagingError"
+        "403":
+          description: Wrong role (caregiver / provider / admin)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessagingError"
+        "404":
+          description: Caregiver not found / not listable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessagingError"
+    get:
+      tags:
+        - messaging
+      summary: The caller's inbox (their Direct-Message threads) — OH-205
+      description: Returns the authenticated caller's threads from their viewer
+        perspective — a Parent sees the Caregivers they messaged; a Caregiver
+        sees the Parents who messaged them — newest activity first. (Provider
+        threads do not exist in v1 → empty.)
+      security:
+        - supabaseAccessToken: []
+      responses:
+        "200":
+          description: The caller's threads
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageThreadList"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessagingError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessagingError"
+  /v1/threads/{threadId}/messages:
+    get:
+      tags:
+        - messaging
+      summary: A thread's transcript (delivery-safe) — OH-205
+      description: Returns a thread's messages (oldest first) for a participant.
+        Bodies are already redacted (delivery-safe). 404 if the thread is
+        unknown or not the caller's — never reveal another's thread.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: threadId
+          in: path
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+          required: false
+          name: limit
+          in: query
+      responses:
+        "200":
+          description: The transcript
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageList"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessagingError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessagingError"
+        "404":
+          description: Thread not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessagingError"
+    post:
+      tags:
+        - messaging
+      summary: Send a message (redacted at delivery) — OH-205
+      description: Sends a message into a thread the caller participates in. The body
+        is run through the disintermediation detector and stored REDACTED
+        (delivery-safe) — the unredacted original is queued for Trust & Safety.
+        A Parent send is Parent-Subscription-gated (402); Caregiver replies are
+        not. 404 if the thread is not the caller's.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: threadId
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendMessageRequest"
+      responses:
+        "201":
+          description: Delivered (redacted) message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+        "400":
+          description: Empty message body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessagingError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessagingError"
+        "402":
+          description: No active Parent Subscription — messaging gated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessagingError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessagingError"
+        "404":
+          description: Thread not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessagingError"
   /v1/providers/contact-us:
     post:
       tags:

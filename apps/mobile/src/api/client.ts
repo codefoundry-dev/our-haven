@@ -323,3 +323,37 @@ export function createParentCheckoutLink(body: ParentCheckoutLinkBody = {}): Pro
 export function createParentPortalLink(): Promise<ParentPortalLink> {
   return post<ParentPortalLink>('/v1/parents/me/subscription/portal-link', undefined);
 }
+
+/**
+ * In-app Messaging (OH-205). `openThread` is the Parent's idempotent
+ * get-or-create of a pre-acceptance Direct-Message thread with a Caregiver
+ * (402 when not subscribed, 404 when the Caregiver is not listable); `getThreads`
+ * is the caller's inbox (Parent or Caregiver viewer perspective);
+ * `getThreadMessages` reads a thread's transcript (bodies already redacted —
+ * delivery-safe); `sendMessage` posts a message (redacted at write time, the
+ * unredacted original queued for Trust & Safety; a Parent send is
+ * Subscription-gated). Live delivery is via Supabase Realtime on the `messages`
+ * table (see lib/useMessageThread) — these calls are the initial load + send.
+ */
+
+export type MessageThreadSummary = paths['/v1/threads']['get']['responses'][200]['content']['application/json']['threads'][number];
+export type ChatMessage = paths['/v1/threads/{threadId}/messages']['get']['responses'][200]['content']['application/json']['messages'][number];
+type OpenThreadBody = paths['/v1/threads']['post']['requestBody']['content']['application/json'];
+type SendMessageBody = paths['/v1/threads/{threadId}/messages']['post']['requestBody']['content']['application/json'];
+
+export function openThread(providerId: string): Promise<MessageThreadSummary> {
+  return post<MessageThreadSummary>('/v1/threads', { providerId } satisfies OpenThreadBody);
+}
+
+export function getThreads(): Promise<MessageThreadSummary[]> {
+  return get<{ threads: MessageThreadSummary[] }>('/v1/threads').then((r) => r.threads);
+}
+
+export function getThreadMessages(threadId: string, limit?: number): Promise<ChatMessage[]> {
+  const qs = limit ? `?limit=${limit}` : '';
+  return get<{ messages: ChatMessage[] }>(`/v1/threads/${threadId}/messages${qs}`).then((r) => r.messages);
+}
+
+export function sendMessage(threadId: string, body: string): Promise<ChatMessage> {
+  return post<ChatMessage>(`/v1/threads/${threadId}/messages`, { body } satisfies SendMessageBody);
+}
