@@ -3071,6 +3071,103 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Unified Search across Caregivers + Providers (filters, hybrid ranking, preview wall)
+         * @description Returns activated, listable supply matching the filters, ranked by the hybrid scorer, with the blur-to-unblur preview wall applied for non-entitled Parents (top 1–2 full per category, the rest blurred teasers). An entitled Parent (active|trialing Subscription) sees everything unblurred. Parent-only.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Which supply roles to search. Default both. */
+                    role?: "all" | "caregiver" | "provider";
+                    /** @description CSV of Caregiver categories (babysitter,tutor,nanny). Caregiver results matching ANY are kept. */
+                    category?: string;
+                    /** @description CSV of Provider specialties / "license type" (slp,ot,aba,psychology,other). */
+                    specialty?: string;
+                    /** @description 5-digit US ZIP — the search origin for ZIP+radius. */
+                    zip?: string;
+                    /** @description Search radius in miles (default 5). Applied only to candidates whose ZIP resolves to a centroid. */
+                    radiusMiles?: number;
+                    /** @description ISO date for the date/time filter (with startMin+endMin). */
+                    date?: string;
+                    /** @description Window start, minutes since midnight (0–1440). */
+                    startMin?: number | null;
+                    /** @description Window end, minutes since midnight (start < end ≤ 1440). */
+                    endMin?: number | null;
+                    /** @description Hourly Rate ceiling in cents, matched against the "from $X" lowest published rate. */
+                    maxRateCents?: number | null;
+                    /** @description Minimum star Rating (0–5). Cold start: unrated supply passes. */
+                    minRating?: number | null;
+                    /** @description When "true", only W-10 Tax-credit-friendly Caregivers (Babysitter/Nanny). */
+                    taxCreditFriendly?: "true" | "false";
+                    /** @description CSV of age bands (infant,toddler,preschool,school-age,teen). Matches on overlap. */
+                    agesServed?: string;
+                    /** @description CSV of Safety-Behaviors (Caregiver behaviour-comfort). Matches on overlap. */
+                    behaviourComfort?: string;
+                    /** @description Provider delivery mode. Accepted but NOT YET applied (no backing column). */
+                    delivery?: "in_person" | "telehealth";
+                    /** @description Max results returned (the top-ranked page). Default 60. */
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Ranked, preview-walled search results */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SearchResponse"];
+                    };
+                };
+                /** @description Invalid date/time window */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SearchError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SearchError"];
+                    };
+                };
+                /** @description Wrong role (caregiver / provider / admin) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SearchError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/providers/contact-us": {
         parameters: {
             query?: never;
@@ -4222,6 +4319,68 @@ export interface components {
         };
         ParentSafetyBehaviorsRequest: {
             safetyBehaviors: ("aggression" | "self-injury" | "wandering" | "meltdowns" | "property-destruction" | "pica" | "sensory-sensitivity" | "communication-support" | "transition-difficulty" | "sleep-disturbance")[];
+        };
+        SearchResponse: {
+            entitled: boolean;
+            total: number;
+            fullCount: number;
+            blurredCount: number;
+            results: components["schemas"]["SearchResultItem"][];
+        };
+        SearchResultItem: {
+            /** @enum {string} */
+            kind: "full";
+            card: components["schemas"]["SearchResultCard"];
+        } | {
+            /** @enum {string} */
+            kind: "blurred";
+            card: components["schemas"]["SearchBlurredCard"];
+        };
+        SearchResultCard: {
+            id: string;
+            /** @enum {string} */
+            role: "caregiver" | "provider";
+            categoryKey: string;
+            displayName: string | null;
+            headline: string | null;
+            photoUrl: string | null;
+            zip: string | null;
+            areaLabel: string | null;
+            distanceMiles: number | null;
+            fromRateCents: number | null;
+            negotiable: boolean;
+            categories: ("babysitter" | "tutor" | "nanny")[];
+            /** @enum {string|null} */
+            specialty: "slp" | "ot" | "aba" | "psychology" | "other" | null;
+            agesServed: ("infant" | "toddler" | "preschool" | "school-age" | "teen")[];
+            behaviourComfort: ("aggression" | "self-injury" | "wandering" | "meltdowns" | "property-destruction" | "pica" | "sensory-sensitivity" | "communication-support" | "transition-difficulty" | "sleep-disturbance")[];
+            taxCreditFriendly: boolean;
+            fcchBadge: boolean;
+            availabilitySummary: string | null;
+            ratingAverage: number;
+            ratingCount: number;
+            ctas: ("message" | "book" | "book-consultation")[];
+        };
+        SearchBlurredCard: {
+            id: string;
+            /** @enum {string} */
+            role: "caregiver" | "provider";
+            categoryKey: string;
+            categories: ("babysitter" | "tutor" | "nanny")[];
+            /** @enum {string|null} */
+            specialty: "slp" | "ot" | "aba" | "psychology" | "other" | null;
+            areaLabel: string | null;
+            fromRateCents: number | null;
+            ratingAverage: number;
+            ratingCount: number;
+            taxCreditFriendly: boolean;
+            fcchBadge: boolean;
+            /** @enum {boolean} */
+            locked: true;
+        };
+        SearchError: {
+            error: string;
+            reason?: string;
         };
         ContactUsResponse: {
             id: string;
