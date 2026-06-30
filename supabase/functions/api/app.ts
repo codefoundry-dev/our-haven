@@ -13,6 +13,7 @@ import { registerConsultationBookingRoutes } from './routes/consultation-booking
 import { registerContactUsRoutes } from './routes/contact-us.ts';
 import { registerHealthRoutes } from './routes/health.ts';
 import { registerMessagingRoutes } from './routes/messaging.ts';
+import { registerOfferRoutes } from './routes/offers.ts';
 import { registerParentProfileRoutes } from './routes/parent-profile.ts';
 import { registerParentSubscriptionRoutes } from './routes/parent-subscription.ts';
 import { registerProviderCredentialsRoutes } from './routes/provider-credentials.ts';
@@ -169,6 +170,7 @@ export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerSupplyProfileRoutes(v1);
   registerConsultationBookingRoutes(v1);
   registerMessagingRoutes(v1);
+  registerOfferRoutes(v1);
   registerContactUsRoutes(v1);
   registerScreeningRoutes(v1);
   registerUploadRoutes(v1);

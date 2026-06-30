@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest';
 import type { OfferSchedule } from './index.js';
 import {
   canCounter,
-  computeOfferTotal,
   defaultValidUntil,
   initialOfferState,
   isExpiredAt,
@@ -16,7 +15,6 @@ import {
   OFFER_STATES,
   OFFER_TERMINAL_STATES,
   OFFER_VALID_UNTIL_DEFAULT_HOURS,
-  offerTotalIsConsistent,
   snapshotInvariantsHold,
   transitionOffer,
   type Offer,
@@ -26,6 +24,7 @@ import {
   type OfferShape,
   type OfferState,
 } from './index.js';
+import { computeOfferTotal, offerTotalIsConsistent } from './total.js';
 
 const T0 = new Date('2026-05-28T12:00:00.000Z');
 const T_VALID = new Date('2026-05-30T12:00:00.000Z'); // 48h after T0 (< 72h default)

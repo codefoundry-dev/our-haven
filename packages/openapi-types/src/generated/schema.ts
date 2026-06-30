@@ -3728,6 +3728,532 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/threads/{threadId}/offers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A thread's Offers (merged into the transcript) — OH-206
+         * @description Returns a thread's Offers (oldest first) for a participant. The exact service address is withheld from the Caregiver until an Offer is accepted. 404 if the thread isn't the caller's.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    threadId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The thread's Offers */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferList"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Thread not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Compose + send a structured Offer / Book-request — OH-206
+         * @description Sends a structured Offer into a thread the caller participates in. A Parent send is Parent-Subscription-gated (402). The Safety-Behaviors disclosure is REQUIRED (disclose a subset or explicitly none — ADR-0016). When the Caregiver is non-negotiable, a Parent's rate is locked to the published per-category Rate (ADR-0017). The free-text scope_note is redacted at write time. 400 on an invalid schedule (recurring not yet composable), child-detail, or a category the Caregiver doesn't offer. 404 if the thread isn't the caller's.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    threadId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ComposeOfferRequest"];
+                };
+            };
+            responses: {
+                /** @description The created Offer */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Offer"];
+                    };
+                };
+                /** @description Invalid Offer */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description No active Parent Subscription */
+                402: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Thread not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/offers/{offerId}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept an Offer (status → accepted) — OH-206
+         * @description The counterparty accepts a pending Offer. A Parent accept is Parent-Subscription-gated. (The atomic Booking materialisation + thread rebind on accept is OH-207.) 409 if the Offer is not pending or has expired.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    offerId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The updated Offer */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Offer"];
+                    };
+                };
+                /** @description Invalid transition input */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description No active Parent Subscription */
+                402: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Offer not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Transition not allowed from the Offer's current state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/offers/{offerId}/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decline an Offer — OH-206
+         * @description The counterparty declines a pending Offer (status → declined). Never gated.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    offerId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The updated Offer */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Offer"];
+                    };
+                };
+                /** @description Invalid transition input */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description No active Parent Subscription */
+                402: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Offer not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Transition not allowed from the Offer's current state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/offers/{offerId}/withdraw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Withdraw an Offer — OH-206
+         * @description The sender withdraws their own Offer (status → withdrawn) from pending or accepted. (Cascade-cancelling Bookings a withdrawn-accepted Offer materialised is OH-207 — no Bookings exist yet.) Never gated.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    offerId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The updated Offer */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Offer"];
+                    };
+                };
+                /** @description Invalid transition input */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description No active Parent Subscription */
+                402: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Offer not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Transition not allowed from the Offer's current state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/offers/{offerId}/counter": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Counter an Offer (opens a successor) — OH-206
+         * @description The counterparty counters a pending Offer with revised rate / schedule / note, opening a fresh pending successor Offer (child detail, category, and address inherited). Refused (409) when the Caregiver is non-negotiable (ADR-0017). A Parent counter is gated.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    offerId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CounterOfferRequest"];
+                };
+            };
+            responses: {
+                /** @description The updated Offer */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Offer"];
+                    };
+                };
+                /** @description Invalid transition input */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description No active Parent Subscription */
+                402: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Offer not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Transition not allowed from the Offer's current state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/providers/contact-us": {
         parameters: {
             query?: never;
@@ -5087,6 +5613,85 @@ export interface components {
         };
         SendMessageRequest: {
             body: string;
+        };
+        Offer: {
+            id: string;
+            threadId: string;
+            senderUid: string;
+            /** @enum {string} */
+            sender: "parent" | "caregiver";
+            /** @enum {string} */
+            status: "pending" | "accepted" | "countered" | "declined" | "expired" | "withdrawn";
+            /** @enum {string} */
+            category: "babysitter" | "tutor" | "nanny";
+            proposedRateCents: number;
+            scopeMinutes: number;
+            perChildSurchargeCents: number;
+            computedTotalCents: number;
+            scopeNote: string;
+            scopeNoteRedacted: boolean;
+            negotiable: boolean;
+            validUntil: string;
+            childCount: number;
+            childAges: number[];
+            safetyBehaviors: string[];
+            serviceAddress: {
+                line1: string | null;
+                line2: string | null;
+                city: string | null;
+                state: string | null;
+                postalCode: string | null;
+            } | null;
+            /** @enum {string} */
+            scheduleKind: "one-off" | "multi-day" | "recurring";
+            slots: components["schemas"]["OfferSlot"][];
+            supersedesOfferId: string | null;
+            createdAt: string;
+            updatedAt: string;
+        };
+        OfferSlot: {
+            date: string;
+            startMin: number;
+            endMin: number;
+        };
+        OfferError: {
+            error: string;
+            reason?: string;
+        };
+        ComposeOfferRequest: {
+            /** @enum {string} */
+            category: "babysitter" | "tutor" | "nanny";
+            proposedRateCents: number;
+            childCount: number;
+            childAges: number[];
+            safetyBehaviors: ("aggression" | "self-injury" | "wandering" | "meltdowns" | "property-destruction" | "pica" | "sensory-sensitivity" | "communication-support" | "transition-difficulty" | "sleep-disturbance")[];
+            serviceAddress?: components["schemas"]["OfferServiceAddress"];
+            scopeNote?: string;
+            schedule: components["schemas"]["OfferSchedule"];
+        };
+        OfferServiceAddress: {
+            line1?: string | null;
+            line2?: string | null;
+            city?: string | null;
+            state?: string | null;
+            postalCode?: string | null;
+        } | null;
+        OfferSchedule: {
+            /** @enum {string} */
+            kind: "one-off";
+            slot: components["schemas"]["OfferSlot"];
+        } | {
+            /** @enum {string} */
+            kind: "multi-day";
+            slots: components["schemas"]["OfferSlot"][];
+        };
+        OfferList: {
+            offers: components["schemas"]["Offer"][];
+        };
+        CounterOfferRequest: {
+            proposedRateCents: number;
+            scopeNote?: string;
+            schedule: components["schemas"]["OfferSchedule"];
         };
         ContactUsResponse: {
             id: string;

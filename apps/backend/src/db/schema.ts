@@ -462,7 +462,10 @@ export interface MessagesTable {
  */
 export interface MessageFlagsTable {
   id: Generated<string>;
-  message_id: string;
+  // Exactly one of message_id / offer_id is set (DB-checked). offer_id covers a
+  // flagged Offer `scope_note` (OH-206; PRD story 109) in the same T&S queue.
+  message_id: string | null;
+  offer_id: ColumnType<string | null, string | null | undefined, string | null>;
   thread_id: string;
   sender_uid: string;
   categories: ColumnType<string[], string[], string[]>;
@@ -471,6 +474,78 @@ export interface MessageFlagsTable {
   created_at: Generated<Date>;
   reviewed_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
   reviewed_by: string | null;
+}
+
+/** One concrete session slot on an Offer's schedule (jsonb; mirrors the domain
+ *  `BookingSlot`). `date` is an ISO `YYYY-MM-DD`; times are minutes-from-midnight. */
+export interface OfferSlotRow {
+  date: string;
+  startMin: number;
+  endMin: number;
+}
+
+/** Anchored weekly recurrence rule on an Offer (jsonb; mirrors the domain
+ *  `RecurrenceRule`). `weekdays` are 0=Sun..6=Sat. */
+export interface OfferRecurrenceRow {
+  startDate: string;
+  endDate: string;
+  weekdays: number[];
+  startMin: number;
+  endMin: number;
+}
+
+export type OfferStatus =
+  | 'pending'
+  | 'accepted'
+  | 'countered'
+  | 'declined'
+  | 'expired'
+  | 'withdrawn';
+
+/**
+ * A structured Offer / Book-request (OH-206; CONTEXT § Offer) anchored to a
+ * Direct-Message thread and rendered inline as an Offer bubble. Carries a MUTABLE
+ * `status`. SERVICE-ROLE-ONLY (RLS enabled, no SELECT policy; NOT Realtime-
+ * published): an Offer row holds the exact service address, which must stay hidden
+ * from the Caregiver until accept (story 124), so all reads go through the Edge
+ * GET which projects the address per viewer + status. The pricing-snapshot +
+ * child-detail + address fields are compose-time copies that never re-derive from
+ * the Caregiver/Parent profile. `slots`/`recurrence` are jsonb (raw JS write). The
+ * accept→materialisation (Job/Application/Booking + thread rebind via `job_id`)
+ * is OH-207, so `job_id` is NULL throughout OH-206.
+ */
+export interface OffersTable {
+  id: Generated<string>;
+  thread_id: string;
+  sender_uid: string;
+  sender: 'parent' | 'caregiver';
+  status: ColumnType<OfferStatus, OfferStatus | undefined, OfferStatus>;
+  category: 'babysitter' | 'tutor' | 'nanny';
+  proposed_rate_cents: number;
+  scope_minutes: number;
+  per_child_surcharge_cents: ColumnType<number, number | undefined, number>;
+  computed_total_cents: number;
+  scope_note: ColumnType<string, string | undefined, string>;
+  scope_note_redacted: ColumnType<boolean, boolean | undefined, boolean>;
+  negotiable: boolean;
+  valid_until: ColumnType<Date, Date | string, Date | string>;
+  child_count: number;
+  child_ages: ColumnType<number[], number[] | undefined, number[]>;
+  safety_behaviors: ColumnType<string[], string[] | undefined, string[]>;
+  service_address_line1: string | null;
+  service_address_line2: string | null;
+  service_city: string | null;
+  service_state: string | null;
+  service_postal_code: string | null;
+  schedule_kind: 'one-off' | 'multi-day' | 'recurring';
+  // jsonb — read as the parsed shape (postgres.js parses jsonb on read) and
+  // written as a raw JS value (the same pattern as stripe_tax tax_breakdown).
+  slots: ColumnType<OfferSlotRow[], OfferSlotRow[] | undefined, OfferSlotRow[]>;
+  recurrence: ColumnType<OfferRecurrenceRow | null, OfferRecurrenceRow | null | undefined, OfferRecurrenceRow | null>;
+  supersedes_offer_id: string | null;
+  job_id: string | null;
+  created_at: Generated<Date>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
 }
 
 /**
@@ -548,6 +623,7 @@ export interface Database {
   message_threads: MessageThreadsTable;
   messages: MessagesTable;
   message_flags: MessageFlagsTable;
+  offers: OffersTable;
   notification_outbox: NotificationOutboxTable;
   notification_push_tokens: NotificationPushTokensTable;
   notification_web_push_subscriptions: NotificationWebPushSubscriptionsTable;

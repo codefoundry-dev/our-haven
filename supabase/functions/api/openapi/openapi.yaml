@@ -2822,6 +2822,283 @@ components:
           maxLength: 4000
       required:
         - body
+    Offer:
+      type: object
+      properties:
+        id:
+          type: string
+        threadId:
+          type: string
+        senderUid:
+          type: string
+        sender:
+          type: string
+          enum:
+            - parent
+            - caregiver
+        status:
+          type: string
+          enum:
+            - pending
+            - accepted
+            - countered
+            - declined
+            - expired
+            - withdrawn
+        category:
+          type: string
+          enum:
+            - babysitter
+            - tutor
+            - nanny
+        proposedRateCents:
+          type: integer
+        scopeMinutes:
+          type: integer
+        perChildSurchargeCents:
+          type: integer
+        computedTotalCents:
+          type: integer
+        scopeNote:
+          type: string
+        scopeNoteRedacted:
+          type: boolean
+        negotiable:
+          type: boolean
+        validUntil:
+          type: string
+        childCount:
+          type: integer
+        childAges:
+          type: array
+          items:
+            type: integer
+        safetyBehaviors:
+          type: array
+          items:
+            type: string
+        serviceAddress:
+          type: object
+          nullable: true
+          properties:
+            line1:
+              type: string
+              nullable: true
+            line2:
+              type: string
+              nullable: true
+            city:
+              type: string
+              nullable: true
+            state:
+              type: string
+              nullable: true
+            postalCode:
+              type: string
+              nullable: true
+          required:
+            - line1
+            - line2
+            - city
+            - state
+            - postalCode
+        scheduleKind:
+          type: string
+          enum:
+            - one-off
+            - multi-day
+            - recurring
+        slots:
+          type: array
+          items:
+            $ref: "#/components/schemas/OfferSlot"
+        supersedesOfferId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required:
+        - id
+        - threadId
+        - senderUid
+        - sender
+        - status
+        - category
+        - proposedRateCents
+        - scopeMinutes
+        - perChildSurchargeCents
+        - computedTotalCents
+        - scopeNote
+        - scopeNoteRedacted
+        - negotiable
+        - validUntil
+        - childCount
+        - childAges
+        - safetyBehaviors
+        - serviceAddress
+        - scheduleKind
+        - slots
+        - supersedesOfferId
+        - createdAt
+        - updatedAt
+    OfferSlot:
+      type: object
+      properties:
+        date:
+          type: string
+          pattern: ^\d{4}-\d{2}-\d{2}$
+        startMin:
+          type: integer
+          minimum: 0
+          maximum: 1440
+        endMin:
+          type: integer
+          minimum: 0
+          maximum: 1440
+      required:
+        - date
+        - startMin
+        - endMin
+    OfferError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
+    ComposeOfferRequest:
+      type: object
+      properties:
+        category:
+          type: string
+          enum:
+            - babysitter
+            - tutor
+            - nanny
+        proposedRateCents:
+          type: integer
+          minimum: 0
+          maximum: 100000000
+        childCount:
+          type: integer
+          minimum: 1
+          maximum: 12
+        childAges:
+          type: array
+          items:
+            type: integer
+            minimum: 0
+            maximum: 17
+          maxItems: 12
+        safetyBehaviors:
+          type: array
+          items:
+            type: string
+            enum:
+              - aggression
+              - self-injury
+              - wandering
+              - meltdowns
+              - property-destruction
+              - pica
+              - sensory-sensitivity
+              - communication-support
+              - transition-difficulty
+              - sleep-disturbance
+        serviceAddress:
+          $ref: "#/components/schemas/OfferServiceAddress"
+        scopeNote:
+          type: string
+          maxLength: 280
+        schedule:
+          $ref: "#/components/schemas/OfferSchedule"
+      required:
+        - category
+        - proposedRateCents
+        - childCount
+        - childAges
+        - safetyBehaviors
+        - schedule
+    OfferServiceAddress:
+      type: object
+      nullable: true
+      properties:
+        line1:
+          type: string
+          nullable: true
+          maxLength: 120
+        line2:
+          type: string
+          nullable: true
+          maxLength: 120
+        city:
+          type: string
+          nullable: true
+          maxLength: 80
+        state:
+          type: string
+          nullable: true
+          pattern: ^[A-Z]{2}$
+        postalCode:
+          type: string
+          nullable: true
+          pattern: ^\d{5}$
+    OfferSchedule:
+      oneOf:
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - one-off
+            slot:
+              $ref: "#/components/schemas/OfferSlot"
+          required:
+            - kind
+            - slot
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - multi-day
+            slots:
+              type: array
+              items:
+                $ref: "#/components/schemas/OfferSlot"
+              minItems: 1
+              maxItems: 31
+          required:
+            - kind
+            - slots
+    OfferList:
+      type: object
+      properties:
+        offers:
+          type: array
+          items:
+            $ref: "#/components/schemas/Offer"
+      required:
+        - offers
+    CounterOfferRequest:
+      type: object
+      properties:
+        proposedRateCents:
+          type: integer
+          minimum: 0
+          maximum: 100000000
+        scopeNote:
+          type: string
+          maxLength: 280
+        schedule:
+          $ref: "#/components/schemas/OfferSchedule"
+      required:
+        - proposedRateCents
+        - schedule
     ContactUsResponse:
       type: object
       properties:
@@ -5844,6 +6121,359 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MessagingError"
+  /v1/threads/{threadId}/offers:
+    post:
+      tags:
+        - offers
+      summary: Compose + send a structured Offer / Book-request — OH-206
+      description: Sends a structured Offer into a thread the caller participates in.
+        A Parent send is Parent-Subscription-gated (402). The Safety-Behaviors
+        disclosure is REQUIRED (disclose a subset or explicitly none —
+        ADR-0016). When the Caregiver is non-negotiable, a Parent's rate is
+        locked to the published per-category Rate (ADR-0017). The free-text
+        scope_note is redacted at write time. 400 on an invalid schedule
+        (recurring not yet composable), child-detail, or a category the
+        Caregiver doesn't offer. 404 if the thread isn't the caller's.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: threadId
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ComposeOfferRequest"
+      responses:
+        "201":
+          description: The created Offer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Offer"
+        "400":
+          description: Invalid Offer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "402":
+          description: No active Parent Subscription
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "404":
+          description: Thread not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+    get:
+      tags:
+        - offers
+      summary: A thread's Offers (merged into the transcript) — OH-206
+      description: Returns a thread's Offers (oldest first) for a participant. The
+        exact service address is withheld from the Caregiver until an Offer is
+        accepted. 404 if the thread isn't the caller's.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: threadId
+          in: path
+      responses:
+        "200":
+          description: The thread's Offers
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferList"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "404":
+          description: Thread not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+  /v1/offers/{offerId}/accept:
+    post:
+      tags:
+        - offers
+      summary: Accept an Offer (status → accepted) — OH-206
+      description: The counterparty accepts a pending Offer. A Parent accept is
+        Parent-Subscription-gated. (The atomic Booking materialisation + thread
+        rebind on accept is OH-207.) 409 if the Offer is not pending or has
+        expired.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: offerId
+          in: path
+      responses:
+        "200":
+          description: The updated Offer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Offer"
+        "400":
+          description: Invalid transition input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "402":
+          description: No active Parent Subscription
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "404":
+          description: Offer not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "409":
+          description: Transition not allowed from the Offer's current state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+  /v1/offers/{offerId}/decline:
+    post:
+      tags:
+        - offers
+      summary: Decline an Offer — OH-206
+      description: The counterparty declines a pending Offer (status → declined).
+        Never gated.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: offerId
+          in: path
+      responses:
+        "200":
+          description: The updated Offer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Offer"
+        "400":
+          description: Invalid transition input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "402":
+          description: No active Parent Subscription
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "404":
+          description: Offer not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "409":
+          description: Transition not allowed from the Offer's current state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+  /v1/offers/{offerId}/withdraw:
+    post:
+      tags:
+        - offers
+      summary: Withdraw an Offer — OH-206
+      description: The sender withdraws their own Offer (status → withdrawn) from
+        pending or accepted. (Cascade-cancelling Bookings a withdrawn-accepted
+        Offer materialised is OH-207 — no Bookings exist yet.) Never gated.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: offerId
+          in: path
+      responses:
+        "200":
+          description: The updated Offer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Offer"
+        "400":
+          description: Invalid transition input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "402":
+          description: No active Parent Subscription
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "404":
+          description: Offer not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "409":
+          description: Transition not allowed from the Offer's current state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+  /v1/offers/{offerId}/counter:
+    post:
+      tags:
+        - offers
+      summary: Counter an Offer (opens a successor) — OH-206
+      description: The counterparty counters a pending Offer with revised rate /
+        schedule / note, opening a fresh pending successor Offer (child detail,
+        category, and address inherited). Refused (409) when the Caregiver is
+        non-negotiable (ADR-0017). A Parent counter is gated.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: offerId
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CounterOfferRequest"
+      responses:
+        "200":
+          description: The updated Offer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Offer"
+        "400":
+          description: Invalid transition input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "402":
+          description: No active Parent Subscription
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "404":
+          description: Offer not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "409":
+          description: Transition not allowed from the Offer's current state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
   /v1/providers/contact-us:
     post:
       tags:
