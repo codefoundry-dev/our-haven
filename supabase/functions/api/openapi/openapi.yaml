@@ -2328,6 +2328,230 @@ components:
           type: string
       required:
         - error
+    SupplyProfile:
+      type: object
+      properties:
+        id:
+          type: string
+        role:
+          type: string
+          enum:
+            - caregiver
+            - provider
+        categoryKey:
+          type: string
+        displayName:
+          type: string
+          nullable: true
+        headline:
+          type: string
+          nullable: true
+        bio:
+          type: string
+          nullable: true
+        photoUrl:
+          type: string
+          nullable: true
+        zip:
+          type: string
+          nullable: true
+        areaLabel:
+          type: string
+          nullable: true
+        distanceMiles:
+          type: number
+          nullable: true
+        fromRateCents:
+          type: integer
+          nullable: true
+        negotiable:
+          type: boolean
+        yearsExperience:
+          type: integer
+          nullable: true
+        languages:
+          type: array
+          items:
+            type: string
+        specialtyTags:
+          type: array
+          items:
+            type: string
+        categories:
+          type: array
+          items:
+            type: string
+            enum:
+              - babysitter
+              - tutor
+              - nanny
+        specialty:
+          type: string
+          nullable: true
+          enum:
+            - slp
+            - ot
+            - aba
+            - psychology
+            - other
+            - null
+        categoryRates:
+          type: array
+          items:
+            $ref: "#/components/schemas/SupplyProfileCategoryRate"
+        agesServed:
+          type: array
+          items:
+            type: string
+            enum:
+              - infant
+              - toddler
+              - preschool
+              - school-age
+              - teen
+        behaviourComfort:
+          type: array
+          items:
+            type: string
+            enum:
+              - aggression
+              - self-injury
+              - wandering
+              - meltdowns
+              - property-destruction
+              - pica
+              - sensory-sensitivity
+              - communication-support
+              - transition-difficulty
+              - sleep-disturbance
+        taxCreditFriendly:
+          type: boolean
+        fcchBadge:
+          type: boolean
+        availabilityGrid:
+          $ref: "#/components/schemas/SupplyProfileAvailabilityGrid"
+        availabilityNote:
+          type: string
+          nullable: true
+        availabilitySummary:
+          type: string
+          nullable: true
+        credentials:
+          type: array
+          items:
+            $ref: "#/components/schemas/SupplyProfileCredential"
+        rating:
+          $ref: "#/components/schemas/SupplyProfileRating"
+        ctas:
+          type: array
+          items:
+            type: string
+            enum:
+              - message
+              - book
+              - book-consultation
+      required:
+        - id
+        - role
+        - categoryKey
+        - displayName
+        - headline
+        - bio
+        - photoUrl
+        - zip
+        - areaLabel
+        - distanceMiles
+        - fromRateCents
+        - negotiable
+        - yearsExperience
+        - languages
+        - specialtyTags
+        - categories
+        - specialty
+        - categoryRates
+        - agesServed
+        - behaviourComfort
+        - taxCreditFriendly
+        - fcchBadge
+        - availabilityGrid
+        - availabilityNote
+        - availabilitySummary
+        - credentials
+        - rating
+        - ctas
+    SupplyProfileCategoryRate:
+      type: object
+      properties:
+        category:
+          type: string
+          enum:
+            - babysitter
+            - tutor
+            - nanny
+        publishedRateCents:
+          type: integer
+          minimum: 0
+        perChildSurchargeCents:
+          type: integer
+          nullable: true
+          minimum: 0
+      required:
+        - category
+        - publishedRateCents
+        - perChildSurchargeCents
+    SupplyProfileAvailabilityGrid:
+      type: object
+      additionalProperties:
+        type: object
+        additionalProperties:
+          type: boolean
+    SupplyProfileCredential:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        label:
+          type: string
+      required:
+        - id
+        - type
+        - label
+    SupplyProfileRating:
+      type: object
+      properties:
+        average:
+          type: number
+          nullable: true
+        count:
+          type: integer
+        reviews:
+          type: array
+          items:
+            type: object
+            properties:
+              stars:
+                type: integer
+              text:
+                type: string
+                nullable: true
+            required:
+              - stars
+              - text
+      required:
+        - average
+        - count
+        - reviews
+    SupplyProfileError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
     ContactUsResponse:
       type: object
       properties:
@@ -4960,6 +5184,63 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SearchError"
+  /v1/supply/{providerId}:
+    get:
+      tags:
+        - search
+      summary: Read one listable supply member's Parent-facing profile (OH-202)
+      description: 'Returns the full public profile of a single listable
+        Caregiver/Provider: identity, per-category Rates with the "from $X"
+        teaser, availability, ages-served + behaviour-comfort, languages +
+        specialty tags, badges, APPROVED Credentials only, and the public
+        Ratings (with text reviews). 404 when the id is unknown OR the supply
+        member is not listable (mirrors Search visibility). Parent-only.'
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+            description: The supply (caregiver/provider) row id, as returned by Search.
+          required: true
+          description: The supply (caregiver/provider) row id, as returned by Search.
+          name: providerId
+          in: path
+        - schema:
+            type: string
+            pattern: ^\d{5}$
+            description: The viewer's 5-digit US ZIP — the origin for the displayed
+              `distanceMiles`.
+          required: false
+          description: The viewer's 5-digit US ZIP — the origin for the displayed
+            `distanceMiles`.
+          name: zip
+          in: query
+      responses:
+        "200":
+          description: The supply member's public profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupplyProfile"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupplyProfileError"
+        "403":
+          description: Wrong role (caregiver / provider / admin)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupplyProfileError"
+        "404":
+          description: Not found or not listable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupplyProfileError"
   /v1/providers/contact-us:
     post:
       tags:

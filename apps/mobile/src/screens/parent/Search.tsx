@@ -70,7 +70,10 @@ export default function SearchScreen() {
   const blurredCount = data?.blurredCount ?? 0;
 
   const openProfile = (id: string, role: string) =>
-    router.push({ pathname: '/provider-detail', params: { id, role } });
+    router.push({
+      pathname: '/provider-detail',
+      params: { id, role, ...(filters.zip.trim() ? { zip: filters.zip.trim() } : {}) },
+    });
 
   return (
     <Screen scroll edges={['top']} contentStyle={styles.content}>
