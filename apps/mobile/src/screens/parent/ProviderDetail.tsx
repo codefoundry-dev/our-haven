@@ -33,6 +33,7 @@ import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { RatingValue } from '@/components/ui/StarRating';
 import { TabStrip } from '@/components/ui/TabStrip';
 import { ApiError, bookConsultation, type SupplyProfile } from '@/api/client';
+import { useParentGate } from '@/lib/paywallGate';
 import { useSupplyProfile } from '@/lib/useSupplyProfile';
 import {
   ageBandLabel,
@@ -59,6 +60,7 @@ export default function ProviderDetailScreen() {
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
   const [booking, setBooking] = useState(false);
   const [bookError, setBookError] = useState<string | null>(null);
+  const { gate, openPaywall } = useParentGate();
 
   if (loading) {
     return (
@@ -99,26 +101,37 @@ export default function ProviderDetailScreen() {
     data.distanceMiles != null ? `${data.distanceMiles} mi away` : data.areaLabel,
   ].filter(Boolean) as string[];
 
+  // Message / Book-request are Parent-Subscription-gated (OH-204): a not-entitled
+  // Parent is routed to the paywall, which resumes the action once subscribed.
   const openMessage = () =>
-    router.push({ pathname: '/message-thread', params: { id: data.id, name: data.displayName ?? '' } });
-  const openBooking = () => router.push({ pathname: '/booking-compose', params: { id: data.id } });
+    gate({ kind: 'message', id: data.id, name: data.displayName ?? undefined }, () =>
+      router.push({ pathname: '/message-thread', params: { id: data.id, name: data.displayName ?? '' } }),
+    );
+  const openBooking = () =>
+    gate({ kind: 'book-request', id: data.id }, () =>
+      router.push({ pathname: '/booking-compose', params: { id: data.id } }),
+    );
 
   // Consultation slot-pick (OH-203): book the selected open slot. Null payment —
-  // no checkout. 402 means the Parent membership gate (the upsell UI is OH-204).
+  // no checkout. A 402 is the Parent-Subscription gate → route to the paywall with
+  // a book-consultation intent so it re-attempts this booking once subscribed (OH-204).
   const slots = data.consultationSlots;
   const bookConsult = async () => {
-    if (!selectedSlot) {
+    const slotId = selectedSlot;
+    if (!slotId) {
       setBookError('Pick a time to book.');
       return;
     }
     setBooking(true);
     setBookError(null);
     try {
-      await bookConsultation(data.id, selectedSlot);
+      await bookConsultation(data.id, slotId);
       router.replace('/bookings');
     } catch (e) {
       if (e instanceof ApiError && e.status === 402) {
-        setBookError('A Parent membership is required to book a consultation.');
+        openPaywall({ kind: 'book-consultation', id: data.id, slotId });
+        setBooking(false);
+        return;
       } else if (e instanceof ApiError && e.status === 409) {
         setBookError('That time was just taken — pick another slot.');
         refetch();

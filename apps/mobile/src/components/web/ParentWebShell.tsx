@@ -16,6 +16,8 @@ import { useRouter } from 'expo-router';
 
 import { Icon, type IconName } from '@/components/Icon';
 import { UserMenu } from '@/components/web/UserMenu';
+import { useParentSubscription } from '@/lib/ParentSubscriptionProvider';
+import { useParentGate } from '@/lib/paywallGate';
 import { WEB_WIDE_BREAKPOINT } from '@/lib/responsive';
 import { colors, fonts, radii } from '@/theme/tokens';
 
@@ -45,6 +47,12 @@ export function ParentWebShell({ active, children }: { active: string; children:
   const { width } = useWindowDimensions();
   const wide = width >= WIDE;
   const router = useRouter();
+  const { gate, openPaywall } = useParentGate();
+  const { entitled } = useParentSubscription();
+
+  // Posting a Job is Parent-Subscription-gated (OH-204); the chip opens the
+  // paywall (manage view when already subscribed).
+  const postJob = () => gate({ kind: 'post-job' }, () => router.push('/post-job' as never));
 
   if (!wide) {
     return (
@@ -98,23 +106,23 @@ export function ParentWebShell({ active, children }: { active: string; children:
           })}
         </View>
 
-        <Pressable onPress={() => router.push('/post-job' as never)} style={styles.cta}>
+        <Pressable onPress={postJob} style={styles.cta}>
           <Icon name="briefcase" size={16} color={colors.inkInv} />
           <Text style={styles.ctaText}>Post a Job</Text>
         </Pressable>
 
         <View style={styles.flex} />
 
-        <Pressable onPress={() => router.push('/paywall' as never)} style={styles.statusChip}>
+        <Pressable onPress={() => openPaywall()} style={styles.statusChip}>
           <View style={styles.statusIcon}>
             <Icon name="sparkle" size={16} color={colors.ink} />
           </View>
           <View style={styles.flexMin}>
             <Text style={styles.statusTitle} numberOfLines={1}>
-              Subscription active
+              {entitled ? 'Subscription active' : 'Unlock the marketplace'}
             </Text>
             <Text style={styles.statusSub} numberOfLines={1}>
-              $14.99/mo · renews Jul 14
+              {entitled ? 'Manage subscription' : 'Subscribe to message & book'}
             </Text>
           </View>
         </Pressable>

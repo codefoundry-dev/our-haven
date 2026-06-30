@@ -17,6 +17,7 @@ import { Redirect, Tabs, useSegments, type Href } from 'expo-router';
 
 import { useAuth } from '@/auth/AuthProvider';
 import { BottomNav } from '@/components/BottomNav';
+import { ParentSubscriptionProvider } from '@/lib/ParentSubscriptionProvider';
 import { ROLE_TABS, landingTab } from '@/lib/roles';
 
 /** Every tab id any role owns — used to tell tab routes apart from flow routes. */
@@ -40,6 +41,7 @@ export default function AppLayout() {
   }
 
   return (
+    <ParentSubscriptionProvider>
     <Tabs tabBar={(props) => <BottomNav {...props} role={role} />} screenOptions={{ headerShown: false }}>
       {/* ── tab destinations (role-aware dispatchers) ─────────────── */}
       <Tabs.Screen name="home" />
@@ -82,5 +84,6 @@ export default function AppLayout() {
       <Tabs.Screen name="consult" options={{ href: null }} />
       <Tabs.Screen name="availability" options={{ href: null }} />
     </Tabs>
+    </ParentSubscriptionProvider>
   );
 }

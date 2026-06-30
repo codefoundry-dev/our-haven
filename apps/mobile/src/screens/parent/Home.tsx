@@ -18,6 +18,7 @@ import { Chip } from '@/components/ui/Chip';
 import { IconButton } from '@/components/ui/IconButton';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { SectionHeader } from '@/components/ui/SectionHeader';
+import { useParentGate } from '@/lib/paywallGate';
 import { usePreview } from '@/preview/PreviewProvider';
 import { shapeBrowse, summarizeAnswers } from '@/preview/questionnaire';
 import { colors, fonts, radii, shadow, type ColorToken } from '@/theme/tokens';
@@ -57,6 +58,11 @@ const APP_TONES: ColorToken[] = ['catTutor', 'catBaby', 'catNanny'];
 export function ParentHome() {
   const router = useRouter();
   const { answers } = usePreview();
+  const { gate } = useParentGate();
+
+  // Posting a Job is Parent-Subscription-gated (OH-204): a not-entitled Parent is
+  // routed to the paywall, which resumes the post-Job flow once subscribed.
+  const postJob = () => gate({ kind: 'post-job' }, () => router.push('/post-job'));
 
   // The ephemeral preview answers re-order the category grid so the most relevant
   // care leads the first browse (story 111). No answers → the default order.
@@ -121,7 +127,7 @@ export function ParentHome() {
 
       {/* Post a Job */}
       <PrimaryButton
-        onPress={() => router.push('/post-job')}
+        onPress={postJob}
         icon={<Icon name="briefcase" size={18} color={colors.inkInv} />}
         style={styles.postBtn}
       >
@@ -136,7 +142,7 @@ export function ParentHome() {
         title="My open Jobs"
         action="See all"
         size="md"
-        onAction={() => router.push('/post-job')}
+        onAction={postJob}
         style={styles.jobsHeader}
       />
       <ScrollView
@@ -148,7 +154,7 @@ export function ParentHome() {
         {OPEN_JOBS.map((job, i) => (
           <Pressable
             key={i}
-            onPress={() => router.push('/post-job')}
+            onPress={postJob}
             accessibilityRole="button"
             style={({ pressed }) => [styles.jobCard, { opacity: pressed ? 0.94 : 1 }]}
           >

@@ -26,12 +26,14 @@ import {
   summaryFromCategories,
   type SearchFilters,
 } from '@/lib/search';
+import { useParentGate } from '@/lib/paywallGate';
 import { useSearch } from '@/lib/useSearch';
 import { colors, fonts, radii, shadow } from '@/theme/tokens';
 
 export function ParentSearchWeb() {
   const router = useRouter();
   const { answers } = usePreview();
+  const { openPaywall } = useParentGate();
 
   const shape = shapeBrowse(answers);
   const leadCategory = shape.shaped ? shape.categories[0] : null;
@@ -80,7 +82,7 @@ export function ParentSearchWeb() {
             </View>
 
             {!entitled && blurredCount > 0 ? (
-              <Pressable onPress={() => router.push('/paywall')} style={styles.paywall}>
+              <Pressable onPress={() => openPaywall()} style={styles.paywall}>
                 <View style={styles.paywallIcon}>
                   <Icon name="sparkle" size={16} color={colors.inkInv} />
                 </View>
@@ -124,7 +126,7 @@ export function ParentSearchWeb() {
                     key={item.card.id}
                     card={item.card}
                     layout="tile"
-                    onUnlock={() => router.push('/paywall')}
+                    onUnlock={() => openPaywall()}
                   />
                 ),
               )}
