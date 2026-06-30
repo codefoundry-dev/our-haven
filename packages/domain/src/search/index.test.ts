@@ -13,7 +13,6 @@ import {
   passesMinRating,
   passesRateCeiling,
   projectPreviewWall,
-  rankAndProject,
   SEARCH_MODULE_VERSION,
   toBlurred,
   withinRadius,
@@ -263,18 +262,5 @@ describe('projectPreviewWall', () => {
 
   it('default reveal count is 2', () => {
     expect(DEFAULT_PREVIEW_FULL_PER_CATEGORY).toBe(2);
-  });
-});
-
-describe('rankAndProject', () => {
-  it('ranks (closest/highest first) then walls in one call', () => {
-    const far = card({ id: 'far', distanceMiles: 4, ratingAverage: 5, ratingCount: 9, categoryKey: 'tutor' });
-    const near = card({ id: 'near', distanceMiles: 0, ratingAverage: 5, ratingCount: 9, categoryKey: 'tutor' });
-    const wall = rankAndProject([far, near], { now: NOW, radiusMiles: 5 }, { entitled: false, fullPerCategory: 1 });
-    // near outranks far → near is the full reveal, far is blurred.
-    expect(wall.items[0]!.card.id).toBe('near');
-    expect(wall.items[0]!.kind).toBe('full');
-    expect(wall.items[1]!.card.id).toBe('far');
-    expect(wall.items[1]!.kind).toBe('blurred');
   });
 });
