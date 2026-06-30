@@ -47,6 +47,7 @@ export * from './state-privacy-patchwork/index.js';
 export * from './job-lifecycle/index.js';
 export * from './application-lifecycle/index.js';
 export * from './offer-lifecycle/index.js';
+export * from './offer-lifecycle/total.js';
 export * from './application-quota/index.js';
 export * from './direct-message-materialisation/index.js';
 export * from './notifications/index.js';

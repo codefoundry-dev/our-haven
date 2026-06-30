@@ -14,9 +14,12 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, 
 
 import { useAuth } from '@/auth/AuthProvider';
 import { Icon } from '@/components/Icon';
+import { OfferBubble } from '@/components/offers/OfferBubble';
+import { OfferComposer } from '@/components/offers/OfferComposer';
+import { OfferCounterSheet } from '@/components/offers/OfferCounterSheet';
 import { Avatar } from '@/components/ui/Avatar';
 import { WebPageHeader } from '@/components/web/WebShell';
-import type { ChatMessage, MessageThreadSummary } from '@/api/client';
+import type { ChatMessage, MessageThreadSummary, Offer } from '@/api/client';
 import {
   MESSAGING_DISCLOSURE_BODY,
   MESSAGING_DISCLOSURE_TITLE,
@@ -128,7 +131,7 @@ export function MessagingTwoPaneWeb({ role }: { role: Role }) {
           {/* ── active thread ─────────────────────────────────── */}
           <View style={styles.threadCol}>
             {selected ? (
-              <ThreadPaneWeb key={selected.id} thread={selected} myUid={myUid} />
+              <ThreadPaneWeb key={selected.id} thread={selected} myUid={myUid} role={role} />
             ) : (
               <View style={styles.threadEmpty}>
                 <Text style={styles.threadEmptyText}>
@@ -143,17 +146,33 @@ export function MessagingTwoPaneWeb({ role }: { role: Role }) {
   );
 }
 
-function ThreadPaneWeb({ thread, myUid }: { thread: MessageThreadSummary; myUid: string | null }) {
-  const { messages, loading, error, sending, send } = useMessageThread({ threadId: thread.id });
+function ThreadPaneWeb({ thread, myUid, role }: { thread: MessageThreadSummary; myUid: string | null; role: Role }) {
+  const {
+    timeline,
+    loading,
+    error,
+    sending,
+    send,
+    composeOffer,
+    acceptOffer,
+    declineOffer,
+    withdrawOffer,
+    counterOffer,
+  } = useMessageThread({ threadId: thread.id });
   const [draft, setDraft] = useState('');
   const [bannerOpen, setBannerOpen] = useState(true);
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [countering, setCountering] = useState<Offer | null>(null);
+  const [busyOfferId, setBusyOfferId] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const name = thread.counterpartyName ?? 'Conversation';
+  const iAmParent = role === 'parent';
+  const providerId = thread.providerId;
 
   useEffect(() => {
     const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
     return () => clearTimeout(t);
-  }, [messages.length]);
+  }, [timeline.length]);
 
   const onSend = async () => {
     const text = draft;
@@ -163,6 +182,17 @@ function ThreadPaneWeb({ thread, myUid }: { thread: MessageThreadSummary; myUid:
       await send(text);
     } catch {
       setDraft(text);
+    }
+  };
+
+  const runOffer = async (offerId: string, action: () => Promise<unknown>) => {
+    setBusyOfferId(offerId);
+    try {
+      await action();
+    } catch {
+      // surfaced by the hook
+    } finally {
+      setBusyOfferId(null);
     }
   };
 
@@ -198,10 +228,25 @@ function ThreadPaneWeb({ thread, myUid }: { thread: MessageThreadSummary; myUid:
         </View>
       ) : (
         <ScrollView ref={scrollRef} style={styles.messages} contentContainerStyle={styles.messagesContent} showsVerticalScrollIndicator={false}>
-          {messages.length === 0 ? (
+          {timeline.length === 0 ? (
             <Text style={styles.emptyHint}>Say hello. Keep your conversation on Our Haven.</Text>
           ) : (
-            messages.map((m) => <Bubble key={m.id} message={m} mine={m.senderUid === myUid} />)
+            timeline.map((item) =>
+              item.kind === 'message' ? (
+                <Bubble key={`m-${item.id}`} message={item.message} mine={item.message.senderUid === myUid} />
+              ) : (
+                <OfferBubble
+                  key={`o-${item.id}`}
+                  offer={item.offer}
+                  mine={item.offer.senderUid === myUid}
+                  busy={busyOfferId === item.offer.id}
+                  onAccept={() => runOffer(item.offer.id, () => acceptOffer(item.offer.id))}
+                  onDecline={() => runOffer(item.offer.id, () => declineOffer(item.offer.id))}
+                  onWithdraw={() => runOffer(item.offer.id, () => withdrawOffer(item.offer.id))}
+                  onCounter={() => setCountering(item.offer)}
+                />
+              ),
+            )
           )}
         </ScrollView>
       )}
@@ -209,6 +254,15 @@ function ThreadPaneWeb({ thread, myUid }: { thread: MessageThreadSummary; myUid:
       {/* composer */}
       <View style={styles.composerWrap}>
         <View style={styles.composer}>
+          {iAmParent ? (
+            <Pressable
+              style={styles.bookBtn}
+              accessibilityLabel="Send a booking request"
+              onPress={() => setComposerOpen(true)}
+            >
+              <Icon name="calendar" size={16} color={colors.brand} />
+            </Pressable>
+          ) : null}
           <TextInput
             value={draft}
             onChangeText={setDraft}
@@ -224,6 +278,27 @@ function ThreadPaneWeb({ thread, myUid }: { thread: MessageThreadSummary; myUid:
           </Pressable>
         </View>
       </View>
+
+      {iAmParent ? (
+        <OfferComposer
+          visible={composerOpen}
+          providerId={providerId}
+          counterpartName={name}
+          onClose={() => setComposerOpen(false)}
+          onSubmit={async (body) => {
+            await composeOffer(body);
+          }}
+        />
+      ) : null}
+
+      <OfferCounterSheet
+        visible={countering != null}
+        offer={countering}
+        onClose={() => setCountering(null)}
+        onSubmit={async (body) => {
+          if (countering) await counterOffer(countering.id, body);
+        }}
+      />
     </View>
   );
 }
@@ -297,8 +372,9 @@ const styles = StyleSheet.create({
   redactHint: { fontFamily: fonts.medium, fontSize: 10.5, color: colors.ink3 },
 
   composerWrap: { padding: 16, borderTopWidth: 1, borderTopColor: colors.hairline },
-  composer: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.surfaceAlt, borderRadius: radii.pill, paddingVertical: 6, paddingLeft: 18, paddingRight: 6 },
+  composer: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.surfaceAlt, borderRadius: radii.pill, paddingVertical: 6, paddingLeft: 8, paddingRight: 6 },
   composerInput: { flex: 1, height: 40, fontFamily: fonts.regular, fontSize: 13, color: colors.ink, padding: 0 },
+  bookBtn: { width: 36, height: 36, borderRadius: radii.pill, backgroundColor: colors.brandSoft, alignItems: 'center', justifyContent: 'center' },
   sendBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 36, paddingHorizontal: 16, borderRadius: radii.pill, backgroundColor: colors.brand },
   sendBtnText: { fontFamily: fonts.semibold, fontSize: 12, color: colors.inkInv },
   sendDisabled: { opacity: 0.4 },

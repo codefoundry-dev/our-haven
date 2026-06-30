@@ -357,3 +357,45 @@ export function getThreadMessages(threadId: string, limit?: number): Promise<Cha
 export function sendMessage(threadId: string, body: string): Promise<ChatMessage> {
   return post<ChatMessage>(`/v1/threads/${threadId}/messages`, { body } satisfies SendMessageBody);
 }
+
+/**
+ * Structured Offers / Book-requests inside a thread (OH-206). `getThreadOffers`
+ * lists a thread's Offers (the exact service address is projected per viewer +
+ * status — hidden from the Caregiver until accept); `sendOffer` composes one
+ * (a Parent send is Subscription-gated; the rate locks to the published Rate when
+ * the Caregiver is non-negotiable; the Safety-Behaviors disclosure is required).
+ * accept / decline / withdraw / counter drive the Offer state machine — Counter is
+ * unavailable against a non-negotiable Caregiver. Offers are read through the Edge
+ * (never direct/Realtime); the thread refetches them on a messages poke + focus.
+ */
+export type Offer = paths['/v1/threads/{threadId}/offers']['get']['responses'][200]['content']['application/json']['offers'][number];
+export type OfferStatus = Offer['status'];
+export type OfferServiceAddress = Offer['serviceAddress'];
+export type OfferSlot = Offer['slots'][number];
+export type ComposeOfferBody = paths['/v1/threads/{threadId}/offers']['post']['requestBody']['content']['application/json'];
+export type OfferSchedule = ComposeOfferBody['schedule'];
+export type CounterOfferBody = paths['/v1/offers/{offerId}/counter']['post']['requestBody']['content']['application/json'];
+
+export function getThreadOffers(threadId: string): Promise<Offer[]> {
+  return get<{ offers: Offer[] }>(`/v1/threads/${threadId}/offers`).then((r) => r.offers);
+}
+
+export function sendOffer(threadId: string, body: ComposeOfferBody): Promise<Offer> {
+  return post<Offer>(`/v1/threads/${threadId}/offers`, body);
+}
+
+export function acceptOffer(offerId: string): Promise<Offer> {
+  return post<Offer>(`/v1/offers/${offerId}/accept`, undefined);
+}
+
+export function declineOffer(offerId: string): Promise<Offer> {
+  return post<Offer>(`/v1/offers/${offerId}/decline`, undefined);
+}
+
+export function withdrawOffer(offerId: string): Promise<Offer> {
+  return post<Offer>(`/v1/offers/${offerId}/withdraw`, undefined);
+}
+
+export function counterOffer(offerId: string, body: CounterOfferBody): Promise<Offer> {
+  return post<Offer>(`/v1/offers/${offerId}/counter`, body);
+}

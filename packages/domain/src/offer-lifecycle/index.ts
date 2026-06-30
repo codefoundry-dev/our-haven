@@ -47,7 +47,12 @@
 import type { CaregiverCategory } from '@our-haven/shared';
 
 import type { BookingSlot, RecurrenceRule } from '../booking-lifecycle/index.js';
-import { calculatePricing } from '../pricing/index.js';
+// NOTE: the `computed_total` derivation (`computeOfferTotal` /
+// `offerTotalIsConsistent`) lives in the sibling `./total.ts` because it needs a
+// RUNTIME import of the Pricing calculator. Keeping it out of this module leaves
+// the Offer state machine free of runtime relative imports, so the Supabase Edge
+// can import it cross-tree via an explicit `.ts` specifier without Deno chasing a
+// `../pricing/index.js` that only exists as `.ts` on disk (ADR-0019; OH-203).
 
 export const OFFER_STATES = [
   'pending',
@@ -188,54 +193,6 @@ export interface OfferSideEffect {
 export type OfferTransitionResult =
   | { ok: true; next: OfferState; sideEffects: readonly OfferSideEffect[] }
   | { ok: false; reason: string };
-
-/**
- * Compute the canonical `computed_total` for an Offer — the parent charge over
- * `scopeQuantity` hours, delegated to the OH-178 Pricing calculator so the
- * Offer's quoted total and the eventual Booking receipt share ONE source of
- * truth (no drift). The per-child surcharge is the cents-per-hour snapshot,
- * applied as `surcharge × hours × max(0, childCount − 1)` (the Pricing model).
- *
- * `commissionBp` is irrelevant here — `computed_total` is the pre-commission
- * parent charge — so it is passed as 0 and only `parentChargeCents` is read.
- *
- * Throws (via the Pricing calculator) on caller-bug inputs — e.g. a Tutor with
- * `childCount > 1` or a non-zero surcharge, or non-integer cents.
- */
-export function computeOfferTotal(args: {
-  proposedRate: number;
-  scopeQuantity: number;
-  childCount: number;
-  perChildSurchargeSnapshot: number;
-  category: CaregiverCategory;
-}): number {
-  return calculatePricing({
-    agreedRateCents: args.proposedRate,
-    hours: args.scopeQuantity,
-    childCount: args.childCount,
-    perChildSurchargeCents: args.perChildSurchargeSnapshot,
-    commissionBp: 0,
-    category: args.category,
-  }).parentChargeCents;
-}
-
-/**
- * Whether the Offer's stored `computedTotal` matches the canonical recompute.
- * A construction-time invariant the composer/handler can assert; not enforced
- * inside `transitionOffer` (the snapshot is trusted once captured).
- */
-export function offerTotalIsConsistent(offer: OfferShape): boolean {
-  return (
-    offer.computedTotal ===
-    computeOfferTotal({
-      proposedRate: offer.proposedRate,
-      scopeQuantity: offer.scopeQuantity,
-      childCount: offer.childCount,
-      perChildSurchargeSnapshot: offer.perChildSurchargeSnapshot,
-      category: offer.category,
-    })
-  );
-}
 
 /**
  * Default `valid_until` for a newly-sent Offer — 72h ahead of `sentAt`. A

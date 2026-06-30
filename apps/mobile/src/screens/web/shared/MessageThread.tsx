@@ -15,10 +15,13 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, 
 
 import { useAuth } from '@/auth/AuthProvider';
 import { Icon } from '@/components/Icon';
+import { OfferBubble } from '@/components/offers/OfferBubble';
+import { OfferComposer } from '@/components/offers/OfferComposer';
+import { OfferCounterSheet } from '@/components/offers/OfferCounterSheet';
 import { Avatar } from '@/components/ui/Avatar';
 import { Card } from '@/components/ui/Card';
 import { WebPageHeader } from '@/components/web/WebShell';
-import type { ChatMessage } from '@/api/client';
+import type { ChatMessage, Offer } from '@/api/client';
 import {
   MESSAGING_DISCLOSURE_BODY,
   MESSAGING_DISCLOSURE_TITLE,
@@ -30,23 +33,40 @@ import { colors, fonts, radii, shadow } from '@/theme/tokens';
 export function MessageThreadWeb() {
   const router = useRouter();
   const go = (r: string) => router.push(r as never);
-  const { session } = useAuth();
+  const { session, role } = useAuth();
   const myUid = session?.user?.id ?? null;
   const { id, threadId, name } = useLocalSearchParams<{ id?: string; threadId?: string; name?: string }>();
 
-  const { thread, messages, loading, error, sending, send } = useMessageThread({ providerId: id, threadId });
+  const {
+    thread,
+    timeline,
+    loading,
+    error,
+    sending,
+    send,
+    composeOffer,
+    acceptOffer,
+    declineOffer,
+    withdrawOffer,
+    counterOffer,
+  } = useMessageThread({ providerId: id, threadId });
   const counterpart =
     (name && name.trim().length > 0 ? name.trim() : null) ?? thread?.counterpartyName ?? 'Conversation';
   const roleLabel = thread?.counterpartyRole === 'caregiver' ? 'Caregiver' : thread?.counterpartyRole === 'parent' ? 'Parent' : null;
+  const iAmParent = role === 'parent';
+  const providerId = id ?? thread?.providerId ?? null;
 
   const [bannerOpen, setBannerOpen] = useState(true);
   const [draft, setDraft] = useState('');
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [countering, setCountering] = useState<Offer | null>(null);
+  const [busyOfferId, setBusyOfferId] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
     return () => clearTimeout(t);
-  }, [messages.length]);
+  }, [timeline.length]);
 
   const onSend = async () => {
     const text = draft;
@@ -56,6 +76,17 @@ export function MessageThreadWeb() {
       await send(text);
     } catch {
       setDraft(text);
+    }
+  };
+
+  const runOffer = async (offerId: string, action: () => Promise<unknown>) => {
+    setBusyOfferId(offerId);
+    try {
+      await action();
+    } catch {
+      // surfaced by the hook; the bubble stays in its prior state
+    } finally {
+      setBusyOfferId(null);
     }
   };
 
@@ -103,16 +134,40 @@ export function MessageThreadWeb() {
                 </View>
               ) : (
                 <ScrollView ref={scrollRef} style={styles.transcript} contentContainerStyle={styles.transcriptContent} showsVerticalScrollIndicator={false}>
-                  {messages.length === 0 ? (
+                  {timeline.length === 0 ? (
                     <Text style={styles.emptyHint}>Say hello. Keep your conversation on Our Haven.</Text>
                   ) : (
-                    messages.map((m) => <Bubble key={m.id} message={m} mine={m.senderUid === myUid} />)
+                    timeline.map((item) =>
+                      item.kind === 'message' ? (
+                        <Bubble key={`m-${item.id}`} message={item.message} mine={item.message.senderUid === myUid} />
+                      ) : (
+                        <OfferBubble
+                          key={`o-${item.id}`}
+                          offer={item.offer}
+                          mine={item.offer.senderUid === myUid}
+                          busy={busyOfferId === item.offer.id}
+                          onAccept={() => runOffer(item.offer.id, () => acceptOffer(item.offer.id))}
+                          onDecline={() => runOffer(item.offer.id, () => declineOffer(item.offer.id))}
+                          onWithdraw={() => runOffer(item.offer.id, () => withdrawOffer(item.offer.id))}
+                          onCounter={() => setCountering(item.offer)}
+                        />
+                      ),
+                    )
                   )}
                 </ScrollView>
               )}
 
               {/* composer */}
               <View style={styles.composer}>
+                {iAmParent && providerId ? (
+                  <Pressable
+                    style={styles.bookBtn}
+                    accessibilityLabel="Send a booking request"
+                    onPress={() => setComposerOpen(true)}
+                  >
+                    <Icon name="calendar" size={18} color={colors.brand} />
+                  </Pressable>
+                ) : null}
                 <View style={styles.inputPill}>
                   <TextInput
                     value={draft}
@@ -168,6 +223,27 @@ export function MessageThreadWeb() {
           </View>
         </View>
       </View>
+
+      {iAmParent && providerId ? (
+        <OfferComposer
+          visible={composerOpen}
+          providerId={providerId}
+          counterpartName={counterpart}
+          onClose={() => setComposerOpen(false)}
+          onSubmit={async (body) => {
+            await composeOffer(body);
+          }}
+        />
+      ) : null}
+
+      <OfferCounterSheet
+        visible={countering != null}
+        offer={countering}
+        onClose={() => setCountering(null)}
+        onSubmit={async (body) => {
+          if (countering) await counterOffer(countering.id, body);
+        }}
+      />
     </View>
   );
 }
@@ -255,6 +331,7 @@ const styles = StyleSheet.create({
   inputPill: { flex: 1, height: 46, borderRadius: radii.pill, backgroundColor: colors.surfaceAlt, paddingHorizontal: 18, justifyContent: 'center' },
   input: { fontFamily: fonts.regular, fontSize: 14.5, color: colors.ink, padding: 0 },
   sendBtn: { width: 46, height: 46, borderRadius: radii.pill, backgroundColor: colors.brand, alignItems: 'center', justifyContent: 'center' },
+  bookBtn: { width: 46, height: 46, borderRadius: radii.pill, backgroundColor: colors.brandSoft, alignItems: 'center', justifyContent: 'center' },
   sendDisabled: { opacity: 0.4 },
 
   // right rail
