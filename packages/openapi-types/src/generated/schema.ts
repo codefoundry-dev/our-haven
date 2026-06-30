@@ -2801,6 +2801,276 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/parents/me/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the authenticated Parent's family profile
+         * @description Returns the family-level Parent profile: Bio, the Preferences checklist, the consent-gated Safety-Behaviors checklist with its consent timestamp (`safetyBehaviorsConsentAt`) + derived `hasConsent`, and the optional default service address. A Parent with no profile row yet reads sensible empties (no write). Supply / admin roles are rejected by the parent-only guard (403).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The Parent profile */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ParentProfile"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ParentProfileError"];
+                    };
+                };
+                /** @description Wrong role (caregiver / provider / admin) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ParentProfileError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update the authenticated Parent's Bio / Preferences / default address
+         * @description Partial update of the NON-sensitive fields — only the supplied fields change. `preferences`, when present, replaces the FULL checklist (validated against the taxonomy + de-duped). `defaultAddress`, when present, replaces the FULL default address (validated: 2-letter US state, 5-digit ZIP). Safety Behaviors are NOT settable here — they go through the consent-gated `PUT …/safety-behaviors` (the consent-to-store gate).
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ParentProfilePatchRequest"];
+                };
+            };
+            responses: {
+                /** @description The updated profile */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ParentProfile"];
+                    };
+                };
+                /** @description Invalid fields / address */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ParentProfileError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ParentProfileError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ParentProfileError"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/v1/parents/me/profile/consent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Grant sensitive-information consent (stamp the consent timestamp)
+         * @description Records the explicit, timestamped sensitive-info consent that unlocks saving Safety Behaviors (PRD story 3). Idempotent: a first grant stamps now; a repeat grant keeps the original timestamp. After this the Parent may PUT their Safety-Behaviors checklist.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Consent recorded; returns the profile */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ParentProfile"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ParentProfileError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ParentProfileError"];
+                    };
+                };
+            };
+        };
+        /**
+         * Withdraw sensitive-information consent — erases Safety Behaviors + timestamp
+         * @description Withdraws consent and permanently deletes every Safety Behavior AND the consent timestamp (PRD story 74). Bio + Preferences are untouched. Idempotent — withdrawing with nothing stored is a no-op that returns the (empty-sensitive) profile.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Consent withdrawn + behaviours erased; returns the profile */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ParentProfile"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ParentProfileError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ParentProfileError"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/parents/me/profile/safety-behaviors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Replace the authenticated Parent's Safety-Behaviors checklist (consent-gated)
+         * @description Replaces the full Safety-Behaviors checklist (validated against the taxonomy + de-duped). REQUIRES sensitive-info consent to already be in force — without it the request is rejected 403 `consent_required` (the consent-to-store gate, PRD story 3). To remove every behaviour, withdraw consent (which also clears the timestamp) rather than PUTting an empty list.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ParentSafetyBehaviorsRequest"];
+                };
+            };
+            responses: {
+                /** @description The updated profile */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ParentProfile"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ParentProfileError"];
+                    };
+                };
+                /** @description Wrong role / consent required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ParentProfileError"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/providers/contact-us": {
         parameters: {
             query?: never;
@@ -3917,6 +4187,41 @@ export interface components {
         ParentSubscriptionPortalLink: {
             /** Format: uri */
             url: string;
+        };
+        ParentProfile: {
+            bio: string | null;
+            preferences: ("non-smoker" | "comfortable-with-pets" | "has-own-transport" | "cpr-certified" | "first-aid-certified" | "experience-with-infants" | "special-needs-experience" | "bilingual" | "light-housekeeping" | "meal-preparation" | "homework-help")[];
+            safetyBehaviors: ("aggression" | "self-injury" | "wandering" | "meltdowns" | "property-destruction" | "pica" | "sensory-sensitivity" | "communication-support" | "transition-difficulty" | "sleep-disturbance")[];
+            /** Format: date-time */
+            safetyBehaviorsConsentAt: string | null;
+            hasConsent: boolean;
+            defaultAddress: components["schemas"]["ParentDefaultAddress"];
+        };
+        ParentDefaultAddress: {
+            line1: string | null;
+            line2: string | null;
+            city: string | null;
+            state: string | null;
+            postalCode: string | null;
+        };
+        ParentProfileError: {
+            error: string;
+            reason?: string;
+        };
+        ParentProfilePatchRequest: {
+            bio?: string | null;
+            preferences?: ("non-smoker" | "comfortable-with-pets" | "has-own-transport" | "cpr-certified" | "first-aid-certified" | "experience-with-infants" | "special-needs-experience" | "bilingual" | "light-housekeeping" | "meal-preparation" | "homework-help")[];
+            defaultAddress?: components["schemas"]["ParentDefaultAddressPatch"];
+        };
+        ParentDefaultAddressPatch: {
+            line1?: string | null;
+            line2?: string | null;
+            city?: string | null;
+            state?: string | null;
+            postalCode?: string | null;
+        };
+        ParentSafetyBehaviorsRequest: {
+            safetyBehaviors: ("aggression" | "self-injury" | "wandering" | "meltdowns" | "property-destruction" | "pica" | "sensory-sensitivity" | "communication-support" | "transition-difficulty" | "sleep-disturbance")[];
         };
         ContactUsResponse: {
             id: string;

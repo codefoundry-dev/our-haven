@@ -308,6 +308,36 @@ export interface ParentSubscriptionsTable {
 }
 
 /**
+ * Parent profile (OH-200; ADR-0012 / ADR-0016). The family-level record that
+ * replaces the removed Child entity: a free-text `bio`, a `preferences[]`
+ * checklist (desired Caregiver traits — not safety-critical, no consent gate),
+ * the fixed sensitive `safety_behaviors[]` checklist, and the optional default
+ * service address that pre-fills a transaction's `service_address`. Like
+ * `parent_subscriptions` there is no `parents` table — keyed by the auth `uid`,
+ * no FK.
+ *
+ * `safety_behaviors` may be non-empty only when `safety_behaviors_consent_at` is
+ * set (the consent-to-store gate, PRD story 3 — enforced at the API layer and
+ * backstopped by a DB CHECK). Withdrawal clears both. `preferences` /
+ * `safety_behaviors` hold taxonomy keys from `@our-haven/shared`, API-validated
+ * (no DB check). There is no persisted neurodivergence/diagnosis field anywhere.
+ */
+export interface ParentProfilesTable {
+  uid: string;
+  bio: string | null;
+  preferences: ColumnType<string[], string[] | undefined, string[]>;
+  safety_behaviors: ColumnType<string[], string[] | undefined, string[]>;
+  safety_behaviors_consent_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  default_address_line1: string | null;
+  default_address_line2: string | null;
+  default_city: string | null;
+  default_state: string | null;
+  default_postal_code: string | null;
+  created_at: Generated<Date>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
+/**
  * Corporate "Contact Us" intake (OH-191; ADR-0011). v1 captures a sales lead for
  * the large-corporation custom-contract path — no self-serve org onboarding /
  * multi-seat model. Not keyed to a `providers` row (leads are pre-account); a
@@ -428,6 +458,7 @@ export interface Database {
   provider_connect_accounts: ProviderConnectAccountsTable;
   provider_subscriptions: ProviderSubscriptionsTable;
   parent_subscriptions: ParentSubscriptionsTable;
+  parent_profiles: ParentProfilesTable;
   provider_contact_intakes: ProviderContactIntakesTable;
   stripe_tax_calculations: StripeTaxCalculationsTable;
   messages: MessagesTable;

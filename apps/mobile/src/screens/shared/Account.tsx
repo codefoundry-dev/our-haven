@@ -1,5 +1,5 @@
 /** Account — identity + sign out (satisfies OH-176 "auth client logs in/out"). */
-import { useRouter } from 'expo-router';
+import { useRouter, type Href } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useAuth } from '@/auth/AuthProvider';
@@ -72,6 +72,23 @@ export default function AccountScreen() {
           <View style={styles.linkText}>
             <Text style={styles.linkTitle}>Profile</Text>
             <Text style={styles.linkSub}>Rates, availability, credentials — what Parents see.</Text>
+          </View>
+          <Icon name="chevron-right" size={20} color={colors.ink3} />
+        </Pressable>
+      ) : null}
+
+      {role === 'parent' ? (
+        <Pressable
+          onPress={() => router.push('/parent-profile' as Href)}
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.linkCard, { opacity: pressed ? 0.85 : 1 }]}
+        >
+          <View style={styles.linkIcon}>
+            <Icon name="person" size={18} color={colors.brand} />
+          </View>
+          <View style={styles.linkText}>
+            <Text style={styles.linkTitle}>Family profile</Text>
+            <Text style={styles.linkSub}>Bio, preferences, Safety Behaviors & default address.</Text>
           </View>
           <Icon name="chevron-right" size={20} color={colors.ink3} />
         </Pressable>

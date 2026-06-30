@@ -1929,6 +1929,164 @@ components:
           format: uri
       required:
         - url
+    ParentProfile:
+      type: object
+      properties:
+        bio:
+          type: string
+          nullable: true
+        preferences:
+          type: array
+          items:
+            type: string
+            enum:
+              - non-smoker
+              - comfortable-with-pets
+              - has-own-transport
+              - cpr-certified
+              - first-aid-certified
+              - experience-with-infants
+              - special-needs-experience
+              - bilingual
+              - light-housekeeping
+              - meal-preparation
+              - homework-help
+        safetyBehaviors:
+          type: array
+          items:
+            type: string
+            enum:
+              - aggression
+              - self-injury
+              - wandering
+              - meltdowns
+              - property-destruction
+              - pica
+              - sensory-sensitivity
+              - communication-support
+              - transition-difficulty
+              - sleep-disturbance
+        safetyBehaviorsConsentAt:
+          type: string
+          nullable: true
+          format: date-time
+        hasConsent:
+          type: boolean
+        defaultAddress:
+          $ref: "#/components/schemas/ParentDefaultAddress"
+      required:
+        - bio
+        - preferences
+        - safetyBehaviors
+        - safetyBehaviorsConsentAt
+        - hasConsent
+        - defaultAddress
+    ParentDefaultAddress:
+      type: object
+      properties:
+        line1:
+          type: string
+          nullable: true
+          maxLength: 120
+        line2:
+          type: string
+          nullable: true
+          maxLength: 120
+        city:
+          type: string
+          nullable: true
+          maxLength: 80
+        state:
+          type: string
+          nullable: true
+          maxLength: 2
+        postalCode:
+          type: string
+          nullable: true
+          maxLength: 5
+      required:
+        - line1
+        - line2
+        - city
+        - state
+        - postalCode
+    ParentProfileError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
+    ParentProfilePatchRequest:
+      type: object
+      properties:
+        bio:
+          type: string
+          nullable: true
+          maxLength: 600
+        preferences:
+          type: array
+          items:
+            type: string
+            enum:
+              - non-smoker
+              - comfortable-with-pets
+              - has-own-transport
+              - cpr-certified
+              - first-aid-certified
+              - experience-with-infants
+              - special-needs-experience
+              - bilingual
+              - light-housekeeping
+              - meal-preparation
+              - homework-help
+        defaultAddress:
+          $ref: "#/components/schemas/ParentDefaultAddressPatch"
+    ParentDefaultAddressPatch:
+      type: object
+      properties:
+        line1:
+          type: string
+          nullable: true
+          maxLength: 200
+        line2:
+          type: string
+          nullable: true
+          maxLength: 200
+        city:
+          type: string
+          nullable: true
+          maxLength: 120
+        state:
+          type: string
+          nullable: true
+          maxLength: 2
+        postalCode:
+          type: string
+          nullable: true
+          maxLength: 10
+    ParentSafetyBehaviorsRequest:
+      type: object
+      properties:
+        safetyBehaviors:
+          type: array
+          items:
+            type: string
+            enum:
+              - aggression
+              - self-injury
+              - wandering
+              - meltdowns
+              - property-destruction
+              - pica
+              - sensory-sensitivity
+              - communication-support
+              - transition-difficulty
+              - sleep-disturbance
+      required:
+        - safetyBehaviors
     ContactUsResponse:
       type: object
       properties:
@@ -4196,6 +4354,181 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ParentSubscriptionError"
+  /v1/parents/me/profile:
+    get:
+      tags:
+        - parent-profile
+      summary: Read the authenticated Parent's family profile
+      description: "Returns the family-level Parent profile: Bio, the Preferences
+        checklist, the consent-gated Safety-Behaviors checklist with its consent
+        timestamp (`safetyBehaviorsConsentAt`) + derived `hasConsent`, and the
+        optional default service address. A Parent with no profile row yet reads
+        sensible empties (no write). Supply / admin roles are rejected by the
+        parent-only guard (403)."
+      security:
+        - supabaseAccessToken: []
+      responses:
+        "200":
+          description: The Parent profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentProfile"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentProfileError"
+        "403":
+          description: Wrong role (caregiver / provider / admin)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentProfileError"
+    patch:
+      tags:
+        - parent-profile
+      summary: Update the authenticated Parent's Bio / Preferences / default address
+      description: "Partial update of the NON-sensitive fields — only the supplied
+        fields change. `preferences`, when present, replaces the FULL checklist
+        (validated against the taxonomy + de-duped). `defaultAddress`, when
+        present, replaces the FULL default address (validated: 2-letter US
+        state, 5-digit ZIP). Safety Behaviors are NOT settable here — they go
+        through the consent-gated `PUT …/safety-behaviors` (the consent-to-store
+        gate)."
+      security:
+        - supabaseAccessToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ParentProfilePatchRequest"
+      responses:
+        "200":
+          description: The updated profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentProfile"
+        "400":
+          description: Invalid fields / address
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentProfileError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentProfileError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentProfileError"
+  /v1/parents/me/profile/consent:
+    post:
+      tags:
+        - parent-profile
+      summary: Grant sensitive-information consent (stamp the consent timestamp)
+      description: "Records the explicit, timestamped sensitive-info consent that
+        unlocks saving Safety Behaviors (PRD story 3). Idempotent: a first grant
+        stamps now; a repeat grant keeps the original timestamp. After this the
+        Parent may PUT their Safety-Behaviors checklist."
+      security:
+        - supabaseAccessToken: []
+      responses:
+        "200":
+          description: Consent recorded; returns the profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentProfile"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentProfileError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentProfileError"
+    delete:
+      tags:
+        - parent-profile
+      summary: Withdraw sensitive-information consent — erases Safety Behaviors +
+        timestamp
+      description: Withdraws consent and permanently deletes every Safety Behavior AND
+        the consent timestamp (PRD story 74). Bio + Preferences are untouched.
+        Idempotent — withdrawing with nothing stored is a no-op that returns the
+        (empty-sensitive) profile.
+      security:
+        - supabaseAccessToken: []
+      responses:
+        "200":
+          description: Consent withdrawn + behaviours erased; returns the profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentProfile"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentProfileError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentProfileError"
+  /v1/parents/me/profile/safety-behaviors:
+    put:
+      tags:
+        - parent-profile
+      summary: Replace the authenticated Parent's Safety-Behaviors checklist
+        (consent-gated)
+      description: Replaces the full Safety-Behaviors checklist (validated against the
+        taxonomy + de-duped). REQUIRES sensitive-info consent to already be in
+        force — without it the request is rejected 403 `consent_required` (the
+        consent-to-store gate, PRD story 3). To remove every behaviour, withdraw
+        consent (which also clears the timestamp) rather than PUTting an empty
+        list.
+      security:
+        - supabaseAccessToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ParentSafetyBehaviorsRequest"
+      responses:
+        "200":
+          description: The updated profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentProfile"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentProfileError"
+        "403":
+          description: Wrong role / consent required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentProfileError"
   /v1/providers/contact-us:
     post:
       tags:

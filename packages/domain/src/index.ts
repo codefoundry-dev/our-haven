@@ -21,6 +21,7 @@ export * from './rating-reveal/index.js';
 export * from './caregiver-availability/index.js';
 export * from './caregiver-profile/index.js';
 export * from './provider-profile/index.js';
+export * from './parent-profile/index.js';
 export * from './provider-subscription/index.js';
 // parent-subscription mirrors the Stripe-lifecycle primitives (StripeSubscriptionStatus,
 // STRIPE_SUBSCRIPTION_STATUSES, isStripeSubscriptionStatus) so it can stay

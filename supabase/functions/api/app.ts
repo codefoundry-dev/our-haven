@@ -11,6 +11,7 @@ import { registerCaregiverConnectRoutes } from './routes/caregiver-connect.ts';
 import { registerCaregiverProfileRoutes } from './routes/caregiver-profile.ts';
 import { registerContactUsRoutes } from './routes/contact-us.ts';
 import { registerHealthRoutes } from './routes/health.ts';
+import { registerParentProfileRoutes } from './routes/parent-profile.ts';
 import { registerParentSubscriptionRoutes } from './routes/parent-subscription.ts';
 import { registerProviderCredentialsRoutes } from './routes/provider-credentials.ts';
 import { registerProviderProfileRoutes } from './routes/provider-profile.ts';
@@ -144,6 +145,7 @@ export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerProviderProfileRoutes(v1);
   registerProviderSubscriptionRoutes(v1);
   registerParentSubscriptionRoutes(v1);
+  registerParentProfileRoutes(v1);
   registerContactUsRoutes(v1);
   registerScreeningRoutes(v1);
   registerUploadRoutes(v1);
