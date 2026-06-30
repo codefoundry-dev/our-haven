@@ -1,20 +1,59 @@
 /**
- * OAuthButtons — Apple / Google sign-in options (design: signin.jsx / signup.jsx).
- * Visually faithful but disabled: the OAuth wiring is a downstream M2 ticket.
+ * OAuthButtons — Apple / Google sign-in + sign-up (design: signin.jsx / signup.jsx).
+ *
+ * Wired to Supabase OAuth (OH-199). On a sign-up screen pass `role` so the
+ * provider round-trip lands the user on the right onboarding (Parent → straight
+ * in; Caregiver/Provider → SupplyOnboarding); the sign-in screens omit it.
  */
-import { StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { useAuth } from '@/auth/AuthProvider';
+import { signInWithProvider, type OAuthProvider } from '@/auth/oauth';
+import type { Role } from '@/lib/roles';
 import { colors, fonts, radii } from '@/theme/tokens';
 
-function OutlineButton({ label }: { label: string }) {
+function OutlineButton({
+  label,
+  loading,
+  disabled,
+  onPress,
+}: {
+  label: string;
+  loading: boolean;
+  disabled: boolean;
+  onPress: () => void;
+}) {
   return (
-    <View accessibilityRole="button" accessibilityState={{ disabled: true }} style={styles.btn}>
-      <Text style={styles.label}>{label}</Text>
-    </View>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled: disabled || loading, busy: loading }}
+      disabled={disabled || loading}
+      onPress={onPress}
+      style={({ pressed }) => [styles.btn, disabled && styles.btnDisabled, pressed && styles.btnPressed]}
+    >
+      {loading ? <ActivityIndicator color={colors.ink} /> : <Text style={styles.label}>{label}</Text>}
+    </Pressable>
   );
 }
 
-export function OAuthButtons({ verb = 'continue' }: { verb?: 'continue' | 'sign up' }) {
+export function OAuthButtons({ verb = 'continue', role }: { verb?: 'continue' | 'sign up'; role?: Role }) {
+  const { configured } = useAuth();
+  const [busy, setBusy] = useState<OAuthProvider | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const start = async (provider: OAuthProvider) => {
+    if (busy || !configured) return;
+    setError(null);
+    setBusy(provider);
+    const result = await signInWithProvider(provider, role ?? null);
+    // On web the page navigates away on success and this component unmounts; on
+    // native we land back here. A real session change is picked up by the auth
+    // gate, so we only need to release the button and surface a failure.
+    setBusy(null);
+    if (result.error) setError(result.error);
+  };
+
   return (
     <View style={styles.wrap}>
       <View style={styles.dividerRow}>
@@ -22,9 +61,19 @@ export function OAuthButtons({ verb = 'continue' }: { verb?: 'continue' | 'sign 
         <Text style={styles.dividerText}>{verb === 'sign up' ? 'OR SIGN UP WITH' : 'OR CONTINUE WITH'}</Text>
         <View style={styles.line} />
       </View>
-      <OutlineButton label="Continue with Apple" />
-      <OutlineButton label="Continue with Google" />
-      <Text style={styles.note}>Social sign-in coming soon</Text>
+      <OutlineButton
+        label="Continue with Apple"
+        loading={busy === 'apple'}
+        disabled={!configured || (busy !== null && busy !== 'apple')}
+        onPress={() => start('apple')}
+      />
+      <OutlineButton
+        label="Continue with Google"
+        loading={busy === 'google'}
+        disabled={!configured || (busy !== null && busy !== 'google')}
+        onPress={() => start('google')}
+      />
+      {error ? <Text style={styles.error}>{error}</Text> : null}
     </View>
   );
 }
@@ -42,8 +91,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
-    opacity: 0.5,
   },
+  btnPressed: { backgroundColor: colors.canvas },
+  btnDisabled: { opacity: 0.5 },
   label: { fontFamily: fonts.semibold, fontSize: 15, color: colors.ink },
-  note: { fontFamily: fonts.regular, fontSize: 12, color: colors.ink3, textAlign: 'center' },
+  error: { fontFamily: fonts.medium, fontSize: 13, color: colors.danger, textAlign: 'center', marginTop: 2 },
 });

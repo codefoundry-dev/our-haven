@@ -186,7 +186,7 @@ export default function SignUpScreen() {
         Create account
       </PrimaryButton>
 
-      <OAuthButtons verb="sign up" />
+      <OAuthButtons verb="sign up" role={role} />
 
       <Text style={styles.terms}>By continuing you agree to our Terms and Privacy Policy.</Text>
 
