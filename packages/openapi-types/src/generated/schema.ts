@@ -3177,7 +3177,7 @@ export interface paths {
         };
         /**
          * Read one listable supply member's Parent-facing profile (OH-202)
-         * @description Returns the full public profile of a single listable Caregiver/Provider: identity, per-category Rates with the "from $X" teaser, availability, ages-served + behaviour-comfort, languages + specialty tags, badges, APPROVED Credentials only, and the public Ratings (with text reviews). 404 when the id is unknown OR the supply member is not listable (mirrors Search visibility). Parent-only.
+         * @description Returns the full public profile of a single listable Caregiver/Provider: identity, per-category Rates with the "from $X" teaser, availability, ages-served + behaviour-comfort, languages + specialty tags, badges, APPROVED Credentials only, and the public Ratings (with text reviews). For a Provider it also carries the clinical credential badge (`providerCredential`) and the open `consultationSlots` the Parent can book. 404 when the id is unknown OR the supply member is not listable (mirrors Search visibility). Parent-only.
          */
         get: {
             parameters: {
@@ -3234,6 +3234,230 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/supply/{providerId}/consultation-bookings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Book an open consultation slot (off-platform payment) — OH-203
+         * @description Books one of a listed Provider's OPEN consultation slots. Creates a per-session Provider Booking born `accepted` with NULL payment (no card charge, no payment intent, no Job/Offer) and holds the slot (open → held) atomically. Parent-only and Parent-Subscription-gated (402 on the free browse account). 404 if the Provider is unknown / not listable, or the slot does not belong to them; 409 if the slot is no longer open.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    providerId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ConsultationBookRequest"];
+                };
+            };
+            responses: {
+                /** @description Booking created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ConsultationBookingSummary"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ConsultationBookingError"];
+                    };
+                };
+                /** @description No active Parent Subscription — booking gated */
+                402: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ConsultationBookingError"];
+                    };
+                };
+                /** @description Wrong role (caregiver / provider / admin) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ConsultationBookingError"];
+                    };
+                };
+                /** @description Provider not found / not listable, or slot not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ConsultationBookingError"];
+                    };
+                };
+                /** @description Slot is no longer open */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ConsultationBookingError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bookings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The caller's schedule (their consultation Bookings) — OH-203
+         * @description Returns the authenticated caller's Bookings — a Parent sees the ones they made; a Provider sees the ones on their calendar — each from the viewer's perspective with the counterparty's display name. v1 contains only Provider consultations.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The caller's bookings */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ConsultationBookingList"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ConsultationBookingError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ConsultationBookingError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bookings/{bookingId}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a consultation Booking (releases the held slot) — OH-203
+         * @description Cancels a still-`accepted` Provider consultation — Parent (`parent-cancel`) or Provider (`provider-cancel`). NULL payment, so cancellation just releases the held slot (held → released). 404 if the Booking is not the caller's; 409 if it is past the cancellable window (already completed/cancelled).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    bookingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Booking cancelled */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ConsultationBookingCancel"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ConsultationBookingError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ConsultationBookingError"];
+                    };
+                };
+                /** @description Booking not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ConsultationBookingError"];
+                    };
+                };
+                /** @description Not cancellable from its current state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ConsultationBookingError"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -4483,6 +4707,8 @@ export interface components {
             availabilityNote: string | null;
             availabilitySummary: string | null;
             credentials: components["schemas"]["SupplyProfileCredential"][];
+            providerCredential: components["schemas"]["SupplyProfileProviderCredential"];
+            consultationSlots: components["schemas"]["SupplyProfileConsultationSlot"][];
             rating: components["schemas"]["SupplyProfileRating"];
             ctas: ("message" | "book" | "book-consultation")[];
         };
@@ -4502,6 +4728,20 @@ export interface components {
             type: string;
             label: string;
         };
+        SupplyProfileProviderCredential: {
+            /** @enum {string} */
+            overall: "verified" | "in-review" | "rejected" | "unverified";
+            licenseVerified: boolean;
+            insuranceVerified: boolean;
+            screeningPassed: boolean;
+            publiclyVerified: boolean;
+        } | null;
+        SupplyProfileConsultationSlot: {
+            id: string;
+            date: string;
+            startMin: number;
+            endMin: number;
+        };
         SupplyProfileRating: {
             average: number | null;
             count: number;
@@ -4513,6 +4753,39 @@ export interface components {
         SupplyProfileError: {
             error: string;
             reason?: string;
+        };
+        ConsultationBookingSummary: {
+            id: string;
+            /** @enum {string} */
+            kind: "caregiver" | "provider";
+            /** @enum {string} */
+            state: "requested" | "accepted" | "declined" | "expired" | "in-progress" | "awaiting-confirmation" | "completed" | "disputed" | "cancelled";
+            /** @enum {string} */
+            viewerRole: "parent" | "provider";
+            providerId: string;
+            counterpartyName: string | null;
+            counterpartySpecialty: string | null;
+            scheduledDate: string;
+            startMin: number;
+            endMin: number;
+            rateCents: number | null;
+            autoCompleteAt: string | null;
+        };
+        ConsultationBookingError: {
+            error: string;
+            reason?: string;
+        };
+        ConsultationBookRequest: {
+            /** Format: uuid */
+            slotId: string;
+        };
+        ConsultationBookingList: {
+            bookings: components["schemas"]["ConsultationBookingSummary"][];
+        };
+        ConsultationBookingCancel: {
+            id: string;
+            /** @enum {string} */
+            state: "requested" | "accepted" | "declined" | "expired" | "in-progress" | "awaiting-confirmation" | "completed" | "disputed" | "cancelled";
         };
         ContactUsResponse: {
             id: string;

@@ -9,6 +9,7 @@ import { registerAuthRoutes } from './routes/auth.ts';
 import { registerCaregiverBadgeRoutes } from './routes/caregiver-badges.ts';
 import { registerCaregiverConnectRoutes } from './routes/caregiver-connect.ts';
 import { registerCaregiverProfileRoutes } from './routes/caregiver-profile.ts';
+import { registerConsultationBookingRoutes } from './routes/consultation-bookings.ts';
 import { registerContactUsRoutes } from './routes/contact-us.ts';
 import { registerHealthRoutes } from './routes/health.ts';
 import { registerParentProfileRoutes } from './routes/parent-profile.ts';
@@ -74,6 +75,11 @@ export const openApiInfo = {
       name: 'search',
       description:
         'Unified Search (OH-201) — one Parent-facing surface across Caregivers + clinical Providers: filters (category/specialty, ZIP+radius, date/time ∩ Availability, Rate ceiling, min Rating, Tax-credit-friendly, ages-served, behaviour-comfort), the OH-180 hybrid ranking, and the blur-to-unblur preview wall (1–2 full per category for non-entitled Parents; unblurs on Subscription).',
+    },
+    {
+      name: 'bookings',
+      description:
+        'Provider consultation booking (OH-203) — a Parent books an open consultation slot (slot-pick); the per-session Booking is born `accepted` with NULL payment (off-platform; no Job/Offer/payment-intent), holds the slot, shows on both schedules, and auto-completes after the slot. Parent-Subscription-gated.',
     },
     { name: 'verification', description: 'Supply verification — state + email/phone/ID-doc facts (OH-184)' },
     {
@@ -155,6 +161,7 @@ export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerParentProfileRoutes(v1);
   registerSearchRoutes(v1);
   registerSupplyProfileRoutes(v1);
+  registerConsultationBookingRoutes(v1);
   registerContactUsRoutes(v1);
   registerScreeningRoutes(v1);
   registerUploadRoutes(v1);

@@ -1,6 +1,13 @@
 import { sql, type SqlBool } from 'kysely';
 
 import type { Db } from './db/kysely.ts';
+// Cross-tree, Deno-clean domain module (ADR-0019; explicit-`.ts`). The Booking
+// state machine is the single authority for the auto-complete transition — the
+// sweep claims the due rows and applies what the domain returns.
+import {
+  transitionBooking,
+  type BookingState,
+} from '../../../packages/domain/src/booking-lifecycle/index.ts';
 
 /**
  * Due-row sweeps for the minute tick (ADR-0019 § Decision 4; OH-237).
@@ -10,18 +17,22 @@ import type { Db } from './db/kysely.ts';
  * `FOR UPDATE SKIP LOCKED` so overlapping ticks never double-process, and acts
  * on them inside one transaction.
  *
- * Today exactly one due-work source exists in the schema — FCRA screening
- * disposal (`provider_screenings.purge_at`), which IS the background-check raw
- * 6-month retention sweep (CONTEXT § Retention; @our-haven/domain
- * `RETENTION_HORIZONS.BACKGROUND_CHECK_RAW_RETENTION_MONTHS`). The Booking
- * 24h-expiry, Session auto-confirm, Offer 72h-expiry and the remaining
- * retention/erasure sweeps named in ADR-0019 land here as their owning tickets
- * add the `bookings` / `offers` / account / message tables and their deadline
- * columns (OH-177 / OH-179 / OH-200 / OH-2.13): implement a `Sweep` that scans
- * the deadline column and applies the matching action. OH-182 ships the pure
- * policy those sweeps consume — `planErasure` → `dueDirectives(plan, now)` in
- * @our-haven/domain `retention-planner` decides the {category, action, dueAt};
- * a sweep stays a thin "claim due rows, apply the directive" loop.
+ * Two due-work sources exist today:
+ *   - FCRA screening disposal (`provider_screenings.purge_at`) — the
+ *     background-check raw 6-month retention sweep (CONTEXT § Retention;
+ *     @our-haven/domain `RETENTION_HORIZONS.BACKGROUND_CHECK_RAW_RETENTION_MONTHS`).
+ *   - Consultation auto-complete (`bookings.auto_complete_at`, OH-203) — an
+ *     `accepted` Provider Booking auto-completes once its slot end has passed
+ *     (null payment, no payout; the booking-lifecycle `consultation-auto-complete`
+ *     transition).
+ *
+ * The remaining Booking 24h-expiry / Session auto-confirm / Offer 72h-expiry and
+ * the retention/erasure sweeps named in ADR-0019 land here as their owning
+ * tickets add the deadline columns (OH-179 / OH-2.13): implement a `Sweep` that
+ * scans the deadline column and applies the matching action. OH-182 ships the
+ * pure policy those sweeps consume — `planErasure` → `dueDirectives(plan, now)` in
+ * @our-haven/domain `retention-planner` decides the {category, action, dueAt}; a
+ * sweep stays a thin "claim due rows, apply the directive" loop.
  */
 
 export interface SweepContext {
@@ -98,5 +109,63 @@ export const screeningDisposalSweep: Sweep = {
   },
 };
 
+/**
+ * Consultation auto-complete (OH-203; CONTEXT § Booking — Provider slot-pick,
+ * ADR-0011). A per-session Provider Booking is born `accepted` when the Parent
+ * books the slot; once the slot end (`auto_complete_at`) has passed it
+ * auto-completes — `accepted → completed` — with NO payment side effect (the
+ * clinical service is paid off-platform). The held slot stays held (the
+ * consultation happened); cancellation, not completion, is what releases a slot.
+ *
+ * Claimed with `FOR UPDATE SKIP LOCKED` and completed in the same transaction.
+ */
+/** The auto-complete claim, factored out so a unit test can assert the generated
+ *  SQL carries `for update` + `skip locked` without a live database. */
+export function dueConsultationsQuery(db: Db, now: Date, limit: number) {
+  return db
+    .selectFrom('bookings')
+    .select(['id', 'state'])
+    .where('kind', '=', 'provider')
+    .where('state', '=', 'accepted')
+    .where('auto_complete_at', 'is not', null)
+    .where('auto_complete_at', '<=', now)
+    .orderBy('auto_complete_at', 'asc')
+    .limit(limit)
+    .forUpdate()
+    .skipLocked();
+}
+
+export const consultationAutoCompleteSweep: Sweep = {
+  name: 'consultation_auto_complete',
+  run(db, { now, limit }) {
+    return db.transaction().execute(async (trx) => {
+      const due = (await dueConsultationsQuery(trx, now, limit).execute()) as {
+        id: string;
+        state: BookingState;
+      }[];
+
+      // The Booking state machine is the authority: a consultation completes only
+      // from `accepted`. The WHERE already constrains it, but routing through the
+      // domain keeps the transition rule in one place (and skips anything it rejects).
+      const ids = due
+        .filter((row) => {
+          const r = transitionBooking({ kind: 'provider', state: row.state }, { type: 'consultation-auto-complete' });
+          return r.ok && r.next === 'completed';
+        })
+        .map((row) => row.id);
+
+      if (ids.length === 0) return { name: 'consultation_auto_complete', processed: 0 };
+
+      await trx
+        .updateTable('bookings')
+        .set({ state: 'completed', updated_at: now })
+        .where('id', 'in', ids)
+        .execute();
+
+      return { name: 'consultation_auto_complete', processed: ids.length };
+    });
+  },
+};
+
 /** Every sweep the minute tick runs. Append future deadline sweeps here. */
-export const SWEEPS: readonly Sweep[] = [screeningDisposalSweep];
+export const SWEEPS: readonly Sweep[] = [screeningDisposalSweep, consultationAutoCompleteSweep];

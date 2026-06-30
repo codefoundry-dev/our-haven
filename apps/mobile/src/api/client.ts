@@ -66,6 +66,12 @@ export type SupplyProfile = paths['/v1/supply/{providerId}']['get']['responses']
 export type SupplyProfileCategoryRate = SupplyProfile['categoryRates'][number];
 export type SupplyProfileCredential = SupplyProfile['credentials'][number];
 export type SupplyProfileReview = SupplyProfile['rating']['reviews'][number];
+export type SupplyProfileSlot = SupplyProfile['consultationSlots'][number];
+export type SupplyProfileProviderCredential = NonNullable<SupplyProfile['providerCredential']>;
+
+// Provider consultation booking (OH-203) — book an open slot; the schedule both
+// parties read; cancellation. The POST + list item share one BookingSummary shape.
+export type BookingSummary = paths['/v1/bookings']['get']['responses'][200]['content']['application/json']['bookings'][number];
 
 export class ApiError extends Error {
   constructor(
@@ -265,4 +271,24 @@ export function getSearch(query: SearchQuery = {}): Promise<SearchResponse> {
 export function getSupplyProfile(providerId: string, zip?: string): Promise<SupplyProfile> {
   const qs = zip && zip.trim().length > 0 ? `?zip=${encodeURIComponent(zip.trim())}` : '';
   return get<SupplyProfile>(`/v1/supply/${providerId}${qs}`);
+}
+
+/**
+ * Book one of a Provider's open consultation slots (OH-203). Creates a per-session
+ * Provider Booking born `accepted` with NULL payment (off-platform) and holds the
+ * slot. Throws ApiError 402 when the Parent has no active Subscription, 409 when
+ * the slot is no longer open.
+ */
+export function bookConsultation(providerId: string, slotId: string): Promise<BookingSummary> {
+  return post<BookingSummary>(`/v1/supply/${providerId}/consultation-bookings`, { slotId });
+}
+
+/** The caller's schedule — their consultation Bookings, from the viewer's perspective (OH-203). */
+export function getBookings(): Promise<BookingSummary[]> {
+  return get<{ bookings: BookingSummary[] }>('/v1/bookings').then((r) => r.bookings);
+}
+
+/** Cancel a still-`accepted` consultation Booking, releasing the held slot (OH-203). */
+export function cancelBooking(bookingId: string): Promise<{ id: string; state: BookingSummary['state'] }> {
+  return post<{ id: string; state: BookingSummary['state'] }>(`/v1/bookings/${bookingId}/cancel`, {});
 }

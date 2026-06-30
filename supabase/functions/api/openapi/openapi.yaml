@@ -44,6 +44,12 @@ tags:
       ages-served, behaviour-comfort), the OH-180 hybrid ranking, and the
       blur-to-unblur preview wall (1–2 full per category for non-entitled
       Parents; unblurs on Subscription)."
+  - name: bookings
+    description: Provider consultation booking (OH-203) — a Parent books an open
+      consultation slot (slot-pick); the per-session Booking is born `accepted`
+      with NULL payment (off-platform; no Job/Offer/payment-intent), holds the
+      slot, shows on both schedules, and auto-completes after the slot.
+      Parent-Subscription-gated.
   - name: verification
     description: Supply verification — state + email/phone/ID-doc facts (OH-184)
   - name: screening
@@ -2440,6 +2446,12 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SupplyProfileCredential"
+        providerCredential:
+          $ref: "#/components/schemas/SupplyProfileProviderCredential"
+        consultationSlots:
+          type: array
+          items:
+            $ref: "#/components/schemas/SupplyProfileConsultationSlot"
         rating:
           $ref: "#/components/schemas/SupplyProfileRating"
         ctas:
@@ -2477,6 +2489,8 @@ components:
         - availabilityNote
         - availabilitySummary
         - credentials
+        - providerCredential
+        - consultationSlots
         - rating
         - ctas
     SupplyProfileCategoryRate:
@@ -2518,6 +2532,47 @@ components:
         - id
         - type
         - label
+    SupplyProfileProviderCredential:
+      type: object
+      nullable: true
+      properties:
+        overall:
+          type: string
+          enum:
+            - verified
+            - in-review
+            - rejected
+            - unverified
+        licenseVerified:
+          type: boolean
+        insuranceVerified:
+          type: boolean
+        screeningPassed:
+          type: boolean
+        publiclyVerified:
+          type: boolean
+      required:
+        - overall
+        - licenseVerified
+        - insuranceVerified
+        - screeningPassed
+        - publiclyVerified
+    SupplyProfileConsultationSlot:
+      type: object
+      properties:
+        id:
+          type: string
+        date:
+          type: string
+        startMin:
+          type: integer
+        endMin:
+          type: integer
+      required:
+        - id
+        - date
+        - startMin
+        - endMin
     SupplyProfileRating:
       type: object
       properties:
@@ -2552,6 +2607,112 @@ components:
           type: string
       required:
         - error
+    ConsultationBookingSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum:
+            - caregiver
+            - provider
+        state:
+          type: string
+          enum:
+            - requested
+            - accepted
+            - declined
+            - expired
+            - in-progress
+            - awaiting-confirmation
+            - completed
+            - disputed
+            - cancelled
+        viewerRole:
+          type: string
+          enum:
+            - parent
+            - provider
+        providerId:
+          type: string
+        counterpartyName:
+          type: string
+          nullable: true
+        counterpartySpecialty:
+          type: string
+          nullable: true
+        scheduledDate:
+          type: string
+        startMin:
+          type: integer
+        endMin:
+          type: integer
+        rateCents:
+          type: integer
+          nullable: true
+        autoCompleteAt:
+          type: string
+          nullable: true
+      required:
+        - id
+        - kind
+        - state
+        - viewerRole
+        - providerId
+        - counterpartyName
+        - counterpartySpecialty
+        - scheduledDate
+        - startMin
+        - endMin
+        - rateCents
+        - autoCompleteAt
+    ConsultationBookingError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
+    ConsultationBookRequest:
+      type: object
+      properties:
+        slotId:
+          type: string
+          format: uuid
+      required:
+        - slotId
+    ConsultationBookingList:
+      type: object
+      properties:
+        bookings:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConsultationBookingSummary"
+      required:
+        - bookings
+    ConsultationBookingCancel:
+      type: object
+      properties:
+        id:
+          type: string
+        state:
+          type: string
+          enum:
+            - requested
+            - accepted
+            - declined
+            - expired
+            - in-progress
+            - awaiting-confirmation
+            - completed
+            - disputed
+            - cancelled
+      required:
+        - id
+        - state
     ContactUsResponse:
       type: object
       properties:
@@ -5193,8 +5354,10 @@ paths:
         Caregiver/Provider: identity, per-category Rates with the "from $X"
         teaser, availability, ages-served + behaviour-comfort, languages +
         specialty tags, badges, APPROVED Credentials only, and the public
-        Ratings (with text reviews). 404 when the id is unknown OR the supply
-        member is not listable (mirrors Search visibility). Parent-only.'
+        Ratings (with text reviews). For a Provider it also carries the clinical
+        credential badge (`providerCredential`) and the open `consultationSlots`
+        the Parent can book. 404 when the id is unknown OR the supply member is
+        not listable (mirrors Search visibility). Parent-only.'
       security:
         - supabaseAccessToken: []
       parameters:
@@ -5241,6 +5404,149 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SupplyProfileError"
+  /v1/supply/{providerId}/consultation-bookings:
+    post:
+      tags:
+        - bookings
+      summary: Book an open consultation slot (off-platform payment) — OH-203
+      description: Books one of a listed Provider's OPEN consultation slots. Creates a
+        per-session Provider Booking born `accepted` with NULL payment (no card
+        charge, no payment intent, no Job/Offer) and holds the slot (open →
+        held) atomically. Parent-only and Parent-Subscription-gated (402 on the
+        free browse account). 404 if the Provider is unknown / not listable, or
+        the slot does not belong to them; 409 if the slot is no longer open.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: providerId
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConsultationBookRequest"
+      responses:
+        "201":
+          description: Booking created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsultationBookingSummary"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsultationBookingError"
+        "402":
+          description: No active Parent Subscription — booking gated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsultationBookingError"
+        "403":
+          description: Wrong role (caregiver / provider / admin)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsultationBookingError"
+        "404":
+          description: Provider not found / not listable, or slot not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsultationBookingError"
+        "409":
+          description: Slot is no longer open
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsultationBookingError"
+  /v1/bookings:
+    get:
+      tags:
+        - bookings
+      summary: The caller's schedule (their consultation Bookings) — OH-203
+      description: Returns the authenticated caller's Bookings — a Parent sees the
+        ones they made; a Provider sees the ones on their calendar — each from
+        the viewer's perspective with the counterparty's display name. v1
+        contains only Provider consultations.
+      security:
+        - supabaseAccessToken: []
+      responses:
+        "200":
+          description: The caller's bookings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsultationBookingList"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsultationBookingError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsultationBookingError"
+  /v1/bookings/{bookingId}/cancel:
+    post:
+      tags:
+        - bookings
+      summary: Cancel a consultation Booking (releases the held slot) — OH-203
+      description: Cancels a still-`accepted` Provider consultation — Parent
+        (`parent-cancel`) or Provider (`provider-cancel`). NULL payment, so
+        cancellation just releases the held slot (held → released). 404 if the
+        Booking is not the caller's; 409 if it is past the cancellable window
+        (already completed/cancelled).
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: bookingId
+          in: path
+      responses:
+        "200":
+          description: Booking cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsultationBookingCancel"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsultationBookingError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsultationBookingError"
+        "404":
+          description: Booking not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsultationBookingError"
+        "409":
+          description: Not cancellable from its current state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsultationBookingError"
   /v1/providers/contact-us:
     post:
       tags:

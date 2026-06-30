@@ -171,6 +171,48 @@ export interface ProviderSlotsTable {
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
 }
 
+/**
+ * Bookings (OH-203) — the persisted Booking the OH-177 `booking-lifecycle` deep
+ * module backs, scoped to the **Provider consultation** slice in v1. A Parent
+ * books an open `provider_slots` window: the act holds the slot and writes one
+ * row here born `accepted` (`kind = 'provider'`), NULL payment (off-platform,
+ * ADR-0011 — no Job/Offer/payment-intent). It auto-completes when the minute
+ * tick sweeps `auto_complete_at <= now()` (state `accepted → completed`) and is
+ * visible on both schedules: the Parent's (`parent_uid`) and the Provider's
+ * (`provider_id`).
+ *
+ * Shaped for the full caregiver|provider model (the `kind` fork + the nine
+ * lifecycle states), but only the provider path writes today; Caregiver
+ * hourly/payment columns land with OH-179's persistence. `parent_uid` is the
+ * auth user uuid (no `parents` table — matches `parent_subscriptions.uid`).
+ * `rate_cents` is a display-only per-session snapshot. `auto_complete_at`
+ * interprets the slot's wall-clock end as UTC (the tz-agnostic slot simplification).
+ */
+export interface BookingsTable {
+  id: Generated<string>;
+  kind: 'caregiver' | 'provider';
+  state:
+    | 'requested'
+    | 'accepted'
+    | 'declined'
+    | 'expired'
+    | 'in-progress'
+    | 'awaiting-confirmation'
+    | 'completed'
+    | 'disputed'
+    | 'cancelled';
+  parent_uid: string;
+  provider_id: string;
+  slot_id: string | null;
+  scheduled_date: ColumnType<string, string, string>;
+  start_min: number;
+  end_min: number;
+  rate_cents: number | null;
+  auto_complete_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  created_at: Generated<Date>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
 export interface ProviderScreeningsTable {
   id: Generated<string>;
   provider_id: string;
@@ -452,6 +494,7 @@ export interface Database {
   provider_category_rates: ProviderCategoryRatesTable;
   caregiver_credentials: CaregiverCredentialsTable;
   provider_slots: ProviderSlotsTable;
+  bookings: BookingsTable;
   provider_screenings: ProviderScreeningsTable;
   specialist_credentials: SpecialistCredentialsTable;
   provider_home_childcare_registrations: ProviderHomeChildcareRegistrationsTable;
