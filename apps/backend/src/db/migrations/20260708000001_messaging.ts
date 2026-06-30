@@ -131,6 +131,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   // a thread's participants without nested cross-table RLS on every Realtime
   // change check (fast + correct). `auth.uid()` is the JWT `sub`, available even
   // inside a definer function (it reads the request claims GUC).
+  // plpgsql-canary-exception: message-thread-participant
   await sql`
     CREATE OR REPLACE FUNCTION public.is_message_thread_participant(p_thread uuid)
     RETURNS boolean

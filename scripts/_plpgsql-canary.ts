@@ -25,6 +25,16 @@ export const REGISTERED_EXCEPTIONS: Readonly<Record<string, string>> = {
   // mirror. Bounded (insert-one-row, ON CONFLICT DO NOTHING); not a write-path
   // domain switch-trigger.
   'profiles-mirror': 'auth.users → public.profiles sign-up mirror (20260704000001_profiles)',
+  // is_message_thread_participant(uuid) SECURITY DEFINER STABLE *SQL* helper
+  // (migration 20260708000001_messaging): a single EXISTS participant lookup
+  // that backs the `messages` SELECT RLS policy authorising Supabase Realtime
+  // `postgres_changes` delivery to the two thread participants (ADR-0010). The
+  // policy predicate must be evaluable in-DB on every changed row, so there is
+  // no TS-orchestrated alternative; SECURITY DEFINER avoids the messages policy
+  // recursing through message_threads' own RLS on every Realtime change check.
+  // Bounded: pure SQL (no control flow), read-only, no business logic.
+  'message-thread-participant':
+    'is_message_thread_participant RLS/Realtime helper (20260708000001_messaging)',
 };
 
 const RULES: ReadonlyArray<{ name: string; re: RegExp }> = [
