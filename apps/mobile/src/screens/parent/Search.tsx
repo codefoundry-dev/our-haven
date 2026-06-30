@@ -22,6 +22,7 @@ import { Screen } from '@/components/Screen';
 import { FilterChip } from '@/components/ui/Chip';
 import { IconButton } from '@/components/ui/IconButton';
 import { SearchBar } from '@/components/ui/SearchBar';
+import { useParentGate } from '@/lib/paywallGate';
 import { usePreview } from '@/preview/PreviewProvider';
 import { shapeBrowse } from '@/preview/questionnaire';
 import {
@@ -44,6 +45,7 @@ function summaryLabel(filters: SearchFilters): string {
 export default function SearchScreen() {
   const router = useRouter();
   const { answers } = usePreview();
+  const { openPaywall } = useParentGate();
 
   // Seed the first browse from the ephemeral preview answers, if any.
   const shape = shapeBrowse(answers);
@@ -109,7 +111,7 @@ export default function SearchScreen() {
 
       {/* Paywall banner — only when there is locked supply behind the wall */}
       {!entitled && blurredCount > 0 ? (
-        <Pressable onPress={() => router.push('/paywall')} style={styles.paywall}>
+        <Pressable onPress={() => openPaywall()} style={styles.paywall}>
           <View style={styles.paywallIcon}>
             <Icon name="sparkle" size={16} color={colors.inkInv} />
           </View>
@@ -162,7 +164,7 @@ export default function SearchScreen() {
               onOpen={() => openProfile(item.card.id, item.card.role)}
             />
           ) : (
-            <BlurredResultCard key={item.card.id} card={item.card} layout="row" onUnlock={() => router.push('/paywall')} />
+            <BlurredResultCard key={item.card.id} card={item.card} layout="row" onUnlock={() => openPaywall()} />
           ),
         )}
       </View>

@@ -14,6 +14,7 @@ import { WebPageHeader } from '@/components/web/ParentWebShell';
 import { SignOutConfirmModal, useSignOutFlow } from '@/components/web/SignOutConfirm';
 import { Icon, type IconName } from '@/components/Icon';
 import { Toggle } from '@/components/ui/Toggle';
+import { useParentGate } from '@/lib/paywallGate';
 import { colors, fonts, radii, shadow } from '@/theme/tokens';
 
 interface LinkRow {
@@ -34,6 +35,7 @@ const SETTINGS: LinkRow[] = [
 export function ParentAccountWeb() {
   const router = useRouter();
   const go = (route?: string) => route && router.push(route as never);
+  const { openPaywall, entitled } = useParentGate();
   const signOutFlow = useSignOutFlow();
   const [sms, setSms] = useState(true);
   const [email, setEmail] = useState(true);
@@ -71,14 +73,18 @@ export function ParentAccountWeb() {
               <Icon name="sparkle" size={20} color={colors.brand} />
             </View>
             <View style={styles.flexMin}>
-              <Text style={styles.subTitle}>Our Haven membership · active</Text>
-              <Text style={styles.subSub}>$14.99 / month · renews Jul 14, 2026</Text>
+              <Text style={styles.subTitle}>
+                {entitled ? 'Our Haven membership · active' : 'No active membership'}
+              </Text>
+              <Text style={styles.subSub}>
+                {entitled ? '$14.99 / month · manage via Stripe' : 'Subscribe to message, book, and post Jobs.'}
+              </Text>
             </View>
             <Pressable
-              onPress={() => go('/paywall')}
+              onPress={() => openPaywall()}
               style={({ pressed }) => [styles.manageBtn, { opacity: pressed ? 0.9 : 1 }]}
             >
-              <Text style={styles.manageText}>Manage</Text>
+              <Text style={styles.manageText}>{entitled ? 'Manage' : 'Subscribe'}</Text>
             </Pressable>
           </View>
 

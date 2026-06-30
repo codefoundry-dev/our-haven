@@ -73,6 +73,15 @@ export type SupplyProfileProviderCredential = NonNullable<SupplyProfile['provide
 // parties read; cancellation. The POST + list item share one BookingSummary shape.
 export type BookingSummary = paths['/v1/bookings']['get']['responses'][200]['content']['application/json']['bookings'][number];
 
+// Parent Subscription (OH-193 server / OH-204 paywall). The summary the demand-side
+// paywall reads (`entitled` is the gate); the hosted-checkout link the paywall opens;
+// the Billing Portal link the entitled "manage subscription" affordance opens.
+export type ParentSubscription = paths['/v1/parents/me/subscription']['get']['responses'][200]['content']['application/json'];
+export type ParentSubscriptionStatus = ParentSubscription['status'];
+export type ParentCheckoutLink = paths['/v1/parents/me/subscription/checkout-link']['post']['responses'][200]['content']['application/json'];
+export type ParentCheckoutLinkBody = NonNullable<paths['/v1/parents/me/subscription/checkout-link']['post']['requestBody']>['content']['application/json'];
+export type ParentPortalLink = paths['/v1/parents/me/subscription/portal-link']['post']['responses'][200]['content']['application/json'];
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -291,4 +300,26 @@ export function getBookings(): Promise<BookingSummary[]> {
 /** Cancel a still-`accepted` consultation Booking, releasing the held slot (OH-203). */
 export function cancelBooking(bookingId: string): Promise<{ id: string; state: BookingSummary['state'] }> {
   return post<{ id: string; state: BookingSummary['state'] }>(`/v1/bookings/${bookingId}/cancel`, {});
+}
+
+/**
+ * Parent Subscription — the demand-side paywall (OH-204) on top of OH-193's
+ * server endpoints. `getParentSubscription` reads the gate state (`entitled`,
+ * true iff status is active/trialing); `createParentCheckoutLink` returns the
+ * Stripe-hosted Checkout URL the paywall opens (status flips when the billing
+ * webhook fires, so the paywall polls the summary on return);
+ * `createParentPortalLink` returns the Billing Portal URL for an entitled Parent
+ * to manage / cancel. Parent-role-gated server-side (403 for supply roles).
+ */
+
+export function getParentSubscription(): Promise<ParentSubscription> {
+  return get<ParentSubscription>('/v1/parents/me/subscription');
+}
+
+export function createParentCheckoutLink(body: ParentCheckoutLinkBody = {}): Promise<ParentCheckoutLink> {
+  return post<ParentCheckoutLink>('/v1/parents/me/subscription/checkout-link', body);
+}
+
+export function createParentPortalLink(): Promise<ParentPortalLink> {
+  return post<ParentPortalLink>('/v1/parents/me/subscription/portal-link', undefined);
 }

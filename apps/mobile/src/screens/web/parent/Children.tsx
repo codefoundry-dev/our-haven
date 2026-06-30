@@ -20,6 +20,7 @@ import { useRouter } from 'expo-router';
 import { Icon } from '@/components/Icon';
 import { Card } from '@/components/ui/Card';
 import { WebPageHeader } from '@/components/web/ParentWebShell';
+import { useParentGate } from '@/lib/paywallGate';
 import { colors, fonts, radii, shadow, type ColorToken } from '@/theme/tokens';
 
 interface Child {
@@ -51,6 +52,8 @@ const BEHAVIOURS: readonly string[] = [
 export function ParentChildrenWeb() {
   const router = useRouter();
   const go = (route: string) => router.push(route as never);
+  const { gate } = useParentGate();
+  const postJob = () => gate({ kind: 'post-job' }, () => go('/post-job'));
 
   const [children] = useState<Child[]>(CHILDREN);
   // Safety behaviours stay locked until the Parent explicitly consents.
@@ -94,7 +97,7 @@ export function ParentChildrenWeb() {
               </View>
               <Text style={styles.emptyTitle}>No children added yet</Text>
               <Text style={styles.emptySub}>Add a child to speed up posting Jobs and sending Booking requests.</Text>
-              <Pressable accessibilityRole="button" onPress={() => go('/post-job')} style={styles.emptyBtn}>
+              <Pressable accessibilityRole="button" onPress={postJob} style={styles.emptyBtn}>
                 <Icon name="plus" size={16} color={colors.inkInv} />
                 <Text style={styles.emptyBtnText}>Add child</Text>
               </Pressable>
