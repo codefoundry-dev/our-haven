@@ -15,10 +15,11 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 
 import { ApiError, roleClaim } from '@/api/client';
 import { useAuth } from '@/auth/AuthProvider';
+import { clearPendingRole, getPendingRole } from '@/auth/pendingRole';
 import { RolePickCards } from '@/components/RolePickCards';
 import { Screen } from '@/components/Screen';
 import { SupplyOnboarding } from '@/components/SupplyOnboarding';
-import { resolveRoleClaimView } from '@/lib/roleClaim';
+import { resolveRoleClaimView, type RoleClaimView } from '@/lib/roleClaim';
 import { isRole, type Role } from '@/lib/roles';
 import { colors, fonts } from '@/theme/tokens';
 
@@ -30,12 +31,34 @@ export default function RoleClaimScreen() {
   // refresh / late session hydration on web still resolves to the right
   // onboarding instead of flashing the role picker.
   const intendedRaw = session?.user?.user_metadata?.intended_role;
-  const intended = isRole(intendedRaw) ? intendedRaw : null;
+  const metaIntended = isRole(intendedRaw) ? intendedRaw : null;
+
+  // OAuth sign-up can't write intended_role to user_metadata (the user doesn't
+  // exist until the provider returns), so the choice is stashed locally and read
+  // back here as a fallback. Wait for that async read before resolving the view
+  // so an OAuth Parent never flashes the role picker mid-resolution.
+  const [pending, setPending] = useState<Role | null>(null);
+  const [pendingResolved, setPendingResolved] = useState(false);
+  useEffect(() => {
+    let active = true;
+    getPendingRole().then((r) => {
+      if (active) {
+        setPending(r);
+        setPendingResolved(true);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const intended = metaIntended ?? pending;
 
   // `override` only applies to a legacy account with no intended role that must
   // pick one from the cards below.
   const [override, setOverride] = useState<Role | null>(null);
-  const view = resolveRoleClaimView({ status, intended, override });
+  const view: RoleClaimView =
+    metaIntended || pendingResolved ? resolveRoleClaimView({ status, intended, override }) : { kind: 'loading' };
 
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -49,6 +72,7 @@ export default function RoleClaimScreen() {
       setError(null);
       try {
         await roleClaim({ role: 'parent' });
+        await clearPendingRole(); // consumed — don't let it misroute a later user
         if (!cancelled) await refresh(); // gate then redirects into (app)
       } catch (e) {
         if (!cancelled) {
