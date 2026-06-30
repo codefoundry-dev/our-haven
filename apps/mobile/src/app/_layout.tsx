@@ -90,8 +90,10 @@ function useAuthRedirect(status: ReturnType<typeof useAuth>['status'], role: Rol
     // The password-recovery link establishes a real (role-less) session, which
     // would otherwise read as "authed, no role" and bounce to role-claim. Keep
     // the user on the reset-password screen until they've set a new password;
-    // the screen routes onward (via "/") once that succeeds.
-    if (inAuth && segments[1] === 'reset-password') return;
+    // the screen routes onward (via "/") once that succeeds. (`includes` rather
+    // than `segments[1]` so this typechecks against the untyped-routes fallback
+    // segments tuple in CI, where the generated route types aren't present.)
+    if (inAuth && segments.includes('reset-password')) return;
 
     if (status === 'anon') {
       if (!inAuth) router.replace('/(auth)/role-pick' as Href);
