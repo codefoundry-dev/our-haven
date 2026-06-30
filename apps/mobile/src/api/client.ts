@@ -35,6 +35,15 @@ export type CredentialCreateBody = paths['/v1/providers/me/credentials']['post']
 export type CaregiverConnectSummary = paths['/v1/caregiver/connect/summary']['get']['responses'][200]['content']['application/json'];
 export type CaregiverConnectOnboardingLink = paths['/v1/caregiver/connect/onboarding-link']['post']['responses'][200]['content']['application/json'];
 
+// Parent profile (OH-200) — family-level Bio + Preferences + consent-gated Safety
+// Behaviors + default service address.
+export type ParentProfile = paths['/v1/parents/me/profile']['get']['responses'][200]['content']['application/json'];
+export type ParentProfilePatch = paths['/v1/parents/me/profile']['patch']['requestBody']['content']['application/json'];
+export type ParentPreference = NonNullable<ParentProfilePatch['preferences']>[number];
+export type ParentSafetyBehavior = ParentProfile['safetyBehaviors'][number];
+export type ParentDefaultAddress = ParentProfile['defaultAddress'];
+export type ParentSafetyBehaviorsBody = paths['/v1/parents/me/profile/safety-behaviors']['put']['requestBody']['content']['application/json'];
+
 // Provider (clinical) profile builder (OH-189).
 export type ProviderClinicalProfile = paths['/v1/providers/me/clinical-profile']['get']['responses'][200]['content']['application/json'];
 export type ProviderClinicalProfilePatch = paths['/v1/providers/me/clinical-profile']['patch']['requestBody']['content']['application/json'];
@@ -60,7 +69,7 @@ async function authHeaders(): Promise<Record<string, string>> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-async function request<T>(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<T> {
+async function request<T>(method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE', path: string, body?: unknown): Promise<T> {
   if (!API_URL) {
     throw new ApiError(0, 'EXPO_PUBLIC_API_URL is not set — cannot reach the backend.');
   }
@@ -83,6 +92,7 @@ async function request<T>(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: str
 const get = <T>(path: string): Promise<T> => request<T>('GET', path);
 const post = <T>(path: string, body: unknown): Promise<T> => request<T>('POST', path, body);
 const patchJson = <T>(path: string, body: unknown): Promise<T> => request<T>('PATCH', path, body);
+const putJson = <T>(path: string, body: unknown): Promise<T> => request<T>('PUT', path, body);
 const del = <T>(path: string): Promise<T> => request<T>('DELETE', path);
 
 /**
@@ -155,6 +165,36 @@ export function getConnectSummary(): Promise<CaregiverConnectSummary> {
 
 export function createConnectOnboardingLink(): Promise<CaregiverConnectOnboardingLink> {
   return post<CaregiverConnectOnboardingLink>('/v1/caregiver/connect/onboarding-link', undefined);
+}
+
+/**
+ * Parent profile (OH-200). The family-level profile: Bio + Preferences + the
+ * optional default service address (`patchParentProfile`), and the consent-gated
+ * Safety-Behaviors checklist — `grantSafetyConsent` stamps the explicit consent
+ * that unlocks `putSafetyBehaviors`; `withdrawSafetyConsent` erases the behaviours
+ * + timestamp (Bio + Preferences survive). Saving behaviours without consent 403s.
+ */
+
+export function getParentProfile(): Promise<ParentProfile> {
+  return get<ParentProfile>('/v1/parents/me/profile');
+}
+
+export function patchParentProfile(patch: ParentProfilePatch): Promise<ParentProfile> {
+  return patchJson<ParentProfile>('/v1/parents/me/profile', patch);
+}
+
+export function grantSafetyConsent(): Promise<ParentProfile> {
+  return post<ParentProfile>('/v1/parents/me/profile/consent', undefined);
+}
+
+export function withdrawSafetyConsent(): Promise<ParentProfile> {
+  return del<ParentProfile>('/v1/parents/me/profile/consent');
+}
+
+export function putSafetyBehaviors(safetyBehaviors: ParentSafetyBehavior[]): Promise<ParentProfile> {
+  return putJson<ParentProfile>('/v1/parents/me/profile/safety-behaviors', {
+    safetyBehaviors,
+  } satisfies ParentSafetyBehaviorsBody);
 }
 
 /**
