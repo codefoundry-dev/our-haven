@@ -16,6 +16,13 @@ import {
   fromRateCents,
   type CategoryRate,
 } from '../../../../packages/domain/src/caregiver-profile/index.ts';
+// The clinical credential-status projection (OH-189) — the Provider-facing badge
+// OH-202 deferred. Reused here so the Parent profile view collapses the
+// license/insurance/screening facts exactly as the Provider's own builder does.
+import {
+  deriveCredentialStatus,
+  type ClinicalCredentialFacts,
+} from '../../../../packages/domain/src/provider-profile/index.ts';
 import {
   ctasForRole,
   haversineMiles,
@@ -61,12 +68,13 @@ import {
  * `zip` query is the viewer's search origin; when it (and the candidate's ZIP)
  * resolve to a centroid, `distanceMiles` is returned, else null.
  *
- * SCOPE (OH-202): the Caregiver profile is fully populated. A Provider row is
- * returned (role-tagged, with specialty + per-session Rate + availability) so the
- * shared screen never breaks, but the clinical-credential display + consultation
- * slot booking are OH-203. The Message / Book CTAs themselves are navigation;
- * the Subscription paywall that gates them is OH-204, and the real messaging
- * thread is OH-205.
+ * SCOPE: the Caregiver profile is fully populated (OH-202). The Provider profile
+ * is now complete too (OH-203): the `providerCredential` clinical badge (the
+ * license/insurance/screening collapse) and the open `consultationSlots` the
+ * Parent books are returned here; the booking mutation itself lives in
+ * consultation-bookings.ts. The Message / Book CTAs are navigation; the
+ * Subscription paywall UI is OH-204 (the booking mutation enforces the gate
+ * server-side), and the real messaging thread is OH-205.
  *
  * KNOWN HOLE (flagged, not blocking — same as Search): Ratings have no
  * persistence yet, so `projectPublicSupplyRating` is fed an empty exchange list
@@ -113,6 +121,36 @@ const CredentialSchema = z
   })
   .openapi('SupplyProfileCredential');
 
+/** A bookable (open) consultation slot — the Provider slot-pick (OH-203). */
+const ConsultationSlotSchema = z
+  .object({
+    id: z.string(),
+    /** Calendar day, ISO `YYYY-MM-DD`. */
+    date: z.string(),
+    /** Window start/end, minutes-since-midnight (0..1440). */
+    startMin: z.number().int(),
+    endMin: z.number().int(),
+  })
+  .openapi('SupplyProfileConsultationSlot');
+
+/**
+ * The Provider's Parent-facing clinical credential display (OH-203) — the badge
+ * OH-202 deferred. A read-only collapse of the license/insurance/screening facts;
+ * null for Caregivers (their public Credentials are the approved-only
+ * `credentials` list above).
+ */
+const ProviderCredentialSchema = z
+  .object({
+    /** Collapsed badge — `verified` only when every clinical gate is cleared. */
+    overall: z.enum(['verified', 'in-review', 'rejected', 'unverified']),
+    licenseVerified: z.boolean(),
+    insuranceVerified: z.boolean(),
+    screeningPassed: z.boolean(),
+    /** Whether to show the public "Verified" badge (overall === 'verified'). */
+    publiclyVerified: z.boolean(),
+  })
+  .openapi('SupplyProfileProviderCredential');
+
 /** The public supply-side rating display (aggregate + count + full text). */
 const RatingSchema = z
   .object({
@@ -158,6 +196,10 @@ const SupplyProfileResponse = z
     /** Rendered one-line Availability summary (e.g. "Weekdays, afternoons"). */
     availabilitySummary: z.string().nullable(),
     credentials: z.array(CredentialSchema),
+    /** Provider clinical credential badge (OH-203); null for Caregivers. */
+    providerCredential: ProviderCredentialSchema.nullable(),
+    /** Open (bookable) consultation slots — Providers only; empty for Caregivers. */
+    consultationSlots: z.array(ConsultationSlotSchema),
     rating: RatingSchema,
     /** Role-appropriate actions: Caregiver → message+book; Provider → book-consultation. */
     ctas: z.array(CtaEnum),
@@ -203,6 +245,18 @@ interface CredentialRow {
   label: string;
   review_state: string;
 }
+interface SlotRow {
+  id: string;
+  slot_date: Date | string;
+  start_min: number;
+  end_min: number;
+}
+/** The admin's holistic clinical decision + which docs were uploaded (OH-184/186). */
+interface SpecialistRow {
+  decision: 'verified' | 'rejected' | null;
+  license_doc_object_path: string | null;
+  insurance_doc_object_path: string | null;
+}
 
 /* ── helpers ────────────────────────────────────────────────────────────────── */
 
@@ -213,6 +267,10 @@ function photoUrlFor(supabaseUrl: string, bucket: string, objectPath: string | n
 
 function round1(n: number): number {
   return Math.round(n * 10) / 10;
+}
+
+function toDateStr(value: Date | string): string {
+  return value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10);
 }
 
 async function loadProviderById(db: Db, providerId: string): Promise<ProviderRow | null> {
@@ -250,7 +308,7 @@ const getSupplyProfileRoute = createRoute({
   tags: ['search'],
   summary: 'Read one listable supply member\'s Parent-facing profile (OH-202)',
   description:
-    'Returns the full public profile of a single listable Caregiver/Provider: identity, per-category Rates with the "from $X" teaser, availability, ages-served + behaviour-comfort, languages + specialty tags, badges, APPROVED Credentials only, and the public Ratings (with text reviews). 404 when the id is unknown OR the supply member is not listable (mirrors Search visibility). Parent-only.',
+    'Returns the full public profile of a single listable Caregiver/Provider: identity, per-category Rates with the "from $X" teaser, availability, ages-served + behaviour-comfort, languages + specialty tags, badges, APPROVED Credentials only, and the public Ratings (with text reviews). For a Provider it also carries the clinical credential badge (`providerCredential`) and the open `consultationSlots` the Parent can book. 404 when the id is unknown OR the supply member is not listable (mirrors Search visibility). Parent-only.',
   security: [{ supabaseAccessToken: [] }],
   middleware: [requireAuth({ roles: ['parent'] })] as const,
   request: { params: ParamSchema, query: QuerySchema },
@@ -273,7 +331,7 @@ export function registerSupplyProfileRoutes(app: OpenAPIHono<AppEnv>): void {
     // supply member exists.
     if (!provider) return c.json({ error: 'profile_not_found' }, 404);
 
-    const [profile, ver, sub, fcch, rateRows, credentialRows] = await Promise.all([
+    const [profile, ver, sub, fcch, rateRows, credentialRows, slotRows, specialist] = await Promise.all([
       db
         .selectFrom('provider_profiles')
         .select([
@@ -329,6 +387,23 @@ export function registerSupplyProfileRoutes(app: OpenAPIHono<AppEnv>): void {
         .where('provider_id', '=', provider.id)
         .orderBy('created_at', 'asc')
         .execute() as Promise<unknown> as Promise<CredentialRow[]>,
+      // Open (bookable) consultation slots — the Provider slot-pick (OH-203).
+      // Empty for Caregivers (they have no provider_slots rows).
+      db
+        .selectFrom('provider_slots')
+        .select(['id', 'slot_date', 'start_min', 'end_min'])
+        .where('provider_id', '=', provider.id)
+        .where('state', '=', 'open')
+        .orderBy('slot_date', 'asc')
+        .orderBy('start_min', 'asc')
+        .execute() as Promise<unknown> as Promise<SlotRow[]>,
+      // The Provider's holistic clinical decision + uploaded-doc facts (OH-184/186),
+      // feeding the credential-status collapse. Absent for Caregivers.
+      db
+        .selectFrom('specialist_credentials')
+        .select(['decision', 'license_doc_object_path', 'insurance_doc_object_path'])
+        .where('provider_id', '=', provider.id)
+        .executeTakeFirst() as Promise<unknown> as Promise<SpecialistRow | undefined>,
     ]);
 
     // Not searchable yet, paused, or below the activation/listing bar → 404.
@@ -364,6 +439,39 @@ export function registerSupplyProfileRoutes(app: OpenAPIHono<AppEnv>): void {
     // reveal projection so the capture story only supplies the rows.
     const publicRating = projectPublicSupplyRating([], new Date());
 
+    // Open consultation slots — the Parent's slot-pick surface (OH-203). Always
+    // present; non-empty only for a (listed) Provider.
+    const consultationSlots = slotRows.map((s) => ({
+      id: s.id,
+      date: toDateStr(s.slot_date),
+      startMin: s.start_min,
+      endMin: s.end_min,
+    }));
+
+    // Provider clinical credential badge (OH-203) — the display OH-202 deferred.
+    // Collapsed via the same domain projection the Provider's own builder uses.
+    // (A listable Provider has already cleared license + insurance + screening,
+    // so this surfaces the "Verified" trust badge + its breakdown.)
+    let providerCredential: z.infer<typeof ProviderCredentialSchema> | null = null;
+    if (provider.role === 'provider') {
+      const facts: ClinicalCredentialFacts = {
+        licenseVerified: ver?.license_verified_at != null,
+        insuranceVerified: ver?.insurance_verified_at != null,
+        screeningPassed: ver?.screening_passed_at != null,
+        rejected: ver?.rejected_at != null || specialist?.decision === 'rejected',
+        licenseUploaded: specialist?.license_doc_object_path != null,
+        insuranceUploaded: specialist?.insurance_doc_object_path != null,
+      };
+      const status = deriveCredentialStatus(facts);
+      providerCredential = {
+        overall: status.overall,
+        licenseVerified: facts.licenseVerified,
+        insuranceVerified: facts.insuranceVerified,
+        screeningPassed: facts.screeningPassed,
+        publiclyVerified: status.publiclyVerified,
+      };
+    }
+
     const categoryKey = provider.role === 'provider' ? 'provider' : categories[0] ?? 'caregiver';
 
     const body = {
@@ -396,6 +504,8 @@ export function registerSupplyProfileRoutes(app: OpenAPIHono<AppEnv>): void {
       credentials: credentialRows
         .filter((r) => r.review_state === 'approved')
         .map((r) => ({ id: r.id, type: r.type, label: r.label })),
+      providerCredential,
+      consultationSlots,
       rating: {
         average: publicRating.averageStars,
         count: publicRating.count,

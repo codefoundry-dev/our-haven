@@ -8,8 +8,14 @@
  * Reviews TabStrip, and a sticky CTA bar driven by the profile's role-appropriate
  * `ctas` (Caregiver → Message + Book; Provider → Book-a-consultation). Real data
  * via `useSupplyProfile`; only APPROVED Credentials and PUBLIC Ratings are shown
- * (the backend enforces both). The paywall that gates Message/Book is OH-204; the
- * real messaging thread is OH-205.
+ * (the backend enforces both).
+ *
+ * For a Provider (OH-203) the screen also shows the open consultation slots
+ * (slot-pick) + the Verified-clinician credential breakdown; tapping a slot and
+ * "Book consultation" creates the null-payment Booking (`bookConsultation`) and
+ * lands on the schedule. A 402 surfaces the Parent-membership gate inline (the
+ * upsell UI is OH-204). The paywall that gates Caregiver Message/Book is OH-204;
+ * the real messaging thread is OH-205.
  */
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -26,7 +32,7 @@ import { Portrait } from '@/components/ui/PhotoPlaceholder';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { RatingValue } from '@/components/ui/StarRating';
 import { TabStrip } from '@/components/ui/TabStrip';
-import type { SupplyProfile } from '@/api/client';
+import { ApiError, bookConsultation, type SupplyProfile } from '@/api/client';
 import { useSupplyProfile } from '@/lib/useSupplyProfile';
 import {
   ageBandLabel,
@@ -39,6 +45,7 @@ import {
   profileBadges,
   profileCategory,
 } from '@/lib/supply-profile';
+import { providerCredentialRows, slotLabel } from '@/lib/consultation';
 import { colors, fonts, radii, shadow } from '@/theme/tokens';
 
 const TABS = ['About', 'Availability', 'Reviews'] as const;
@@ -49,6 +56,9 @@ export default function ProviderDetailScreen() {
   const { id, zip } = useLocalSearchParams<{ id?: string; role?: string; zip?: string }>();
   const { data, loading, error, notFound, refetch } = useSupplyProfile(id ?? null, zip);
   const [tab, setTab] = useState<Tab>('About');
+  const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+  const [booking, setBooking] = useState(false);
+  const [bookError, setBookError] = useState<string | null>(null);
 
   if (loading) {
     return (
@@ -92,6 +102,33 @@ export default function ProviderDetailScreen() {
   const openMessage = () =>
     router.push({ pathname: '/message-thread', params: { id: data.id, name: data.displayName ?? '' } });
   const openBooking = () => router.push({ pathname: '/booking-compose', params: { id: data.id } });
+
+  // Consultation slot-pick (OH-203): book the selected open slot. Null payment —
+  // no checkout. 402 means the Parent membership gate (the upsell UI is OH-204).
+  const slots = data.consultationSlots;
+  const bookConsult = async () => {
+    if (!selectedSlot) {
+      setBookError('Pick a time to book.');
+      return;
+    }
+    setBooking(true);
+    setBookError(null);
+    try {
+      await bookConsultation(data.id, selectedSlot);
+      router.replace('/bookings');
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 402) {
+        setBookError('A Parent membership is required to book a consultation.');
+      } else if (e instanceof ApiError && e.status === 409) {
+        setBookError('That time was just taken — pick another slot.');
+        refetch();
+        setSelectedSlot(null);
+      } else {
+        setBookError(e instanceof ApiError ? e.message : 'Could not complete the booking.');
+      }
+      setBooking(false);
+    }
+  };
 
   return (
     <Screen edges={['top']} contentStyle={styles.content}>
@@ -158,6 +195,40 @@ export default function ProviderDetailScreen() {
             ))}
           </View>
 
+          {/* Consultation slots — Provider slot-pick (OH-203) */}
+          {data.role === 'provider' ? (
+            <View style={styles.slotsSection}>
+              <Text style={styles.eyebrow}>Open consultation slots</Text>
+              {slots.length === 0 ? (
+                <Text style={styles.slotsEmpty}>
+                  No open slots right now. Check back soon or message to ask about availability.
+                </Text>
+              ) : (
+                <View style={styles.slotList}>
+                  {slots.map((s) => {
+                    const sel = selectedSlot === s.id;
+                    return (
+                      <Pressable
+                        key={s.id}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: sel }}
+                        onPress={() => {
+                          setSelectedSlot(s.id);
+                          setBookError(null);
+                        }}
+                        style={({ pressed }) => [styles.slotRow, sel && styles.slotRowSel, { opacity: pressed ? 0.9 : 1 }]}
+                      >
+                        <Icon name="clock" size={16} color={sel ? colors.brand : colors.ink2} />
+                        <Text style={[styles.slotText, sel && styles.slotTextSel]}>{slotLabel(s)}</Text>
+                        {sel ? <Icon name="check-circle" size={18} color={colors.brand} /> : null}
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
+            </View>
+          ) : null}
+
           {/* Tabs */}
           <TabStrip tabs={TABS} value={tab} onChange={setTab} style={styles.tabs} />
 
@@ -169,26 +240,34 @@ export default function ProviderDetailScreen() {
 
       {/* Sticky CTA — driven by the profile's role-appropriate actions */}
       <View style={styles.footer}>
-        {data.ctas.includes('message') ? (
-          <Pressable
-            onPress={openMessage}
-            accessibilityRole="button"
-            style={({ pressed }) => [styles.secondaryBtn, { opacity: pressed ? 0.9 : 1 }]}
-          >
-            <Icon name="message" size={18} color={colors.ink} />
-            <Text style={styles.secondaryText}>Message</Text>
-          </Pressable>
-        ) : null}
-        {data.ctas.includes('book') ? (
-          <PrimaryButton onPress={openBooking} style={styles.primaryBtn}>
-            Book a slot
-          </PrimaryButton>
-        ) : null}
-        {data.ctas.includes('book-consultation') ? (
-          <PrimaryButton onPress={openBooking} style={styles.primaryBtn}>
-            Book consultation
-          </PrimaryButton>
-        ) : null}
+        {bookError ? <Text style={styles.bookError}>{bookError}</Text> : null}
+        <View style={styles.footerRow}>
+          {data.ctas.includes('message') ? (
+            <Pressable
+              onPress={openMessage}
+              accessibilityRole="button"
+              style={({ pressed }) => [styles.secondaryBtn, { opacity: pressed ? 0.9 : 1 }]}
+            >
+              <Icon name="message" size={18} color={colors.ink} />
+              <Text style={styles.secondaryText}>Message</Text>
+            </Pressable>
+          ) : null}
+          {data.ctas.includes('book') ? (
+            <PrimaryButton onPress={openBooking} style={styles.primaryBtn}>
+              Book a slot
+            </PrimaryButton>
+          ) : null}
+          {data.ctas.includes('book-consultation') ? (
+            <PrimaryButton
+              onPress={bookConsult}
+              loading={booking}
+              disabled={slots.length === 0}
+              style={styles.primaryBtn}
+            >
+              {selectedSlot ? 'Book consultation' : 'Select a time'}
+            </PrimaryButton>
+          ) : null}
+        </View>
       </View>
     </Screen>
   );
@@ -267,6 +346,25 @@ function AboutTab({ data }: { data: SupplyProfile }) {
           <View style={styles.wrapRow}>
             {data.credentials.map((cr) => (
               <CredBadge key={cr.id} label={cr.label} status="verified" icon="check-circle" />
+            ))}
+          </View>
+        </>
+      ) : null}
+
+      {/* Provider clinical credential breakdown (OH-203) */}
+      {data.providerCredential ? (
+        <>
+          <Text style={styles.eyebrow}>Verified clinician</Text>
+          <View style={styles.credList}>
+            {providerCredentialRows(data.providerCredential).map((row) => (
+              <View key={row.label} style={styles.credRow}>
+                <Icon
+                  name={row.ok ? 'check-circle' : 'clock'}
+                  size={16}
+                  color={row.ok ? colors.success : colors.ink3}
+                />
+                <Text style={styles.credText}>{row.label}</Text>
+              </View>
             ))}
           </View>
         </>
@@ -365,6 +463,29 @@ const styles = StyleSheet.create({
   offerText: { fontFamily: fonts.bold, fontSize: 11.5, color: colors.brand },
 
   badges: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 16 },
+
+  slotsSection: { marginTop: 24 },
+  slotsEmpty: { fontFamily: fonts.regular, fontSize: 14, lineHeight: 20, color: colors.ink2, marginTop: 10 },
+  slotList: { gap: 8, marginTop: 12 },
+  slotRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    height: 52,
+    borderRadius: radii.md,
+    borderWidth: 1.5,
+    borderColor: colors.hairline,
+    backgroundColor: colors.surface,
+  },
+  slotRowSel: { borderColor: colors.brand, backgroundColor: colors.brandSoft },
+  slotText: { flex: 1, minWidth: 0, fontFamily: fonts.medium, fontSize: 14, color: colors.ink },
+  slotTextSel: { fontFamily: fonts.semibold, color: colors.ink },
+
+  credList: { gap: 10, marginTop: 12 },
+  credRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  credText: { fontFamily: fonts.medium, fontSize: 14, color: colors.ink },
+
   tabs: { marginTop: 24 },
   tabBody: { marginTop: 20 },
   paragraph: { fontFamily: fonts.regular, fontSize: 15, lineHeight: 24, color: colors.ink },
@@ -395,8 +516,6 @@ const styles = StyleSheet.create({
   reviewText: { fontFamily: fonts.regular, fontSize: 14, lineHeight: 20, color: colors.ink, marginTop: 10 },
 
   footer: {
-    flexDirection: 'row',
-    gap: 10,
     backgroundColor: colors.surface,
     paddingHorizontal: 24,
     paddingTop: 14,
@@ -405,6 +524,8 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 28,
     ...shadow.e2,
   },
+  footerRow: { flexDirection: 'row', gap: 10 },
+  bookError: { fontFamily: fonts.medium, fontSize: 13, color: colors.danger, marginBottom: 10, textAlign: 'center' },
   secondaryBtn: {
     flex: 1,
     flexDirection: 'row',

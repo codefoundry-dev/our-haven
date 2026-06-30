@@ -19,6 +19,8 @@ interface Tables {
   provider_home_childcare_registrations?: Record<string, unknown>[];
   provider_category_rates?: Record<string, unknown>[];
   caregiver_credentials?: Record<string, unknown>[];
+  provider_slots?: Record<string, unknown>[];
+  specialist_credentials?: Record<string, unknown>[];
 }
 
 function makeDb(tables: Tables = {}) {
@@ -156,7 +158,24 @@ interface Body {
   fcchBadge: boolean;
   specialty: string | null;
   behaviourComfort: string[];
+  consultationSlots: { id: string; date: string; startMin: number; endMin: number }[];
+  providerCredential: {
+    overall: string;
+    licenseVerified: boolean;
+    insuranceVerified: boolean;
+    screeningPassed: boolean;
+    publiclyVerified: boolean;
+  } | null;
 }
+
+const slot = (id: string, date: string, start_min: number, end_min: number, state = 'open') => ({
+  id,
+  provider_id: PID,
+  slot_date: date,
+  start_min,
+  end_min,
+  state,
+});
 
 describe('GET /v1/supply/{id} — auth', () => {
   it('401 without a bearer token', async () => {
@@ -184,6 +203,9 @@ describe('GET /v1/supply/{id} — listable Caregiver', () => {
     expect(body.taxCreditFriendly).toBe(true);
     expect(body.fcchBadge).toBe(true);
     expect(body.behaviourComfort).toEqual(['meltdowns']);
+    // A Caregiver has no consultation slots + no clinical credential badge.
+    expect(body.consultationSlots).toEqual([]);
+    expect(body.providerCredential).toBeNull();
   });
 
   it('surfaces ONLY approved Credentials', async () => {
@@ -229,7 +251,7 @@ describe('GET /v1/supply/{id} — visibility (mirrors Search)', () => {
 });
 
 describe('GET /v1/supply/{id} — Provider role', () => {
-  it('returns the consultation CTA + per-session rate when listed', async () => {
+  it('returns the consultation CTA + per-session rate + open slots + Verified badge when listed', async () => {
     const app = buildApp(
       makeDeps(
         makeDb({
@@ -239,6 +261,11 @@ describe('GET /v1/supply/{id} — Provider role', () => {
           provider_subscriptions: [{ provider_id: PID, status: 'active' }],
           provider_category_rates: [],
           caregiver_credentials: [],
+          // One bookable slot is surfaced; a released one must not be (route filters state='open').
+          provider_slots: [slot('s1', '2026-07-10', 540, 600)],
+          specialist_credentials: [
+            { provider_id: PID, decision: 'verified', license_doc_object_path: 'l.pdf', insurance_doc_object_path: 'i.pdf' },
+          ],
         }),
       ),
     );
@@ -249,6 +276,15 @@ describe('GET /v1/supply/{id} — Provider role', () => {
     expect(body.specialty).toBe('slp');
     expect(body.fromRateCents).toBe(12000);
     expect(body.ctas).toEqual(['book-consultation']);
+    expect(body.consultationSlots).toEqual([{ id: 's1', date: '2026-07-10', startMin: 540, endMin: 600 }]);
+    // A listable Provider has cleared license + insurance + screening → Verified.
+    expect(body.providerCredential).toEqual({
+      overall: 'verified',
+      licenseVerified: true,
+      insuranceVerified: true,
+      screeningPassed: true,
+      publiclyVerified: true,
+    });
   });
 
   it('404 for a Provider without an active Subscription (listing gate)', async () => {

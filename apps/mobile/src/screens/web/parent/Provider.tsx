@@ -7,6 +7,11 @@
  * TabStrip; right is a Book/Message action card with the rate + quick facts (the
  * desktop form of the native sticky CTA bar). Real data via `useSupplyProfile`;
  * only APPROVED Credentials + PUBLIC Ratings are shown. RN primitives only.
+ *
+ * For a Provider (OH-203) the action card carries the open consultation slots
+ * (slot-pick) + the book button (`bookConsultation`, null payment); the About tab
+ * adds the Verified-clinician credential breakdown. A 402 surfaces the
+ * Parent-membership gate inline (the upsell UI is OH-204).
  */
 import { useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -22,7 +27,7 @@ import { Portrait } from '@/components/ui/PhotoPlaceholder';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { RatingValue } from '@/components/ui/StarRating';
 import { TabStrip } from '@/components/ui/TabStrip';
-import type { SupplyProfile } from '@/api/client';
+import { ApiError, bookConsultation, type SupplyProfile } from '@/api/client';
 import { useSupplyProfile } from '@/lib/useSupplyProfile';
 import {
   ageBandLabel,
@@ -35,6 +40,7 @@ import {
   profileBadges,
   profileCategory,
 } from '@/lib/supply-profile';
+import { providerCredentialRows, slotLabel } from '@/lib/consultation';
 import { colors, fonts, radii, shadow } from '@/theme/tokens';
 
 const TABS = ['About', 'Availability', 'Reviews'] as const;
@@ -45,6 +51,9 @@ export function ParentProviderWeb() {
   const { id, zip } = useLocalSearchParams<{ id?: string; role?: string; zip?: string }>();
   const { data, loading, error, notFound, refetch } = useSupplyProfile(id ?? null, zip);
   const [tab, setTab] = useState<Tab>('About');
+  const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+  const [booking, setBooking] = useState(false);
+  const [bookError, setBookError] = useState<string | null>(null);
 
   if (loading) {
     return (
@@ -104,6 +113,32 @@ export function ParentProviderWeb() {
   const openMessage = () =>
     router.push({ pathname: '/message-thread', params: { id: data.id, name: data.displayName ?? '' } });
   const openBooking = () => router.push({ pathname: '/booking-compose', params: { id: data.id } });
+
+  // Consultation slot-pick (OH-203): book the selected open slot (null payment).
+  const slots = data.consultationSlots;
+  const bookConsult = async () => {
+    if (!selectedSlot) {
+      setBookError('Pick a time to book.');
+      return;
+    }
+    setBooking(true);
+    setBookError(null);
+    try {
+      await bookConsultation(data.id, selectedSlot);
+      router.replace('/bookings');
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 402) {
+        setBookError('A Parent membership is required to book a consultation.');
+      } else if (e instanceof ApiError && e.status === 409) {
+        setBookError('That time was just taken — pick another slot.');
+        refetch();
+        setSelectedSlot(null);
+      } else {
+        setBookError(e instanceof ApiError ? e.message : 'Could not complete the booking.');
+      }
+      setBooking(false);
+    }
+  };
 
   return (
     <View>
@@ -178,9 +213,43 @@ export function ParentProviderWeb() {
                 </PrimaryButton>
               ) : null}
               {data.ctas.includes('book-consultation') ? (
-                <PrimaryButton onPress={openBooking} style={styles.bookBtn}>
-                  Book consultation
-                </PrimaryButton>
+                <View style={styles.slotsBlock}>
+                  <Text style={styles.slotsHeading}>Open consultation slots</Text>
+                  {slots.length === 0 ? (
+                    <Text style={styles.slotsEmpty}>No open slots right now. Check back soon.</Text>
+                  ) : (
+                    <View style={styles.slotList}>
+                      {slots.map((s) => {
+                        const sel = selectedSlot === s.id;
+                        return (
+                          <Pressable
+                            key={s.id}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected: sel }}
+                            onPress={() => {
+                              setSelectedSlot(s.id);
+                              setBookError(null);
+                            }}
+                            style={({ pressed }) => [styles.slotRow, sel && styles.slotRowSel, { opacity: pressed ? 0.9 : 1 }]}
+                          >
+                            <Icon name="clock" size={15} color={sel ? colors.brand : colors.ink2} />
+                            <Text style={[styles.slotText, sel && styles.slotTextSel]}>{slotLabel(s)}</Text>
+                            {sel ? <Icon name="check-circle" size={16} color={colors.brand} /> : null}
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  )}
+                  {bookError ? <Text style={styles.bookError}>{bookError}</Text> : null}
+                  <PrimaryButton
+                    onPress={bookConsult}
+                    loading={booking}
+                    disabled={slots.length === 0}
+                    style={styles.bookBtn}
+                  >
+                    {selectedSlot ? 'Book consultation' : 'Select a time'}
+                  </PrimaryButton>
+                </View>
               ) : null}
               {data.ctas.includes('message') ? (
                 <Pressable
@@ -295,6 +364,25 @@ function AboutTab({ data }: { data: SupplyProfile }) {
           <View style={styles.wrapRow}>
             {data.credentials.map((cr) => (
               <CredBadge key={cr.id} label={cr.label} status="verified" icon="check-circle" />
+            ))}
+          </View>
+        </>
+      ) : null}
+
+      {/* Provider clinical credential breakdown (OH-203) */}
+      {data.providerCredential ? (
+        <>
+          <Text style={styles.eyebrow}>Verified clinician</Text>
+          <View style={styles.credList}>
+            {providerCredentialRows(data.providerCredential).map((row) => (
+              <View key={row.label} style={styles.credRow}>
+                <Icon
+                  name={row.ok ? 'check-circle' : 'clock'}
+                  size={16}
+                  color={row.ok ? colors.success : colors.ink3}
+                />
+                <Text style={styles.credText}>{row.label}</Text>
+              </View>
             ))}
           </View>
         </>
@@ -421,6 +509,30 @@ const styles = StyleSheet.create({
   bookBtn: { height: 52 },
   messageBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 52, borderRadius: radii.pill, borderWidth: 1.5, borderColor: colors.ink, backgroundColor: colors.surface, marginTop: 10 },
   messageText: { fontFamily: fonts.semibold, fontSize: 15, letterSpacing: -0.2, color: colors.ink },
+
+  slotsBlock: { gap: 10 },
+  slotsHeading: { fontFamily: fonts.semibold, fontSize: 11, letterSpacing: 0.4, textTransform: 'uppercase', color: colors.ink3 },
+  slotsEmpty: { fontFamily: fonts.regular, fontSize: 13, lineHeight: 18, color: colors.ink2 },
+  slotList: { gap: 8 },
+  slotRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    height: 46,
+    borderRadius: radii.md,
+    borderWidth: 1.5,
+    borderColor: colors.hairline,
+    backgroundColor: colors.surface,
+  },
+  slotRowSel: { borderColor: colors.brand, backgroundColor: colors.brandSoft },
+  slotText: { flex: 1, minWidth: 0, fontFamily: fonts.medium, fontSize: 13, color: colors.ink },
+  slotTextSel: { fontFamily: fonts.semibold },
+  bookError: { fontFamily: fonts.medium, fontSize: 12.5, color: colors.danger },
+
+  credList: { gap: 10, marginTop: 12 },
+  credRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  credText: { fontFamily: fonts.medium, fontSize: 14, color: colors.ink },
 
   facts: { marginTop: 18, gap: 14 },
   factRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
