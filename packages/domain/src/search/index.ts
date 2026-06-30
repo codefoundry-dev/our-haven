@@ -31,12 +31,13 @@
  * Pure + deterministic; no clock (the ranker injects `now`).
  */
 
-import {
-  rankCandidates,
-  type RankingCandidate,
-  type RankingOptions,
-  type ScoredCandidate,
-} from '../search-ranking/index.js';
+// Cross-module TYPES only — the hybrid ranker itself lives in `../search-ranking`
+// (OH-180). A bare, type-only `@our-haven/domain` import (the credentials-type
+// pattern in caregiver-profile.ts) keeps this module Deno-clean: the Edge bundles
+// `search` cross-tree, and a runtime relative `.js` import of a sibling domain
+// module fails Deno's module graph (Deno does not remap `.js`→`.ts`). The handler
+// composes `rankCandidates` + `projectPreviewWall` directly (routes/search.ts).
+import type { RankingCandidate, ScoredCandidate } from '@our-haven/domain';
 
 export const SEARCH_MODULE_VERSION = '0.1.0-OH-201';
 
@@ -332,16 +333,9 @@ export function projectPreviewWall(
   };
 }
 
-/**
- * Convenience pipeline: rank the filtered cards (delegating to the OH-180
- * hybrid scorer) then apply the preview wall. The handler can call this, or
- * call `rankCandidates` + `projectPreviewWall` itself when it needs the scored
- * candidates in between.
- */
-export function rankAndProject(
-  cards: readonly SupplyCard[],
-  ranking: RankingOptions,
-  wall: PreviewWallOptions,
-): PreviewWall {
-  return projectPreviewWall(rankCandidates(cards, ranking), wall);
-}
+// NOTE: the rank-then-wall pipeline is composed at the handler layer
+// (routes/search.ts: `projectPreviewWall(rankCandidates(...), ...)`) rather than
+// via a convenience export here — a runtime import of the sibling
+// `../search-ranking` module would make this module non-Deno-clean (see the
+// type-only import note above), and the handler needs the scored candidates in
+// between anyway.
