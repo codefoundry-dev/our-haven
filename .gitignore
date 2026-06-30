@@ -25,6 +25,7 @@ apps/*/.env
 apps/*/.env.*
 !apps/*/.env.example
 apps/backend/credentials/
+apps/mobile/credentials/
 apps/backend/.gcp/
 **/*-credentials.json
 **/service-account*.json

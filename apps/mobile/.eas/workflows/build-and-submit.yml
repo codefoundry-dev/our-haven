@@ -1,0 +1,46 @@
+# EAS Workflow — build both platforms (production profile) and submit to
+# TestFlight (iOS) + Google Play Internal track (Android). OH-198.
+#
+# Triggered manually (`eas workflow:run .eas/workflows/build-and-submit.yml`) or
+# automatically when a `release-*` git tag is pushed. Requires the project to be
+# linked first (`eas init`) and submit credentials configured (see
+# docs/eas-build.md). The Android Play track is set to `internal` in eas.json's
+# submit.production profile.
+name: Build and submit (TestFlight + Play Internal)
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - release-*
+
+jobs:
+  build_ios:
+    name: Build iOS (production)
+    type: build
+    params:
+      platform: ios
+      profile: production
+
+  build_android:
+    name: Build Android (production)
+    type: build
+    params:
+      platform: android
+      profile: production
+
+  submit_ios:
+    name: Submit to TestFlight
+    type: submit
+    needs: [build_ios]
+    params:
+      build_id: ${{ needs.build_ios.outputs.build_id }}
+      profile: production
+
+  submit_android:
+    name: Submit to Play Internal
+    type: submit
+    needs: [build_android]
+    params:
+      build_id: ${{ needs.build_android.outputs.build_id }}
+      profile: production
