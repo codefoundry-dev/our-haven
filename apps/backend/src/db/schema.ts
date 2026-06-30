@@ -419,17 +419,58 @@ export interface StripeTaxCalculationsTable {
 }
 
 /**
+ * A Direct-Message thread (OH-205) — a 1:1 conversation between a Parent and a
+ * supply member. v1 only creates pre-acceptance Parent↔Caregiver threads
+ * (ADR-0011); `job_id` is NULL until OH-179 materialisation rebinds the thread.
+ * `body`/preview values are always the redacted, delivery-safe text.
+ */
+export interface MessageThreadsTable {
+  id: Generated<string>;
+  parent_uid: string;
+  supply_uid: string;
+  provider_id: string;
+  supply_role: string;
+  job_id: string | null;
+  created_at: Generated<Date>;
+  last_message_at: ColumnType<Date, Date | string | undefined, Date | string>;
+  last_message_preview: ColumnType<string | null, string | null | undefined, string | null>;
+  last_message_redacted: ColumnType<boolean, boolean | undefined, boolean>;
+}
+
+/**
  * Chat messages for live Direct-Message threads, enabled for Supabase Realtime
- * (OH-174 skeleton). Minimal foundational shape; OH-2.13 extends it. The
- * realtime helper (src/supabase/realtime.ts) subscribes to INSERTs filtered by
- * `thread_id`.
+ * (OH-174 skeleton; OH-205 data model). `body` holds the REDACTED, delivery-safe
+ * text (redaction happens at write time because Realtime broadcasts the row);
+ * `redacted` is true when contact info was stripped. The unredacted original
+ * lives in `message_flags`. The realtime helper subscribes to INSERTs filtered
+ * by `thread_id`.
  */
 export interface MessagesTable {
   id: Generated<string>;
   thread_id: string;
   sender_uid: string;
   body: string;
+  redacted: ColumnType<boolean, boolean | undefined, boolean>;
   created_at: Generated<Date>;
+}
+
+/**
+ * Trust & Safety flagged-thread queue (OH-205; CONTEXT § Trust & Safety). One
+ * row per message that tripped the disintermediation detector — the UNREDACTED
+ * original + match metadata, for T&S review. Service-role-only (RLS enabled, no
+ * policy); never published to Realtime.
+ */
+export interface MessageFlagsTable {
+  id: Generated<string>;
+  message_id: string;
+  thread_id: string;
+  sender_uid: string;
+  categories: ColumnType<string[], string[], string[]>;
+  original_body: string;
+  matches: ColumnType<unknown[], unknown[], unknown[]>;
+  created_at: Generated<Date>;
+  reviewed_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  reviewed_by: string | null;
 }
 
 /**
@@ -504,7 +545,9 @@ export interface Database {
   parent_profiles: ParentProfilesTable;
   provider_contact_intakes: ProviderContactIntakesTable;
   stripe_tax_calculations: StripeTaxCalculationsTable;
+  message_threads: MessageThreadsTable;
   messages: MessagesTable;
+  message_flags: MessageFlagsTable;
   notification_outbox: NotificationOutboxTable;
   notification_push_tokens: NotificationPushTokensTable;
   notification_web_push_subscriptions: NotificationWebPushSubscriptionsTable;

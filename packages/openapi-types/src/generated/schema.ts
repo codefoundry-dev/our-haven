@@ -3464,6 +3464,270 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/threads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The caller's inbox (their Direct-Message threads) — OH-205
+         * @description Returns the authenticated caller's threads from their viewer perspective — a Parent sees the Caregivers they messaged; a Caregiver sees the Parents who messaged them — newest activity first. (Provider threads do not exist in v1 → empty.)
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The caller's threads */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MessageThreadList"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MessagingError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MessagingError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Open (get-or-create) a Direct-Message thread with a Caregiver — OH-205
+         * @description Parent-only, idempotent get-or-create of the pre-acceptance Direct-Message thread with a listable Caregiver (ADR-0011 — DM is Caregiver-only). Parent-Subscription-gated (402 on the free browse account). 404 if the supply member is unknown, not a Caregiver, or not listable (paused/unverified) — never reveal hidden supply.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["OpenThreadRequest"];
+                };
+            };
+            responses: {
+                /** @description Thread (existing or newly created) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MessageThreadSummary"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MessagingError"];
+                    };
+                };
+                /** @description No active Parent Subscription — messaging gated */
+                402: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MessagingError"];
+                    };
+                };
+                /** @description Wrong role (caregiver / provider / admin) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MessagingError"];
+                    };
+                };
+                /** @description Caregiver not found / not listable */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MessagingError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/threads/{threadId}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A thread's transcript (delivery-safe) — OH-205
+         * @description Returns a thread's messages (oldest first) for a participant. Bodies are already redacted (delivery-safe). 404 if the thread is unknown or not the caller's — never reveal another's thread.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    threadId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The transcript */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MessageList"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MessagingError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MessagingError"];
+                    };
+                };
+                /** @description Thread not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MessagingError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Send a message (redacted at delivery) — OH-205
+         * @description Sends a message into a thread the caller participates in. The body is run through the disintermediation detector and stored REDACTED (delivery-safe) — the unredacted original is queued for Trust & Safety. A Parent send is Parent-Subscription-gated (402); Caregiver replies are not. 404 if the thread is not the caller's.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    threadId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SendMessageRequest"];
+                };
+            };
+            responses: {
+                /** @description Delivered (redacted) message */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Message"];
+                    };
+                };
+                /** @description Empty message body */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MessagingError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MessagingError"];
+                    };
+                };
+                /** @description No active Parent Subscription — messaging gated */
+                402: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MessagingError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MessagingError"];
+                    };
+                };
+                /** @description Thread not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MessagingError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/providers/contact-us": {
         parameters: {
             query?: never;
@@ -4786,6 +5050,43 @@ export interface components {
             id: string;
             /** @enum {string} */
             state: "requested" | "accepted" | "declined" | "expired" | "in-progress" | "awaiting-confirmation" | "completed" | "disputed" | "cancelled";
+        };
+        MessageThreadSummary: {
+            id: string;
+            providerId: string;
+            counterpartyName: string | null;
+            /** @enum {string} */
+            counterpartyRole: "parent" | "caregiver" | "provider";
+            /** @enum {string} */
+            anchor: "thread" | "job";
+            lastMessagePreview: string | null;
+            lastMessageAt: string;
+            lastMessageRedacted: boolean;
+        };
+        MessagingError: {
+            error: string;
+            reason?: string;
+        };
+        OpenThreadRequest: {
+            /** Format: uuid */
+            providerId: string;
+        };
+        MessageThreadList: {
+            threads: components["schemas"]["MessageThreadSummary"][];
+        };
+        MessageList: {
+            messages: components["schemas"]["Message"][];
+        };
+        Message: {
+            id: string;
+            threadId: string;
+            senderUid: string;
+            body: string;
+            redacted: boolean;
+            createdAt: string;
+        };
+        SendMessageRequest: {
+            body: string;
         };
         ContactUsResponse: {
             id: string;
