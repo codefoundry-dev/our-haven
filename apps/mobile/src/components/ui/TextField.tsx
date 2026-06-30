@@ -86,6 +86,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  input: { flex: 1, fontFamily: fonts.medium, fontSize: 15, color: colors.ink, paddingVertical: 14 },
+  // outlineStyle:'none' suppresses the browser's square focus outline on web (TextInput
+  // renders a real <input>); the rounded `box` border is the single focus affordance.
+  input: { flex: 1, fontFamily: fonts.medium, fontSize: 15, color: colors.ink, paddingVertical: 14, outlineStyle: 'none' } as object,
   helper: { fontFamily: fonts.regular, fontSize: 12, color: colors.ink3, marginTop: 6, paddingLeft: 4 },
 });
