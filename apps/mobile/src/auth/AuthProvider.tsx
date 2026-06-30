@@ -3,11 +3,14 @@
  * derived permanent role (read from the access token's app_metadata, ADR-0011).
  */
 import type { Session } from '@supabase/supabase-js';
+import * as Linking from 'expo-linking';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Platform } from 'react-native';
 
 import { isSupabaseConfigured, supabase } from '@/auth/supabase';
 import { isRole, type Role } from '@/lib/roles';
+
+const isWeb = Platform.OS === 'web' && typeof window !== 'undefined';
 
 /**
  * Where the email-confirmation link returns the user. On web, back to the
@@ -17,8 +20,19 @@ import { isRole, type Role } from '@/lib/roles';
  * NOTE: every origin used here must be in Supabase Auth → URL Configuration →
  * Redirect URLs, or GoTrue ignores it and falls back to the Site URL.
  */
-const emailRedirectTo =
-  Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : undefined;
+const emailRedirectTo = isWeb ? window.location.origin : undefined;
+
+/**
+ * Where the password-reset email returns the user — the dedicated reset-password
+ * route, so the recovery session lands on the "set a new password" form. On web
+ * that's an absolute origin URL; on native it's the `ourhaven://reset-password`
+ * deep link (the screen exchanges the link's tokens for the recovery session).
+ * Like emailRedirectTo, this URL must be allow-listed in Supabase Auth → URL
+ * Configuration → Redirect URLs.
+ */
+const recoveryRedirectTo = isWeb
+  ? `${window.location.origin}/reset-password`
+  : Linking.createURL('reset-password');
 
 type Status = 'loading' | 'authed' | 'anon';
 
@@ -41,6 +55,12 @@ interface AuthValue {
   signIn: (email: string, password: string) => Promise<{ error?: string }>;
   signUp: (args: SignUpArgs) => Promise<{ error?: string; needsConfirmation?: boolean }>;
   signOut: () => Promise<void>;
+  /** Email a password-reset link (no-op for the caller if the address is unknown — GoTrue
+   *  never reveals whether an account exists, so success here just means "the email was sent
+   *  if it matched an account"). The link returns to the reset-password screen. */
+  resetPassword: (email: string) => Promise<{ error?: string }>;
+  /** Set a new password for the user in the active (recovery) session. */
+  updatePassword: (password: string) => Promise<{ error?: string }>;
   /** Pull a fresh access token — call after role-claim so app_metadata.role lands in the JWT. */
   refresh: () => Promise<void>;
 }
@@ -98,6 +118,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       async signOut() {
         await supabase.auth.signOut();
+      },
+      async resetPassword(email) {
+        const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+          redirectTo: recoveryRedirectTo,
+        });
+        return { error: error?.message };
+      },
+      async updatePassword(password) {
+        const { error } = await supabase.auth.updateUser({ password });
+        return { error: error?.message };
       },
       async refresh() {
         const { data } = await supabase.auth.refreshSession();

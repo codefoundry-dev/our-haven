@@ -99,6 +99,14 @@ export default function SignInScreen() {
         />
       </View>
 
+      <Pressable
+        onPress={() => router.push('/(auth)/forgot-password' as Href)}
+        hitSlop={8}
+        style={styles.forgotRow}
+      >
+        <Text style={styles.forgot}>Forgot password?</Text>
+      </Pressable>
+
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <PrimaryButton
@@ -124,6 +132,8 @@ const styles = StyleSheet.create({
   link: { fontFamily: fonts.bold, fontSize: 13, color: colors.ink, textDecorationLine: 'underline' },
   notice: { marginTop: 20 },
   fields: { gap: 12, marginTop: 24 },
+  forgotRow: { alignSelf: 'flex-end', marginTop: 12 },
+  forgot: { fontFamily: fonts.semibold, fontSize: 13, color: colors.ink2, textDecorationLine: 'underline' },
   error: { fontFamily: fonts.medium, fontSize: 13, color: colors.danger, marginTop: 12 },
   cta: { marginTop: 18 },
 });

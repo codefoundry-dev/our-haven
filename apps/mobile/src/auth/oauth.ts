@@ -40,7 +40,7 @@ export interface OAuthResult {
  * errors can arrive in either part. (URLSearchParams is polyfilled app-wide by
  * react-native-url-polyfill, imported from auth/supabase.)
  */
-function paramsFromRedirect(url: string): Record<string, string> {
+export function paramsFromRedirect(url: string): Record<string, string> {
   const out: Record<string, string> = {};
   const absorb = (segment: string) => {
     new URLSearchParams(segment).forEach((value, key) => {

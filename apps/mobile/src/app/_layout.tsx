@@ -87,6 +87,12 @@ function useAuthRedirect(status: ReturnType<typeof useAuth>['status'], role: Rol
     const inRoleClaim = root === 'role-claim';
     const inApp = root === '(app)';
 
+    // The password-recovery link establishes a real (role-less) session, which
+    // would otherwise read as "authed, no role" and bounce to role-claim. Keep
+    // the user on the reset-password screen until they've set a new password;
+    // the screen routes onward (via "/") once that succeeds.
+    if (inAuth && segments[1] === 'reset-password') return;
+
     if (status === 'anon') {
       if (!inAuth) router.replace('/(auth)/role-pick' as Href);
       return;
