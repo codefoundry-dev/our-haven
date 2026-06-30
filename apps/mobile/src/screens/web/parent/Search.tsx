@@ -49,7 +49,10 @@ export function ParentSearchWeb() {
   const total = data?.total ?? 0;
 
   const openProfile = (id: string, role: string) =>
-    router.push({ pathname: '/provider-detail', params: { id, role } });
+    router.push({
+      pathname: '/provider-detail',
+      params: { id, role, ...(filters.zip.trim() ? { zip: filters.zip.trim() } : {}) },
+    });
 
   return (
     <View>

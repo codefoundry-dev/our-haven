@@ -11,7 +11,7 @@
  * `@/screens/web/shared/MessageThread` and is chosen by `message-thread.web.tsx`.
  */
 import { useState } from 'react';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { Icon } from '@/components/Icon';
@@ -22,6 +22,9 @@ import { colors, fonts, radii, shadow } from '@/theme/tokens';
 
 export default function MessageThreadScreen() {
   const router = useRouter();
+  const { name } = useLocalSearchParams<{ id?: string; name?: string }>();
+  const counterpart = name && name.trim().length > 0 ? name.trim() : 'Maya Okafor';
+  const firstName = counterpart.split(' ')[0];
   const [bannerOpen, setBannerOpen] = useState(true);
   const [draft, setDraft] = useState('');
 
@@ -30,10 +33,10 @@ export default function MessageThreadScreen() {
       {/* Header */}
       <View style={styles.header}>
         <IconButton name="chevron-left" onPress={() => router.back()} accessibilityLabel="Back" />
-        <Avatar label="Maya" tone="catTutor" size="sm" online />
+        <Avatar label={counterpart} tone="catTutor" size="sm" online />
         <View style={styles.headerName}>
           <Text style={styles.name} numberOfLines={1}>
-            Maya Okafor
+            {counterpart}
           </Text>
           <View style={styles.statusRow}>
             <View style={styles.onlineDot} />
@@ -86,7 +89,7 @@ export default function MessageThreadScreen() {
           <TextInput
             value={draft}
             onChangeText={setDraft}
-            placeholder="Message Maya…"
+            placeholder={`Message ${firstName}…`}
             placeholderTextColor={colors.ink3}
             style={styles.input}
           />

@@ -277,7 +277,7 @@ interface ProfileRow {
   behaviour_comfort: string[] | null;
   updated_at: Date | string | null;
 }
-interface VerificationRow {
+export interface VerificationRow {
   provider_id: string;
   phone_confirmed_at: Date | string | null;
   screening_passed_at: Date | string | null;
@@ -290,7 +290,7 @@ interface RateRow {
   category: string;
   published_rate_cents: number;
 }
-interface ProviderSubRow {
+export interface ProviderSubRow {
   provider_id: string;
   status: StripeSubscriptionStatus | null;
 }
@@ -332,8 +332,13 @@ function isPresent(value: Date | string | null): boolean {
   return value != null;
 }
 
-/** The activation/listing bar a supply row must clear to appear in search. */
-function isListable(role: 'caregiver' | 'provider', ver: VerificationRow | undefined, sub: ProviderSubRow | undefined): boolean {
+/**
+ * The activation/listing bar a supply row must clear to appear in search — and,
+ * by extension, to be viewable on the Parent-facing profile-detail surface
+ * (supply-profile.ts reuses this so the two surfaces can never disagree about
+ * who is publicly visible).
+ */
+export function isListable(role: 'caregiver' | 'provider', ver: VerificationRow | undefined, sub: ProviderSubRow | undefined): boolean {
   if (!ver) return false;
   if (isPresent(ver.rejected_at)) return false;
   if (!isPresent(ver.phone_confirmed_at)) return false; // hard activation gate (OH-181)

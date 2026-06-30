@@ -18,6 +18,7 @@ import { registerProviderProfileRoutes } from './routes/provider-profile.ts';
 import { registerProviderSubscriptionRoutes } from './routes/provider-subscription.ts';
 import { registerScreeningRoutes } from './routes/screening.ts';
 import { registerSearchRoutes } from './routes/search.ts';
+import { registerSupplyProfileRoutes } from './routes/supply-profile.ts';
 import { registerUploadRoutes } from './routes/uploads.ts';
 import { registerVerificationRoutes } from './routes/verification.ts';
 import { registerCheckrWebhookRoutes } from './routes/webhooks/checkr.ts';
@@ -153,6 +154,7 @@ export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerParentSubscriptionRoutes(v1);
   registerParentProfileRoutes(v1);
   registerSearchRoutes(v1);
+  registerSupplyProfileRoutes(v1);
   registerContactUsRoutes(v1);
   registerScreeningRoutes(v1);
   registerUploadRoutes(v1);

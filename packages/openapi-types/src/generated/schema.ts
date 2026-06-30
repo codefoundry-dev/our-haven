@@ -3168,6 +3168,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/supply/{providerId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read one listable supply member's Parent-facing profile (OH-202)
+         * @description Returns the full public profile of a single listable Caregiver/Provider: identity, per-category Rates with the "from $X" teaser, availability, ages-served + behaviour-comfort, languages + specialty tags, badges, APPROVED Credentials only, and the public Ratings (with text reviews). 404 when the id is unknown OR the supply member is not listable (mirrors Search visibility). Parent-only.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description The viewer's 5-digit US ZIP — the origin for the displayed `distanceMiles`. */
+                    zip?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description The supply (caregiver/provider) row id, as returned by Search. */
+                    providerId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The supply member's public profile */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SupplyProfile"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SupplyProfileError"];
+                    };
+                };
+                /** @description Wrong role (caregiver / provider / admin) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SupplyProfileError"];
+                    };
+                };
+                /** @description Not found or not listable */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SupplyProfileError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/providers/contact-us": {
         parameters: {
             query?: never;
@@ -4379,6 +4451,66 @@ export interface components {
             locked: true;
         };
         SearchError: {
+            error: string;
+            reason?: string;
+        };
+        SupplyProfile: {
+            id: string;
+            /** @enum {string} */
+            role: "caregiver" | "provider";
+            categoryKey: string;
+            displayName: string | null;
+            headline: string | null;
+            bio: string | null;
+            photoUrl: string | null;
+            zip: string | null;
+            areaLabel: string | null;
+            distanceMiles: number | null;
+            fromRateCents: number | null;
+            negotiable: boolean;
+            yearsExperience: number | null;
+            languages: string[];
+            specialtyTags: string[];
+            categories: ("babysitter" | "tutor" | "nanny")[];
+            /** @enum {string|null} */
+            specialty: "slp" | "ot" | "aba" | "psychology" | "other" | null;
+            categoryRates: components["schemas"]["SupplyProfileCategoryRate"][];
+            agesServed: ("infant" | "toddler" | "preschool" | "school-age" | "teen")[];
+            behaviourComfort: ("aggression" | "self-injury" | "wandering" | "meltdowns" | "property-destruction" | "pica" | "sensory-sensitivity" | "communication-support" | "transition-difficulty" | "sleep-disturbance")[];
+            taxCreditFriendly: boolean;
+            fcchBadge: boolean;
+            availabilityGrid: components["schemas"]["SupplyProfileAvailabilityGrid"];
+            availabilityNote: string | null;
+            availabilitySummary: string | null;
+            credentials: components["schemas"]["SupplyProfileCredential"][];
+            rating: components["schemas"]["SupplyProfileRating"];
+            ctas: ("message" | "book" | "book-consultation")[];
+        };
+        SupplyProfileCategoryRate: {
+            /** @enum {string} */
+            category: "babysitter" | "tutor" | "nanny";
+            publishedRateCents: number;
+            perChildSurchargeCents: number | null;
+        };
+        SupplyProfileAvailabilityGrid: {
+            [key: string]: {
+                [key: string]: boolean;
+            };
+        };
+        SupplyProfileCredential: {
+            id: string;
+            type: string;
+            label: string;
+        };
+        SupplyProfileRating: {
+            average: number | null;
+            count: number;
+            reviews: {
+                stars: number;
+                text: string | null;
+            }[];
+        };
+        SupplyProfileError: {
             error: string;
             reason?: string;
         };

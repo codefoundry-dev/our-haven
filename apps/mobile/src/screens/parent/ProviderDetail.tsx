@@ -1,58 +1,104 @@
 /**
- * Provider detail (design: screens/provider-detail.jsx + screens/provider.jsx).
+ * Caregiver profile view (OH-202) — Parent-facing, native + narrow web.
+ * Design: screens/provider-detail.jsx + screens/provider.jsx.
  *
- * Full-bleed hero Portrait over the category pastel with overlay back/share/
- * bookmark buttons, an overlapping info block (CategoryChip + badges + name +
- * RatingValue + rate as a big number), an About/Availability/Reviews TabStrip
- * with simple content per tab, and a sticky Message + Book-a-slot CTA bar.
- * UI scaffold — inline sample data.
+ * The destination of a Search result tap. Full-bleed hero Portrait over the
+ * category pastel with overlay back/share/bookmark, an overlapping info block
+ * (CategoryChip + badges + name + RatingValue + rate), an About/Availability/
+ * Reviews TabStrip, and a sticky CTA bar driven by the profile's role-appropriate
+ * `ctas` (Caregiver → Message + Book; Provider → Book-a-consultation). Real data
+ * via `useSupplyProfile`; only APPROVED Credentials and PUBLIC Ratings are shown
+ * (the backend enforces both). The paywall that gates Message/Book is OH-204; the
+ * real messaging thread is OH-205.
  */
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { Icon } from '@/components/Icon';
 import { Screen } from '@/components/Screen';
 import { Avatar } from '@/components/ui/Avatar';
 import { Badge, CredBadge } from '@/components/ui/Badge';
-import { CategoryChip } from '@/components/ui/CategoryChip';
+import { CategoryChip, CATEGORY_TONE } from '@/components/ui/CategoryChip';
 import { Chip } from '@/components/ui/Chip';
 import { IconButton } from '@/components/ui/IconButton';
 import { Portrait } from '@/components/ui/PhotoPlaceholder';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { RatingValue } from '@/components/ui/StarRating';
 import { TabStrip } from '@/components/ui/TabStrip';
+import type { SupplyProfile } from '@/api/client';
+import { useSupplyProfile } from '@/lib/useSupplyProfile';
+import {
+  ageBandLabel,
+  alsoOffersLabel,
+  availabilityRows,
+  behaviourLabel,
+  categoryRateLabel,
+  dollars,
+  hasAnyAvailability,
+  profileBadges,
+  profileCategory,
+} from '@/lib/supply-profile';
 import { colors, fonts, radii, shadow } from '@/theme/tokens';
 
 const TABS = ['About', 'Availability', 'Reviews'] as const;
 type Tab = (typeof TABS)[number];
 
-const SPECIALTIES = ['Pre-algebra', 'Reading fluency', 'ESL bilingual', 'IEP-friendly', 'Test prep'];
-const COMFORT = ['ADHD', 'Anxiety', 'Food allergies / EpiPen', 'Mild sensory needs', 'IEP-friendly'];
-const RATES = [
-  { cat: 'Tutor', tint: colors.catTutor, rate: '$35', note: 'Math · single-child sessions' },
-  { cat: 'Babysitter', tint: colors.catBaby, rate: '$28', note: '+$5/hr per extra child' },
-];
-const AVAILABILITY = [
-  { day: 'Mon – Fri', bands: 'Afternoons & evenings' },
-  { day: 'Saturday', bands: 'Mornings' },
-  { day: 'Sunday', bands: 'Unavailable' },
-];
-const REVIEWS = [
-  { name: 'Dana R.', tone: 'catBaby' as const, value: 5.0, text: 'Amara actually asks to do math now. Maya explains the "why" so it sticks.' },
-  { name: 'Tomas L.', tone: 'catNanny' as const, value: 4.8, text: 'Punctual, patient, and great notes after every session. Highly recommend.' },
-];
-
 export default function ProviderDetailScreen() {
   const router = useRouter();
+  const { id, zip } = useLocalSearchParams<{ id?: string; role?: string; zip?: string }>();
+  const { data, loading, error, notFound, refetch } = useSupplyProfile(id ?? null, zip);
   const [tab, setTab] = useState<Tab>('About');
+
+  if (loading) {
+    return (
+      <Screen edges={['top']} contentStyle={styles.centered}>
+        <ActivityIndicator color={colors.brand} />
+      </Screen>
+    );
+  }
+
+  if (notFound || error || !data) {
+    return (
+      <Screen edges={['top']} contentStyle={styles.centered}>
+        <Text style={styles.errorTitle}>{notFound ? 'Profile unavailable' : error}</Text>
+        <Text style={styles.errorSub}>
+          {notFound
+            ? 'This profile is no longer available. Try another match from your search.'
+            : 'We couldn’t load this profile.'}
+        </Text>
+        <View style={styles.errorActions}>
+          {!notFound ? (
+            <Pressable onPress={refetch} style={styles.retry}>
+              <Text style={styles.retryText}>Try again</Text>
+            </Pressable>
+          ) : null}
+          <Pressable onPress={() => router.back()} style={styles.retryGhost}>
+            <Text style={styles.retryGhostText}>Back to search</Text>
+          </Pressable>
+        </View>
+      </Screen>
+    );
+  }
+
+  const tone = colors[CATEGORY_TONE[profileCategory(data)]];
+  const also = alsoOffersLabel(data);
+  const fromRate = dollars(data.fromRateCents);
+  const metaBits = [
+    data.headline,
+    data.distanceMiles != null ? `${data.distanceMiles} mi away` : data.areaLabel,
+  ].filter(Boolean) as string[];
+
+  const openMessage = () =>
+    router.push({ pathname: '/message-thread', params: { id: data.id, name: data.displayName ?? '' } });
+  const openBooking = () => router.push({ pathname: '/booking-compose', params: { id: data.id } });
 
   return (
     <Screen edges={['top']} contentStyle={styles.content}>
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* Hero */}
         <View style={styles.hero}>
-          <Portrait height={300} tint={colors.catTutor} label="provider portrait · 4:5" />
+          <Portrait height={300} tint={tone} label="" />
           <View style={styles.heroBar}>
             <IconButton name="chevron-left" onPress={() => router.back()} accessibilityLabel="Back" />
             <View style={styles.heroActions}>
@@ -61,10 +107,12 @@ export default function ProviderDetailScreen() {
             </View>
           </View>
           <View style={styles.heroFoot}>
-            <CategoryChip category="Tutor" />
-            <View style={styles.alsoPill}>
-              <Text style={styles.alsoText}>Also offers Babysitter</Text>
-            </View>
+            <CategoryChip category={profileCategory(data)} />
+            {also ? (
+              <View style={styles.alsoPill}>
+                <Text style={styles.alsoText}>{also}</Text>
+              </View>
+            ) : null}
           </View>
         </View>
 
@@ -72,142 +120,223 @@ export default function ProviderDetailScreen() {
         <View style={styles.body}>
           <View style={styles.infoRow}>
             <View style={styles.infoLeft}>
-              <Text style={styles.name}>Maya Okafor</Text>
-              <Text style={styles.sub}>K–8 Math · Eastside · 2.3 mi away</Text>
-              <View style={styles.ratingRow}>
-                <RatingValue value={4.9} size={16} />
-                <Text style={styles.ratingMeta}>· 87 reviews · replies in 1h</Text>
+              <Text style={styles.name}>{data.displayName ?? 'Caregiver'}</Text>
+              {metaBits.length > 0 ? <Text style={styles.sub}>{metaBits.join(' · ')}</Text> : null}
+              {data.rating.count > 0 ? (
+                <View style={styles.ratingRow}>
+                  <RatingValue value={data.rating.average ?? 0} size={16} />
+                  <Text style={styles.ratingMeta}>
+                    · {data.rating.count} {data.rating.count === 1 ? 'review' : 'reviews'}
+                  </Text>
+                </View>
+              ) : (
+                <Text style={styles.ratingMeta}>New to Our Haven · no reviews yet</Text>
+              )}
+            </View>
+            {fromRate ? (
+              <View style={styles.rateCol}>
+                <Text style={styles.rateFrom}>FROM</Text>
+                <Text style={styles.rateBig}>{fromRate}</Text>
+                <Text style={styles.ratePer}>{data.role === 'provider' ? 'per session' : 'per hour'}</Text>
               </View>
-            </View>
-            <View style={styles.rateCol}>
-              <Text style={styles.rateFrom}>FROM</Text>
-              <Text style={styles.rateBig}>$28</Text>
-              <Text style={styles.ratePer}>per hour</Text>
-            </View>
+            ) : null}
           </View>
 
-          <View style={styles.offerRow}>
-            <View style={styles.offerPill}>
-              <Icon name="sparkle" size={12} color={colors.brand} />
-              <Text style={styles.offerText}>Open to Offers</Text>
+          {data.negotiable ? (
+            <View style={styles.offerRow}>
+              <View style={styles.offerPill}>
+                <Icon name="sparkle" size={12} color={colors.brand} />
+                <Text style={styles.offerText}>Open to Offers</Text>
+              </View>
             </View>
-          </View>
+          ) : null}
 
           {/* Badges */}
           <View style={styles.badges}>
-            <Badge kind="verified" />
-            <Badge kind="tax" />
-            <Badge kind="toprated" />
+            {profileBadges(data).map((b) => (
+              <Badge key={b} kind={b} />
+            ))}
           </View>
 
           {/* Tabs */}
           <TabStrip tabs={TABS} value={tab} onChange={setTab} style={styles.tabs} />
 
-          {tab === 'About' ? (
-            <View style={styles.tabBody}>
-              <Text style={styles.paragraph}>
-                Eight years tutoring K–8 across the metro area. I focus on building number sense first, fluency second — your
-                kid will tell you why a problem works, not just the answer.
-              </Text>
-
-              <Text style={styles.eyebrow}>Specialties</Text>
-              <View style={styles.wrapRow}>
-                {SPECIALTIES.map((s) => (
-                  <View key={s} style={styles.outlineChip}>
-                    <Text style={styles.outlineChipText}>{s}</Text>
-                  </View>
-                ))}
-              </View>
-
-              <Text style={styles.eyebrow}>Languages</Text>
-              <Text style={styles.value}>English · Spanish · Yoruba</Text>
-
-              <Text style={styles.eyebrow}>Services & rates</Text>
-              <View style={styles.rateList}>
-                {RATES.map((s) => (
-                  <View key={s.cat} style={styles.rateItem}>
-                    <View style={[styles.rateTag, { backgroundColor: s.tint }]}>
-                      <Text style={styles.rateTagText}>{s.cat}</Text>
-                    </View>
-                    <Text style={styles.rateNote} numberOfLines={1}>
-                      {s.note}
-                    </Text>
-                    <Text style={styles.rateItemRate}>
-                      {s.rate}
-                      <Text style={styles.rateItemUnit}>/hr</Text>
-                    </Text>
-                  </View>
-                ))}
-              </View>
-
-              <Text style={styles.eyebrow}>Ages & comfort</Text>
-              <Text style={styles.value}>Works with ages 4–13 · comfortable supporting:</Text>
-              <View style={styles.wrapRow}>
-                {COMFORT.map((c) => (
-                  <Chip key={c} label={c} tone="comfort" />
-                ))}
-              </View>
-
-              <Text style={styles.eyebrow}>Credentials</Text>
-              <View style={styles.wrapRow}>
-                <CredBadge label="CPR & First Aid" status="verified" icon="check-circle" />
-                <CredBadge label="Child Development Associate" status="verified" icon="check-circle" />
-                <CredBadge label="Water Safety Instructor" status="pending" />
-              </View>
-            </View>
-          ) : null}
-
-          {tab === 'Availability' ? (
-            <View style={styles.tabBody}>
-              <Text style={styles.paragraph}>Typical weekly availability. Send a message to confirm a specific slot.</Text>
-              {AVAILABILITY.map((a) => (
-                <View key={a.day} style={styles.availRow}>
-                  <Text style={styles.availDay}>{a.day}</Text>
-                  <Text style={styles.availBands}>{a.bands}</Text>
-                </View>
-              ))}
-            </View>
-          ) : null}
-
-          {tab === 'Reviews' ? (
-            <View style={styles.tabBody}>
-              {REVIEWS.map((r) => (
-                <View key={r.name} style={styles.reviewCard}>
-                  <View style={styles.reviewHead}>
-                    <Avatar label={r.name} size="sm" tone={r.tone} />
-                    <View style={styles.reviewWho}>
-                      <Text style={styles.reviewName}>{r.name}</Text>
-                      <RatingValue value={r.value} size={13} />
-                    </View>
-                  </View>
-                  <Text style={styles.reviewText}>{r.text}</Text>
-                </View>
-              ))}
-            </View>
-          ) : null}
+          {tab === 'About' ? <AboutTab data={data} /> : null}
+          {tab === 'Availability' ? <AvailabilityTab data={data} /> : null}
+          {tab === 'Reviews' ? <ReviewsTab data={data} /> : null}
         </View>
       </ScrollView>
 
-      {/* Sticky CTA */}
+      {/* Sticky CTA — driven by the profile's role-appropriate actions */}
       <View style={styles.footer}>
-        <Pressable
-          onPress={() => router.push('/message-thread')}
-          accessibilityRole="button"
-          style={({ pressed }) => [styles.secondaryBtn, { opacity: pressed ? 0.9 : 1 }]}
-        >
-          <Icon name="message" size={18} color={colors.ink} />
-          <Text style={styles.secondaryText}>Message</Text>
-        </Pressable>
-        <PrimaryButton onPress={() => router.push('/booking-compose')} style={styles.primaryBtn}>
-          Book a slot
-        </PrimaryButton>
+        {data.ctas.includes('message') ? (
+          <Pressable
+            onPress={openMessage}
+            accessibilityRole="button"
+            style={({ pressed }) => [styles.secondaryBtn, { opacity: pressed ? 0.9 : 1 }]}
+          >
+            <Icon name="message" size={18} color={colors.ink} />
+            <Text style={styles.secondaryText}>Message</Text>
+          </Pressable>
+        ) : null}
+        {data.ctas.includes('book') ? (
+          <PrimaryButton onPress={openBooking} style={styles.primaryBtn}>
+            Book a slot
+          </PrimaryButton>
+        ) : null}
+        {data.ctas.includes('book-consultation') ? (
+          <PrimaryButton onPress={openBooking} style={styles.primaryBtn}>
+            Book consultation
+          </PrimaryButton>
+        ) : null}
       </View>
     </Screen>
   );
 }
 
+/* ── tabs ───────────────────────────────────────────────────────────────────── */
+
+function AboutTab({ data }: { data: SupplyProfile }) {
+  return (
+    <View style={styles.tabBody}>
+      {data.bio ? <Text style={styles.paragraph}>{data.bio}</Text> : null}
+
+      {data.specialtyTags.length > 0 ? (
+        <>
+          <Text style={styles.eyebrow}>Specialties</Text>
+          <View style={styles.wrapRow}>
+            {data.specialtyTags.map((s) => (
+              <View key={s} style={styles.outlineChip}>
+                <Text style={styles.outlineChipText}>{s}</Text>
+              </View>
+            ))}
+          </View>
+        </>
+      ) : null}
+
+      {data.languages.length > 0 ? (
+        <>
+          <Text style={styles.eyebrow}>Languages</Text>
+          <Text style={styles.value}>{data.languages.join(' · ')}</Text>
+        </>
+      ) : null}
+
+      {data.categoryRates.length > 0 ? (
+        <>
+          <Text style={styles.eyebrow}>Services & rates</Text>
+          <View style={styles.rateList}>
+            {data.categoryRates.map((r) => (
+              <View key={r.category} style={styles.rateItem}>
+                <View style={styles.rateTag}>
+                  <Text style={styles.rateTagText}>{categoryRateLabel(r)}</Text>
+                </View>
+                {r.perChildSurchargeCents != null ? (
+                  <Text style={styles.rateNote} numberOfLines={1}>
+                    +{dollars(r.perChildSurchargeCents)}/hr per extra child
+                  </Text>
+                ) : (
+                  <View style={styles.flexMin} />
+                )}
+                <Text style={styles.rateItemRate}>
+                  {dollars(r.publishedRateCents)}
+                  <Text style={styles.rateItemUnit}>/hr</Text>
+                </Text>
+              </View>
+            ))}
+          </View>
+        </>
+      ) : null}
+
+      {data.agesServed.length > 0 || data.behaviourComfort.length > 0 ? (
+        <Text style={styles.eyebrow}>Ages & comfort</Text>
+      ) : null}
+      {data.agesServed.length > 0 ? (
+        <Text style={styles.value}>Works with {data.agesServed.map(ageBandLabel).join(', ')}</Text>
+      ) : null}
+      {data.behaviourComfort.length > 0 ? (
+        <View style={styles.wrapRow}>
+          {data.behaviourComfort.map((b) => (
+            <Chip key={b} label={behaviourLabel(b)} tone="comfort" />
+          ))}
+        </View>
+      ) : null}
+
+      {data.credentials.length > 0 ? (
+        <>
+          <Text style={styles.eyebrow}>Credentials</Text>
+          <View style={styles.wrapRow}>
+            {data.credentials.map((cr) => (
+              <CredBadge key={cr.id} label={cr.label} status="verified" icon="check-circle" />
+            ))}
+          </View>
+        </>
+      ) : null}
+    </View>
+  );
+}
+
+function AvailabilityTab({ data }: { data: SupplyProfile }) {
+  if (!hasAnyAvailability(data.availabilityGrid)) {
+    return (
+      <View style={styles.tabBody}>
+        <Text style={styles.paragraph}>
+          {data.availabilitySummary ?? 'Send a message to ask about availability.'}
+        </Text>
+        {data.availabilityNote ? <Text style={styles.availNote}>{data.availabilityNote}</Text> : null}
+      </View>
+    );
+  }
+  return (
+    <View style={styles.tabBody}>
+      <Text style={styles.paragraph}>Typical weekly availability. Send a message to confirm a specific slot.</Text>
+      {availabilityRows(data.availabilityGrid).map((a) => (
+        <View key={a.day} style={styles.availRow}>
+          <Text style={styles.availDay}>{a.day}</Text>
+          <Text style={[styles.availBands, a.bands == null && styles.availOff]}>{a.bands ?? 'Unavailable'}</Text>
+        </View>
+      ))}
+      {data.availabilityNote ? <Text style={styles.availNote}>{data.availabilityNote}</Text> : null}
+    </View>
+  );
+}
+
+function ReviewsTab({ data }: { data: SupplyProfile }) {
+  if (data.rating.reviews.length === 0) {
+    return (
+      <View style={styles.tabBody}>
+        <Text style={styles.paragraph}>No reviews yet — be the first family to book.</Text>
+      </View>
+    );
+  }
+  return (
+    <View style={styles.tabBody}>
+      {data.rating.reviews.map((r, i) => (
+        <View key={i} style={styles.reviewCard}>
+          <View style={styles.reviewHead}>
+            <Avatar label="Family" size="sm" tone="catBaby" />
+            <View style={styles.reviewWho}>
+              <Text style={styles.reviewName}>Verified family</Text>
+              <RatingValue value={r.stars} size={13} />
+            </View>
+          </View>
+          {r.text ? <Text style={styles.reviewText}>{r.text}</Text> : null}
+        </View>
+      ))}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   content: { flex: 1, paddingHorizontal: 0 },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 8 },
+  errorTitle: { fontFamily: fonts.bold, fontSize: 18, color: colors.ink, textAlign: 'center' },
+  errorSub: { fontFamily: fonts.regular, fontSize: 14, color: colors.ink2, textAlign: 'center' },
+  errorActions: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  retry: { height: 44, paddingHorizontal: 20, borderRadius: radii.pill, backgroundColor: colors.brand, alignItems: 'center', justifyContent: 'center' },
+  retryText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.inkInv },
+  retryGhost: { height: 44, paddingHorizontal: 20, borderRadius: radii.pill, borderWidth: 1.5, borderColor: colors.ink, alignItems: 'center', justifyContent: 'center' },
+  retryGhostText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.ink },
+
   scroll: { flex: 1 },
   scrollContent: { paddingBottom: 24 },
 
@@ -221,10 +350,11 @@ const styles = StyleSheet.create({
   body: { marginTop: -28, backgroundColor: colors.canvas, borderTopLeftRadius: 36, borderTopRightRadius: 36, paddingTop: 24, paddingHorizontal: 24 },
   infoRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 },
   infoLeft: { flex: 1, minWidth: 0 },
+  flexMin: { flex: 1, minWidth: 0 },
   name: { fontFamily: fonts.bold, fontSize: 28, lineHeight: 32, letterSpacing: -0.6, color: colors.ink },
   sub: { fontFamily: fonts.regular, fontSize: 14, color: colors.ink2, marginTop: 6 },
   ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
-  ratingMeta: { fontFamily: fonts.regular, fontSize: 13, color: colors.ink2 },
+  ratingMeta: { fontFamily: fonts.regular, fontSize: 13, color: colors.ink2, marginTop: 8 },
   rateCol: { alignItems: 'flex-end' },
   rateFrom: { fontFamily: fonts.semibold, fontSize: 11, letterSpacing: 0.3, color: colors.ink3 },
   rateBig: { fontFamily: fonts.bold, fontSize: 40, lineHeight: 40, letterSpacing: -1.2, color: colors.ink, fontVariant: ['tabular-nums'] },
@@ -246,7 +376,7 @@ const styles = StyleSheet.create({
 
   rateList: { gap: 8, marginTop: 10 },
   rateItem: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.surface, borderRadius: radii.sm, padding: 12, borderWidth: 1, borderColor: colors.hairline },
-  rateTag: { height: 26, paddingHorizontal: 11, borderRadius: radii.pill, alignItems: 'center', justifyContent: 'center' },
+  rateTag: { height: 26, paddingHorizontal: 11, borderRadius: radii.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surfaceAlt },
   rateTagText: { fontFamily: fonts.semibold, fontSize: 12.5, color: colors.ink },
   rateNote: { flex: 1, minWidth: 0, fontFamily: fonts.regular, fontSize: 12.5, color: colors.ink2 },
   rateItemRate: { fontFamily: fonts.bold, fontSize: 16, color: colors.ink, fontVariant: ['tabular-nums'] },
@@ -255,6 +385,8 @@ const styles = StyleSheet.create({
   availRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.hairline },
   availDay: { fontFamily: fonts.semibold, fontSize: 14, color: colors.ink },
   availBands: { fontFamily: fonts.regular, fontSize: 14, color: colors.ink2 },
+  availOff: { color: colors.ink3 },
+  availNote: { fontFamily: fonts.regular, fontSize: 13, lineHeight: 19, color: colors.ink2, marginTop: 14 },
 
   reviewCard: { backgroundColor: colors.surface, borderRadius: radii.lg, padding: 16, marginBottom: 12, ...shadow.e1 },
   reviewHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },

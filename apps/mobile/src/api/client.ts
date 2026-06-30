@@ -61,6 +61,12 @@ export type SearchBlurredCard = Extract<SearchResultItem, { kind: 'blurred' }>['
 export type SearchSupplyRole = SearchResultCard['role'];
 export type SearchCta = SearchResultCard['ctas'][number];
 
+// Parent-facing supply profile detail (OH-202) — the destination of a Search tap.
+export type SupplyProfile = paths['/v1/supply/{providerId}']['get']['responses'][200]['content']['application/json'];
+export type SupplyProfileCategoryRate = SupplyProfile['categoryRates'][number];
+export type SupplyProfileCredential = SupplyProfile['credentials'][number];
+export type SupplyProfileReview = SupplyProfile['rating']['reviews'][number];
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -247,4 +253,16 @@ export function getSearch(query: SearchQuery = {}): Promise<SearchResponse> {
   }
   const qs = params.toString();
   return get<SearchResponse>(`/v1/search${qs ? `?${qs}` : ''}`);
+}
+
+/**
+ * Read one listable supply member's Parent-facing profile (OH-202). The
+ * destination of a Search result tap: full per-category Rates, availability,
+ * ages/behaviour-comfort, badges, APPROVED Credentials only, and public Ratings.
+ * `zip` is the viewer's search origin — when supplied (and resolvable), the
+ * response carries a `distanceMiles`. 404 when the id is unknown or not listable.
+ */
+export function getSupplyProfile(providerId: string, zip?: string): Promise<SupplyProfile> {
+  const qs = zip && zip.trim().length > 0 ? `?zip=${encodeURIComponent(zip.trim())}` : '';
+  return get<SupplyProfile>(`/v1/supply/${providerId}${qs}`);
 }
