@@ -227,8 +227,26 @@ describe('properties (fast-check)', () => {
   });
 });
 
+describe('detect — adjacent tokens redact to a fixed point (regression)', () => {
+  // Two contact tokens with NO separator: a single detection pass misses the
+  // second (its lookbehind is tripped by the first token's trailing char), so
+  // redacting the first exposes the second. The DELIVERED text must still be
+  // clean — re-detecting the redacted output must flag nothing.
+  it.each(['$A0$A0', '@ab@cd', '$Jane$Doe', '@one@two@three'])(
+    'delivers clean text for adjacent tokens %j',
+    (text) => {
+      const once = detect(text);
+      expect(once.flagged).toBe(true);
+      // Re-scanning the delivery-safe text finds no contact info (idempotent).
+      expect(detect(once.redacted).flagged).toBe(false);
+      // …and no original token characters survive outside the placeholder.
+      expect(once.redacted.split(REDACTION_PLACEHOLDER).join('')).not.toMatch(/[$@]/);
+    },
+  );
+});
+
 describe('module version', () => {
   it('is bumped for OH-180', () => {
-    expect(DISINTERMEDIATION_MODULE_VERSION).toBe('0.2.0-OH-180');
+    expect(DISINTERMEDIATION_MODULE_VERSION).toBe('0.2.1-OH-180');
   });
 });

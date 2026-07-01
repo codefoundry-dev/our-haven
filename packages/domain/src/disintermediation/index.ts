@@ -213,14 +213,45 @@ function distinctCategories(
 }
 
 /**
+ * Redact to a FIXED POINT (the delivery-safety invariant
+ * `detect(detect(x).redacted).flagged === false`). A single detection pass can
+ * miss the SECOND of two ADJACENT contact tokens: the lookbehind that stops a
+ * pattern matching mid-word (e.g. `(?<![\w$])` on a `$cashtag`, `(?<![\w@.])` on
+ * an `@handle`) is tripped by the first token's trailing char, so `"$A0$A0"`
+ * detects only the first `$A0`. Redacting it then exposes the second to a
+ * re-scan. Re-detecting + re-redacting until nothing trips guarantees the
+ * delivered text is clean.
+ *
+ * Convergence: every pass replaces ≥1 real token run with the inert placeholder
+ * (which matches nothing) and can only uncover finitely many previously-hidden
+ * adjacent tokens, so the loop terminates; `cap` is a defensive backstop for
+ * adversarial input (the common case redacts in a single pass).
+ */
+function redactToFixedPoint(text: string, firstMatches: readonly DetectionMatch[]): string {
+  let out = redactSpans(text, mergeSpans(firstMatches));
+  if (firstMatches.length === 0) return out;
+  const cap = Math.max(1, text.length);
+  for (let pass = 1; pass < cap; pass++) {
+    const more = collectMatches(out);
+    if (more.length === 0) break;
+    out = redactSpans(out, mergeSpans(more));
+  }
+  return out;
+}
+
+/**
  * Scan free text for contact-info disclosure. Returns the redacted delivery
  * text plus the unredacted match metadata for the Trust & Safety queue.
+ *
+ * `matches` are the FIRST-pass detections on the original text (spans index into
+ * `text`); `redacted` is iterated to a fixed point so the delivered text is
+ * always clean, even when adjacent tokens hid one another (redactToFixedPoint).
  */
 export function detect(text: string): DetectionResult {
   const matches = collectMatches(text);
   return {
     flagged: matches.length > 0,
-    redacted: redactSpans(text, mergeSpans(matches)),
+    redacted: redactToFixedPoint(text, matches),
     matches,
     categories: distinctCategories(matches),
   };
@@ -253,4 +284,4 @@ export function scanOffer(offer: {
   return detect(offer.scopeNote);
 }
 
-export const DISINTERMEDIATION_MODULE_VERSION = '0.2.0-OH-180';
+export const DISINTERMEDIATION_MODULE_VERSION = '0.2.1-OH-180';
