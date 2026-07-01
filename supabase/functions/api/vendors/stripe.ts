@@ -139,6 +139,24 @@ export interface CreateBookingPaymentIntentInput {
   metadata: Record<string, string>;
   /** Stripe customer (the Parent) or null when charging a one-off PaymentMethod. */
   customerId?: string | null;
+  /**
+   * The Parent's saved payment method (`pm_…`) — their subscription card. When
+   * set with `confirm: true` the PI is confirmed server-side (no card entry);
+   * omit to return an unconfirmed PI whose `client_secret` a client confirms.
+   */
+  paymentMethodId?: string | null;
+  /** Confirm the PI in the create call (authorize-at-booking). Default false. */
+  confirm?: boolean;
+  /**
+   * The Parent is NOT in session (the lazy authorize-due sweep). Stripe may then
+   * fail with `authentication_required` instead of returning `requires_action`;
+   * `createBookingPaymentIntent` catches that and returns a `requires_action`
+   * result (client_secret from the embedded PI) so the caller can notify the
+   * Parent to complete 3DS on-session. Default false (interactive at Award).
+   */
+  offSession?: boolean;
+  /** Idempotency-Key for safe retries (e.g. `booking:authorize:<bookingId>`). */
+  idempotencyKey?: string;
   currency?: 'usd';
 }
 
@@ -146,6 +164,53 @@ export interface CreatePaymentIntentResult {
   id: string;
   client_secret: string;
   status: string;
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+ * Booking payment lifecycle — capture / cancel / refund / retrieve (OH-211)
+ *
+ * A booking PI is created with `capture_method: 'manual'` (authorize-at-booking),
+ * then captured at session end (a destination-charge capture IS the payout —
+ * `application_fee_amount` + `transfer_data.destination` move the money on
+ * capture). Partial capture (cancellation charge / fewer confirmed hours)
+ * automatically releases the remainder of the hold. All operations take a
+ * deterministic idempotency key so webhook/sweep retries are safe.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+export interface CapturePaymentIntentInput {
+  id: string;
+  /** Amount to capture, in cents. Omit to capture the full authorized amount.
+   *  Capturing less releases the remainder of the hold. */
+  amountToCaptureCents?: number;
+  /** Commission recomputed on the CAPTURED amount (must be ≤ captured). */
+  applicationFeeCents?: number;
+  idempotencyKey?: string;
+}
+
+export interface RefundPaymentIntentInput {
+  id: string;
+  /** Amount to refund, in cents. Omit to refund the full captured amount. */
+  amountCents?: number;
+  idempotencyKey?: string;
+}
+
+/** The subset of a Stripe PaymentIntent the lifecycle handlers read back. */
+export interface RetrievedPaymentIntent {
+  id: string;
+  status: string;
+  amount: number;
+  amount_capturable?: number;
+  amount_received?: number;
+  application_fee_amount?: number | null;
+  client_secret?: string | null;
+  latest_charge?: string | null;
+  metadata?: Record<string, string>;
+}
+
+export interface RefundResult {
+  id: string;
+  status: string;
+  amount?: number;
 }
 
 /* ────────────────────────────────────────────────────────────────────────
@@ -179,6 +244,12 @@ export interface ParsedStripePaymentIntent {
   status: string;
   amount: number;
   currency: string;
+  /** Held (authorized, not yet captured) amount — set on amount_capturable_updated. */
+  amount_capturable?: number;
+  /** Captured amount — set on succeeded. */
+  amount_received?: number;
+  /** Stripe error surfaced on payment_intent.payment_failed. */
+  last_payment_error?: { code?: string; message?: string } | null;
   metadata?: Record<string, string>;
 }
 
@@ -453,8 +524,14 @@ export interface StripeAdapter {
   verifyConnectWebhookSignature(rawBody: string, signatureHeader: string | null): boolean;
   parseConnectWebhookEvent(rawBody: string): ParsedConnectEvent | null;
 
-  // Booking payment — application_fee destination charge
+  // Booking payment — application_fee destination charge + manual-capture lifecycle (OH-211)
   createBookingPaymentIntent(input: CreateBookingPaymentIntentInput): Promise<CreatePaymentIntentResult>;
+  capturePaymentIntent(input: CapturePaymentIntentInput): Promise<RetrievedPaymentIntent>;
+  cancelPaymentIntent(id: string, idempotencyKey?: string): Promise<RetrievedPaymentIntent>;
+  refundPaymentIntent(input: RefundPaymentIntentInput): Promise<RefundResult>;
+  retrievePaymentIntent(id: string): Promise<RetrievedPaymentIntent>;
+  /** The Parent's default saved card (`pm_…`) from their subscription customer, or null. */
+  retrieveCustomerDefaultPaymentMethod(customerId: string): Promise<string | null>;
 
   // Screening charge (OH-185) — direct PaymentIntent + its own webhook secret
   createScreeningPaymentIntent(input: CreateScreeningPaymentIntentInput): Promise<CreatePaymentIntentResult>;
@@ -523,14 +600,24 @@ export function createStripeAdapter(config: StripeConfig): StripeAdapter {
     });
   }
 
-  async function stripeFetch<T>(path: string, body: URLSearchParams): Promise<T> {
+  function postHeaders(idempotencyKey?: string): Record<string, string> {
     if (!config.secretKey) throw new NotConfiguredError('STRIPE_SECRET_KEY');
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Authorization: `Bearer ${config.secretKey}`,
+    };
+    if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
+    return headers;
+  }
+
+  async function stripeFetch<T>(
+    path: string,
+    body: URLSearchParams,
+    idempotencyKey?: string,
+  ): Promise<T> {
     const res = await doFetch(`${apiBase}${path}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Authorization: `Bearer ${config.secretKey}`,
-      },
+      headers: postHeaders(idempotencyKey),
       body: body.toString(),
     });
     if (!res.ok) {
@@ -609,23 +696,108 @@ export function createStripeAdapter(config: StripeConfig): StripeAdapter {
     async createBookingPaymentIntent(
       input: CreateBookingPaymentIntentInput,
     ): Promise<CreatePaymentIntentResult> {
-      // Destination charge (ADR-0001): the charge settles on the platform
-      // account, `application_fee_amount` is retained as Commission, and the
-      // remainder is transferred to the Caregiver's connected account. The
-      // Parent pays exactly `amountCents` (the displayed Rate); the Caregiver
-      // nets `amountCents − applicationFeeCents`.
+      // Destination charge (ADR-0001) with MANUAL capture (OH-211, story 28):
+      // the charge settles on the platform account, holds `amountCents` on the
+      // Parent's card without capturing, retains `application_fee_amount` as
+      // Commission, and transfers the remainder to the Caregiver's connected
+      // account WHEN CAPTURED (at session end). The Parent pays exactly
+      // `amountCents` (the displayed Rate); the Caregiver nets
+      // `amountCents − applicationFeeCents`.
       const body = new URLSearchParams();
       body.set('amount', String(input.amountCents));
       body.set('currency', input.currency ?? 'usd');
       body.set('description', input.description);
+      body.set('capture_method', 'manual');
       body.set('automatic_payment_methods[enabled]', 'true');
+      // Off-session confirmation must not pick a redirect-based method (the Parent
+      // isn't there to complete a redirect) — restrict to no-redirect methods.
+      if (input.offSession) body.set('automatic_payment_methods[allow_redirects]', 'never');
       body.set('application_fee_amount', String(input.applicationFeeCents));
       body.set('transfer_data[destination]', input.destinationAccountId);
       if (input.customerId) body.set('customer', input.customerId);
+      if (input.paymentMethodId) body.set('payment_method', input.paymentMethodId);
+      if (input.confirm) body.set('confirm', 'true');
+      if (input.offSession) body.set('off_session', 'true');
       for (const [k, v] of Object.entries(input.metadata)) {
         body.set(`metadata[${k}]`, v);
       }
-      return stripeFetch<CreatePaymentIntentResult>('/payment_intents', body);
+
+      // We can't use stripeFetch here: an off-session card that needs 3DS returns
+      // a 402 whose body carries `error.payment_intent` (status requires_action).
+      // We translate that into a normal `requires_action` result so the caller can
+      // persist the PI + notify the Parent, rather than throwing.
+      const res = await doFetch(`${apiBase}/payment_intents`, {
+        method: 'POST',
+        headers: postHeaders(input.idempotencyKey),
+        body: body.toString(),
+      });
+      const raw = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+      if (res.ok && raw && typeof raw.id === 'string') {
+        return {
+          id: raw.id,
+          client_secret: (raw.client_secret as string) ?? '',
+          status: (raw.status as string) ?? 'requires_confirmation',
+        };
+      }
+      const err = raw?.error as
+        | { code?: string; payment_intent?: CreatePaymentIntentResult }
+        | undefined;
+      if (err?.code === 'authentication_required' && err.payment_intent?.id) {
+        const pi = err.payment_intent;
+        return { id: pi.id, client_secret: pi.client_secret ?? '', status: 'requires_action' };
+      }
+      throw new Error(
+        `stripe POST /payment_intents failed: ${res.status} ${JSON.stringify(err ?? raw)?.slice(0, 200)}`,
+      );
+    },
+
+    async capturePaymentIntent(input: CapturePaymentIntentInput): Promise<RetrievedPaymentIntent> {
+      const body = new URLSearchParams();
+      if (input.amountToCaptureCents !== undefined) {
+        body.set('amount_to_capture', String(input.amountToCaptureCents));
+      }
+      if (input.applicationFeeCents !== undefined) {
+        body.set('application_fee_amount', String(input.applicationFeeCents));
+      }
+      return stripeFetch<RetrievedPaymentIntent>(
+        `/payment_intents/${encodeURIComponent(input.id)}/capture`,
+        body,
+        input.idempotencyKey,
+      );
+    },
+
+    async cancelPaymentIntent(id: string, idempotencyKey?: string): Promise<RetrievedPaymentIntent> {
+      // Releases an uncaptured authorization hold (decline / expire / free-tier cancel).
+      return stripeFetch<RetrievedPaymentIntent>(
+        `/payment_intents/${encodeURIComponent(id)}/cancel`,
+        new URLSearchParams(),
+        idempotencyKey,
+      );
+    },
+
+    async refundPaymentIntent(input: RefundPaymentIntentInput): Promise<RefundResult> {
+      // The rare captured-then-refund path (a post-capture reversal); the common
+      // release is cancelPaymentIntent on the uncaptured hold.
+      const body = new URLSearchParams();
+      body.set('payment_intent', input.id);
+      if (input.amountCents !== undefined) body.set('amount', String(input.amountCents));
+      return stripeFetch<RefundResult>('/refunds', body, input.idempotencyKey);
+    },
+
+    async retrievePaymentIntent(id: string): Promise<RetrievedPaymentIntent> {
+      return stripeGet<RetrievedPaymentIntent>(`/payment_intents/${encodeURIComponent(id)}`);
+    },
+
+    async retrieveCustomerDefaultPaymentMethod(customerId: string): Promise<string | null> {
+      const customer = await stripeGet<{
+        invoice_settings?: { default_payment_method?: string | { id?: string } | null };
+        default_source?: string | null;
+      }>(`/customers/${encodeURIComponent(customerId)}`);
+      const dpm = customer.invoice_settings?.default_payment_method;
+      if (typeof dpm === 'string' && dpm) return dpm;
+      if (dpm && typeof dpm === 'object' && dpm.id) return dpm.id;
+      // Legacy fallback (a card saved as a source rather than a PaymentMethod).
+      return customer.default_source ?? null;
     },
 
     async createScreeningPaymentIntent(

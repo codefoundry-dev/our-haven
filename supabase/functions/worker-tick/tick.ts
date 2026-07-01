@@ -6,6 +6,7 @@ import {
 } from './outbox.ts';
 import { SWEEPS, type Sweep, type SweepResult } from './sweeps.ts';
 import type { Db } from './db/kysely.ts';
+import type { StripeAdapter } from '../api/vendors/stripe.ts';
 
 /**
  * One tick (ADR-0019 § Decision 4; OH-237): drain the notification outbox, then
@@ -25,6 +26,9 @@ export interface TickOptions {
   sweeps?: readonly Sweep[];
   outboxLimit?: number;
   sweepLimit?: number;
+  /** Stripe adapter + Commission rate for the booking-payment sweeps (OH-211). */
+  stripe?: StripeAdapter;
+  commissionBp?: number;
   /** Injectable drain step (defaults to the transactional Kysely drain) so the
    *  orchestration is unit-testable without a database. */
   drain?: (
@@ -45,7 +49,14 @@ export async function runTick(db: Db, opts: TickOptions = {}): Promise<TickSumma
   const sweepResults: SweepResult[] = [];
   for (const sweep of sweeps) {
     try {
-      sweepResults.push(await sweep.run(db, { now, limit: opts.sweepLimit ?? 1000 }));
+      sweepResults.push(
+        await sweep.run(db, {
+          now,
+          limit: opts.sweepLimit ?? 1000,
+          stripe: opts.stripe,
+          commissionBp: opts.commissionBp,
+        }),
+      );
     } catch (err) {
       sweepResults.push({
         name: sweep.name,

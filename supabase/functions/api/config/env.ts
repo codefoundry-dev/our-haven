@@ -94,6 +94,22 @@ const EnvSchema = z.object({
     .default('https://api.stripe.com/v1')
     .describe('Stripe API base URL. Overridable for staging / sandbox; tests inject a fetch stub instead.'),
 
+  // ── Booking payment lifecycle (OH-211; ADR-0001 / ADR-0013) ──────────────
+  // The platform Commission skimmed from every Caregiver Booking via the
+  // destination charge's application_fee (CONTEXT § Commission — "target
+  // 15–20%, not yet set"). Basis points (1500 = 15%); env-tunable without a
+  // deploy. Applied at authorize-at-booking + recomputed on partial captures.
+  // Tips are commission-exempt and never flow through this (ADR-0018).
+  BOOKING_COMMISSION_BP: z
+    .coerce.number()
+    .int()
+    .min(0)
+    .max(10_000)
+    .default(1500)
+    .describe(
+      'Platform Commission on Caregiver Bookings, in basis points (default 1500 = 15%; range 0–10000). The destination-charge application_fee. Business-tunable (CONTEXT § Commission target 15–20%).',
+    ),
+
   // ── Background screening (OH-185; ADR-0007) ──────────────────────────────
   // The $35 Stripe charge + Checkr standard-package screening. The Checkr
   // invitation (the slow vendor call) is made by the worker-tick off the

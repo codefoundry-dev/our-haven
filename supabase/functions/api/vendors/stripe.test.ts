@@ -157,6 +157,156 @@ describe('createBookingPaymentIntent — application_fee destination charge', ()
     });
     expect(formBody(call().init).has('customer')).toBe(false);
   });
+
+  it('authorizes with manual capture, the saved card, confirm + interactive (on-session) flags', async () => {
+    const { impl, call } = fakeFetch({ id: 'pi_3', client_secret: 'pi_3_secret', status: 'requires_capture' });
+    const res = await adapter(impl).createBookingPaymentIntent({
+      amountCents: 8_000,
+      applicationFeeCents: 1_200,
+      destinationAccountId: 'acct_cg',
+      description: 'Booking bkg-3',
+      metadata: { booking_id: 'bkg-3', purpose: 'booking' },
+      customerId: 'cus_parent',
+      paymentMethodId: 'pm_saved',
+      confirm: true,
+      idempotencyKey: 'booking:authorize:bkg-3',
+    });
+    expect(res.status).toBe('requires_capture');
+    const body = formBody(call().init);
+    expect(body.get('capture_method')).toBe('manual');
+    expect(body.get('payment_method')).toBe('pm_saved');
+    expect(body.get('confirm')).toBe('true');
+    // interactive (on-session) — no off_session / allow_redirects restriction
+    expect(body.has('off_session')).toBe(false);
+    expect(body.has('automatic_payment_methods[allow_redirects]')).toBe(false);
+    const headers = call().init.headers as Record<string, string>;
+    expect(headers['Idempotency-Key']).toBe('booking:authorize:bkg-3');
+  });
+
+  it('off-session authorize forbids redirect-based methods', async () => {
+    const { impl, call } = fakeFetch({ id: 'pi_4', client_secret: 's', status: 'requires_capture' });
+    await adapter(impl).createBookingPaymentIntent({
+      amountCents: 8_000,
+      applicationFeeCents: 1_200,
+      destinationAccountId: 'acct_cg',
+      description: 'd',
+      metadata: {},
+      customerId: 'cus_parent',
+      paymentMethodId: 'pm_saved',
+      confirm: true,
+      offSession: true,
+    });
+    const body = formBody(call().init);
+    expect(body.get('off_session')).toBe('true');
+    expect(body.get('automatic_payment_methods[allow_redirects]')).toBe('never');
+  });
+
+  it('translates an off-session authentication_required 402 into a requires_action result', async () => {
+    const { impl } = fakeFetch(
+      { error: { code: 'authentication_required', payment_intent: { id: 'pi_5', client_secret: 'pi_5_secret', status: 'requires_action' } } },
+      402,
+    );
+    const res = await adapter(impl).createBookingPaymentIntent({
+      amountCents: 8_000,
+      applicationFeeCents: 1_200,
+      destinationAccountId: 'acct_cg',
+      description: 'd',
+      metadata: {},
+      customerId: 'cus_parent',
+      paymentMethodId: 'pm_saved',
+      confirm: true,
+      offSession: true,
+    });
+    expect(res.id).toBe('pi_5');
+    expect(res.status).toBe('requires_action');
+    expect(res.client_secret).toBe('pi_5_secret');
+  });
+
+  it('throws on a hard decline (no embedded payment_intent to recover)', async () => {
+    const { impl } = fakeFetch({ error: { code: 'card_declined', message: 'Your card was declined.' } }, 402);
+    await expect(
+      adapter(impl).createBookingPaymentIntent({
+        amountCents: 8_000,
+        applicationFeeCents: 1_200,
+        destinationAccountId: 'acct_cg',
+        description: 'd',
+        metadata: {},
+        customerId: 'cus_parent',
+        paymentMethodId: 'pm_bad',
+        confirm: true,
+      }),
+    ).rejects.toThrow(/stripe POST \/payment_intents failed: 402/);
+  });
+});
+
+describe('booking payment lifecycle — capture / cancel / refund / retrieve (OH-211)', () => {
+  it('captures a partial amount with a recomputed application_fee + idempotency key', async () => {
+    const { impl, call } = fakeFetch({ id: 'pi_1', status: 'succeeded', amount_received: 5_000 });
+    const res = await adapter(impl).capturePaymentIntent({
+      id: 'pi_1',
+      amountToCaptureCents: 5_000,
+      applicationFeeCents: 750,
+      idempotencyKey: 'booking:capture:bkg-1',
+    });
+    expect(res.status).toBe('succeeded');
+    expect(call().url).toBe('https://api.stripe.test/v1/payment_intents/pi_1/capture');
+    expect(call().init.method).toBe('POST');
+    const body = formBody(call().init);
+    expect(body.get('amount_to_capture')).toBe('5000');
+    expect(body.get('application_fee_amount')).toBe('750');
+    expect((call().init.headers as Record<string, string>)['Idempotency-Key']).toBe('booking:capture:bkg-1');
+  });
+
+  it('captures the full authorized amount when no partial amount is given', async () => {
+    const { impl, call } = fakeFetch({ id: 'pi_1', status: 'succeeded' });
+    await adapter(impl).capturePaymentIntent({ id: 'pi_1' });
+    const body = formBody(call().init);
+    expect(body.has('amount_to_capture')).toBe(false);
+    expect(body.has('application_fee_amount')).toBe(false);
+  });
+
+  it('cancels an uncaptured hold', async () => {
+    const { impl, call } = fakeFetch({ id: 'pi_2', status: 'canceled' });
+    const res = await adapter(impl).cancelPaymentIntent('pi_2', 'booking:release:bkg-2');
+    expect(res.status).toBe('canceled');
+    expect(call().url).toBe('https://api.stripe.test/v1/payment_intents/pi_2/cancel');
+    expect((call().init.headers as Record<string, string>)['Idempotency-Key']).toBe('booking:release:bkg-2');
+  });
+
+  it('refunds a captured PaymentIntent', async () => {
+    const { impl, call } = fakeFetch({ id: 're_1', status: 'succeeded', amount: 3_000 });
+    const res = await adapter(impl).refundPaymentIntent({ id: 'pi_3', amountCents: 3_000 });
+    expect(res.id).toBe('re_1');
+    expect(call().url).toBe('https://api.stripe.test/v1/refunds');
+    const body = formBody(call().init);
+    expect(body.get('payment_intent')).toBe('pi_3');
+    expect(body.get('amount')).toBe('3000');
+  });
+
+  it('retrieves a PaymentIntent by id', async () => {
+    const { impl, call } = fakeFetch({ id: 'pi_4', status: 'requires_capture', amount: 8_000, amount_capturable: 8_000 });
+    const res = await adapter(impl).retrievePaymentIntent('pi_4');
+    expect(res.amount_capturable).toBe(8_000);
+    expect(call().url).toBe('https://api.stripe.test/v1/payment_intents/pi_4');
+    expect(call().init.method).toBe('GET');
+  });
+
+  it('reads the customer default payment method (string id)', async () => {
+    const { impl, call } = fakeFetch({ id: 'cus_1', invoice_settings: { default_payment_method: 'pm_default' } });
+    const pm = await adapter(impl).retrieveCustomerDefaultPaymentMethod('cus_1');
+    expect(pm).toBe('pm_default');
+    expect(call().url).toBe('https://api.stripe.test/v1/customers/cus_1');
+  });
+
+  it('reads the customer default payment method (expanded object)', async () => {
+    const { impl } = fakeFetch({ id: 'cus_1', invoice_settings: { default_payment_method: { id: 'pm_expanded' } } });
+    expect(await adapter(impl).retrieveCustomerDefaultPaymentMethod('cus_1')).toBe('pm_expanded');
+  });
+
+  it('returns null when the customer has no default payment method', async () => {
+    const { impl } = fakeFetch({ id: 'cus_1', invoice_settings: {} });
+    expect(await adapter(impl).retrieveCustomerDefaultPaymentMethod('cus_1')).toBeNull();
+  });
 });
 
 describe('verifyConnectWebhookSignature', () => {

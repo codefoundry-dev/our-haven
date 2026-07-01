@@ -231,6 +231,35 @@ export interface BookingsTable {
   service_state: string | null;
   service_postal_code: string | null;
   accepted_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  // ── payment lifecycle (OH-211; NULL on a provider consultation) ──────────────
+  payment_intent_id: string | null;
+  payment_status:
+    | 'scheduled'
+    | 'requires_action'
+    | 'authorized'
+    | 'captured'
+    | 'canceled'
+    | 'refunded'
+    | 'failed'
+    | null;
+  authorized_amount_cents: number | null;
+  captured_amount_cents: number | null;
+  refunded_amount_cents: number | null;
+  commission_bp: number | null;
+  commission_cents: number | null;
+  // `proposed_hours` is Postgres numeric → surfaced as a string by the driver.
+  proposed_hours: ColumnType<string | null, string | number | null, string | number | null>;
+  proposed_amount_cents: number | null;
+  authorize_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  request_expires_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  confirm_deadline_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  confirmed_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  disputed_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  cancelled_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  cancellation_tier: 'free' | 'half' | 'full' | null;
+  dispute_reason: string | null;
+  dispute_details: string | null;
+  payment_error: string | null;
   created_at: Generated<Date>;
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
 }

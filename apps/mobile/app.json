@@ -37,7 +37,8 @@
             "imageWidth": 76
           }
         }
-      ]
+      ],
+      "@stripe/stripe-react-native"
     ],
     "experiments": {
       "typedRoutes": true,

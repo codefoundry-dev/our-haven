@@ -71,6 +71,115 @@ async function loadIdentity(supabase: SupabaseHandles, uid: string): Promise<Sup
   };
 }
 
+interface BookingPaymentRow {
+  id: string;
+  parent_uid: string;
+  payment_status: string | null;
+}
+
+interface WebhookPaymentIntent {
+  id: string;
+  amount: number;
+  amount_capturable?: number;
+  amount_received?: number;
+  last_payment_error?: { code?: string; message?: string } | null;
+}
+
+/**
+ * Mirror a booking PaymentIntent's Stripe lifecycle onto its `bookings` row
+ * (OH-211). Keyed by payment_intent_id; every branch is guarded so a duplicate
+ * or out-of-order delivery is a no-op once the booking has reached a terminal
+ * payment state (captured / refunded / canceled). The Booking's domain `state`
+ * is owned by the routes/sweeps that drive `transitionBooking` — the webhook
+ * only reconciles the payment columns.
+ */
+async function handleBookingPaymentEvent(
+  db: Db,
+  eventType: string,
+  pi: WebhookPaymentIntent,
+): Promise<void> {
+  const booking = (await db
+    .selectFrom('bookings')
+    .select(['id', 'parent_uid', 'payment_status'])
+    .where('payment_intent_id', '=', pi.id)
+    .executeTakeFirst()) as BookingPaymentRow | undefined;
+  if (!booking) {
+    console.warn('[stripe-payments] booking webhook: no booking matches PI', pi.id);
+    return;
+  }
+  const now = new Date();
+  const captured = booking.payment_status === 'captured';
+  const refunded = booking.payment_status === 'refunded';
+  const canceled = booking.payment_status === 'canceled';
+
+  switch (eventType) {
+    case 'payment_intent.amount_capturable_updated': {
+      // The hold is placed — authorize is confirmed.
+      if (captured || refunded || canceled) return;
+      await db
+        .updateTable('bookings')
+        .set({
+          payment_status: 'authorized',
+          authorized_amount_cents: pi.amount_capturable ?? pi.amount,
+          updated_at: now,
+        })
+        .where('id', '=', booking.id)
+        .execute();
+      return;
+    }
+    case 'payment_intent.succeeded': {
+      // Captured — the payout transferred to the Caregiver's connected account.
+      if (refunded) return;
+      await db
+        .updateTable('bookings')
+        .set({
+          payment_status: 'captured',
+          captured_amount_cents: pi.amount_received ?? pi.amount,
+          updated_at: now,
+        })
+        .where('id', '=', booking.id)
+        .execute();
+      return;
+    }
+    case 'payment_intent.canceled': {
+      if (captured || refunded) return;
+      await db
+        .updateTable('bookings')
+        .set({ payment_status: 'canceled', updated_at: now })
+        .where('id', '=', booking.id)
+        .execute();
+      return;
+    }
+    case 'payment_intent.payment_failed': {
+      if (captured || refunded || canceled) return;
+      await db.transaction().execute(async (trx) => {
+        await trx
+          .updateTable('bookings')
+          .set({
+            payment_status: 'failed',
+            payment_error: pi.last_payment_error?.message ?? 'payment failed',
+            updated_at: now,
+          })
+          .where('id', '=', booking.id)
+          .execute();
+        await trx
+          .insertInto('notification_outbox')
+          .values({
+            recipient_uid: booking.parent_uid,
+            event_type: 'booking_payment_failed',
+            payload: { bookingId: booking.id },
+            dedupe_key: `booking_payment_failed:${pi.id}`,
+          })
+          .onConflict((oc) => oc.column('dedupe_key').doNothing())
+          .execute();
+      });
+      return;
+    }
+    default:
+      return; // any other booking PI event → ack, no-op
+  }
+}
+
 const webhookRoute = createRoute({
   method: 'post',
   path: '/webhooks/stripe-payments',
@@ -100,12 +209,20 @@ export function registerStripePaymentsWebhookRoutes(app: OpenAPIHono<AppEnv>): v
       return c.json({ error: 'invalid_payload' }, 400);
     }
 
-    // Ack everything that isn't a screening charge succeeding so Stripe stops retrying.
-    if (event.type !== 'payment_intent.succeeded') {
+    const pi = event.data.object;
+    const purpose = pi.metadata?.purpose;
+
+    // ── Booking payment lifecycle (OH-211) ────────────────────────────────────
+    // Mirror the Stripe PaymentIntent's lifecycle onto the `bookings` row (keyed
+    // by payment_intent_id). Idempotent + out-of-order safe: terminal payment
+    // states are never walked back by a late / duplicate delivery.
+    if (purpose === 'booking') {
+      await handleBookingPaymentEvent(db as Db, event.type, pi);
       return c.json({ received: true as const }, 200);
     }
-    const pi = event.data.object;
-    if (pi.metadata?.purpose !== 'screening') {
+
+    // ── Screening charge (OH-185): only the succeeded event advances a row ─────
+    if (event.type !== 'payment_intent.succeeded' || purpose !== 'screening') {
       return c.json({ received: true as const }, 200);
     }
 

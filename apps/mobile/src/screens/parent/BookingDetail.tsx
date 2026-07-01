@@ -1,174 +1,197 @@
 /**
- * Booking detail (Parent — native + narrow web). Design: screens/booking-detail.jsx.
- *
- * Hero band + an info card (mono Booking id, StatusPill, date cards,
- * AvatarGroup of children, rate breakdown), a state timeline, "manage this
- * session" rows, and state-dependent action buttons. UI scaffold — inline data.
+ * Booking detail (Parent — native + narrow web). OH-211 made this LIVE: it reads
+ * `?bookingId=` from the route, fetches `GET /v1/bookings/{id}`, and renders the
+ * real payment lifecycle + schedule + (reveal-at-accept) address, with
+ * state-dependent actions — Cancel (M2.5 preview via CancelSheet), Confirm hours
+ * (capture + payout inside the ~24h review window), and Report an issue (dispute).
  *
  * The desktop layout lives in `@/screens/web/parent/BookingDetail`
  * (`ParentBookingDetailWeb`) and is chosen by `booking-detail.web.tsx` on wide web.
  */
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 
-import { Icon, type IconName } from '@/components/Icon';
+import { Icon } from '@/components/Icon';
 import { AppBar } from '@/components/AppBar';
 import { Screen } from '@/components/Screen';
-import { AvatarGroup } from '@/components/ui/Avatar';
-import { CategoryChip } from '@/components/ui/CategoryChip';
+import { CategoryChip, type Category } from '@/components/ui/CategoryChip';
 import { Portrait } from '@/components/ui/PhotoPlaceholder';
 import { PricingSummary } from '@/components/ui/PricingSummary';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
-import { StatusPill, type BookingState } from '@/components/ui/StatusPill';
+import { StatusPill } from '@/components/ui/StatusPill';
+import { CancelSheet } from '@/components/parent/CancelSheet';
+import { DisputeSheet } from '@/components/parent/DisputeSheet';
+import { ApiError, confirmBookingHours } from '@/api/client';
+import { formatMoney } from '@/lib/offerCopy';
+import {
+  bookingActionsFor,
+  durationHours,
+  formatBookingDate,
+  formatTimeRange,
+  paymentLabel,
+  useBookingDetail,
+} from '@/lib/bookingView';
 import { colors, fonts, radii, shadow } from '@/theme/tokens';
 
-const STATE: BookingState = 'accepted';
-const STATE_ORDER: BookingState[] = ['requested', 'accepted', 'in-progress', 'completed'];
-
-const TIMELINE: { state: BookingState; label: string; meta: string }[] = [
-  { state: 'requested', label: 'Request sent', meta: 'Mon, May 8 · 2:14 PM' },
-  { state: 'accepted', label: 'Accepted by Maya', meta: 'Mon, May 8 · 4:02 PM' },
-  { state: 'in-progress', label: 'Session', meta: 'Wed, May 10 · 9:00 AM' },
-  { state: 'completed', label: 'Completed & charged', meta: 'Pending' },
-];
-
-const MANAGE: { icon: IconName; label: string; sub: string }[] = [
-  { icon: 'clock', label: 'Adjust session time', sub: 'Extend now, or request a shorter time' },
-  { icon: 'shield', label: 'Report an issue', sub: 'Dispute a charge, even after the window' },
-];
-
-function actionsFor(state: BookingState): { primary: string } {
-  switch (state) {
-    case 'requested':
-      return { primary: 'Cancel request' };
-    case 'accepted':
-    case 'awaiting-confirmation':
-      return { primary: 'Confirm hours' };
-    case 'completed':
-      return { primary: 'Leave a review' };
-    default:
-      return { primary: 'View receipt' };
-  }
-}
+const CATEGORY_LABEL: Record<string, Category> = { babysitter: 'Babysitter', tutor: 'Tutor', nanny: 'Nanny' };
 
 export default function BookingDetailScreen() {
   const router = useRouter();
-  const currentIndex = STATE_ORDER.indexOf(STATE);
-  const actions = actionsFor(STATE);
+  const params = useLocalSearchParams<{ bookingId?: string }>();
+  const bookingId = typeof params.bookingId === 'string' ? params.bookingId : null;
+  const { booking, loading, error, reload } = useBookingDetail(bookingId);
+
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [disputeOpen, setDisputeOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const confirmHours = async () => {
+    if (!bookingId || busy) return;
+    setBusy(true);
+    setActionError(null);
+    try {
+      await confirmBookingHours(bookingId);
+      await reload();
+    } catch (e) {
+      setActionError(e instanceof ApiError ? e.message : 'Could not confirm the hours.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <Screen edges={['top']} contentStyle={styles.center}>
+        <ActivityIndicator color={colors.brand} />
+      </Screen>
+    );
+  }
+  if (error || !booking) {
+    return (
+      <Screen edges={['top']} contentStyle={styles.content}>
+        <AppBar title="Booking detail" onBack={() => router.back()} style={styles.appBar} />
+        <View style={styles.center}>
+          <Text style={styles.emptyText}>{error ?? 'Booking not found.'}</Text>
+        </View>
+      </Screen>
+    );
+  }
+
+  const actions = bookingActionsFor(booking);
+  const hours = durationHours(booking.startMin, booking.endMin);
+  const rateCents = booking.agreedRateCents ?? 0;
+  const totalCents = booking.computedTotalCents ?? booking.authorizedAmountCents ?? 0;
+  const catLabel = booking.category ? CATEGORY_LABEL[booking.category] : null;
+  const title = booking.counterpartyName
+    ? `${catLabel ?? 'Care'} with ${booking.counterpartyName}`
+    : (catLabel ?? 'Booking');
 
   return (
     <Screen edges={['top']} contentStyle={styles.content}>
-      <AppBar
-        title="Booking detail"
-        onBack={() => router.back()}
-        actions={[{ icon: 'dots', label: 'More' }]}
-        style={styles.appBar}
-      />
+      <AppBar title="Booking detail" onBack={() => router.back()} style={styles.appBar} />
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Hero band */}
         <View style={styles.hero}>
-          <Portrait height={180} tint={colors.catTutor} label="provider · maya okafor" radius={28} />
-          <CategoryChip category="Tutor" style={styles.heroChip} />
+          <Portrait height={180} tint={colors.catTutor} label={booking.counterpartyName ?? 'caregiver'} radius={28} />
+          {catLabel ? <CategoryChip category={catLabel} style={styles.heroChip} /> : null}
         </View>
 
-        <Text style={styles.title}>Math tutoring with Maya</Text>
+        <Text style={styles.title}>{title}</Text>
 
-        {/* Info card */}
         <View style={styles.card}>
           <View style={styles.idRow}>
-            <Text style={styles.bookingId}>OH-B-4F92K3</Text>
-            <StatusPill state={STATE} label="Accepted" />
+            <Text style={styles.bookingId}>{`OH-B-${booking.id.slice(0, 6).toUpperCase()}`}</Text>
+            <StatusPill state={booking.state} />
           </View>
 
           <View style={styles.dayRow}>
             <View style={[styles.dayCard, { backgroundColor: colors.catNanny }]}>
               <View style={styles.dayHead}>
-                <Text style={styles.dayHeadText}>Today</Text>
+                <Text style={styles.dayHeadText}>Date</Text>
                 <Icon name="calendar" size={16} color={colors.ink} />
               </View>
-              <Text style={styles.dayDate}>Wed, May 10</Text>
-              <View style={styles.dayMeta}>
-                <Text style={styles.dayMetaText}>Week 19</Text>
-                <Text style={styles.dayMetaText}>2026</Text>
-              </View>
+              <Text style={styles.dayDate}>{formatBookingDate(booking.scheduledDate)}</Text>
             </View>
             <View style={[styles.dayCard, { backgroundColor: colors.highlight }]}>
               <View style={styles.dayHead}>
-                <Text style={styles.dayHeadText}>Session</Text>
-                <Icon name="check-circle" size={16} color={colors.ink} />
+                <Text style={styles.dayHeadText}>Time</Text>
+                <Icon name="clock" size={16} color={colors.ink} />
               </View>
-              <Text style={styles.dayTime}>9:00–9:30 AM</Text>
-              <Text style={styles.dayMetaText}>30 min</Text>
+              <Text style={styles.dayTime}>{formatTimeRange(booking.startMin, booking.endMin)}</Text>
+              <Text style={styles.dayMetaText}>{hours}h</Text>
             </View>
           </View>
 
+          {booking.childCount != null ? (
+            <>
+              <View style={styles.divider} />
+              <Text style={styles.eyebrow}>Children on booking</Text>
+              <Text style={styles.childText}>
+                {booking.childCount} {booking.childCount === 1 ? 'child' : 'children'}
+                {booking.childAges.length ? ` · ages ${booking.childAges.join(', ')}` : ''}
+              </Text>
+            </>
+          ) : null}
+
+          {booking.serviceAddress?.line1 ? (
+            <>
+              <View style={styles.divider} />
+              <Text style={styles.eyebrow}>Address</Text>
+              <Text style={styles.childText}>
+                {[booking.serviceAddress.line1, booking.serviceAddress.city, booking.serviceAddress.state]
+                  .filter(Boolean)
+                  .join(', ')}
+              </Text>
+            </>
+          ) : null}
+
           <View style={styles.divider} />
-
-          <Text style={styles.eyebrow}>Children on booking</Text>
-          <View style={styles.childRow}>
-            <AvatarGroup items={[{ label: 'A', tone: 'catTutor' }]} size={28} />
-            <Text style={styles.childText}>1 child · age 9</Text>
-          </View>
-
-          <View style={styles.divider} />
-
           <PricingSummary
             lines={[
-              { label: 'Tutor rate · 0.5h', value: '$17.50', muted: true },
-              { label: 'Service fee', value: '$2.10', muted: true },
-              { label: 'Tax', value: '$1.40', muted: true },
+              { label: `Rate · ${hours}h`, value: formatMoney(rateCents * hours || 0), muted: true },
+              ...(totalCents - rateCents * hours > 0
+                ? [{ label: 'Per-child surcharge', value: formatMoney(totalCents - rateCents * hours), muted: true }]
+                : []),
             ]}
-            total={{ label: 'Total', value: '$21.00' }}
+            total={{ label: 'Total', value: formatMoney(totalCents) }}
           />
         </View>
 
-        {/* State timeline */}
-        <Text style={[styles.eyebrow, styles.sectionEyebrow]}>Progress</Text>
-        <View style={styles.card}>
-          {TIMELINE.map((step, i) => {
-            const done = i <= currentIndex;
-            const isLast = i === TIMELINE.length - 1;
-            return (
-              <View key={step.state} style={styles.tlRow}>
-                <View style={styles.tlRail}>
-                  <View style={[styles.tlDot, done ? styles.tlDotOn : styles.tlDotOff]}>
-                    {done ? <Icon name="check" size={11} color={colors.inkInv} /> : null}
-                  </View>
-                  {!isLast ? <View style={[styles.tlLine, i < currentIndex ? styles.tlLineOn : styles.tlLineOff]} /> : null}
-                </View>
-                <View style={styles.tlText}>
-                  <Text style={[styles.tlLabel, !done && styles.tlLabelOff]}>{step.label}</Text>
-                  <Text style={styles.tlMeta}>{step.meta}</Text>
-                </View>
-              </View>
-            );
-          })}
+        {/* Payment status */}
+        <View style={styles.payCard}>
+          <View style={styles.payIcon}>
+            <Icon name="dollar" size={16} color={colors.ink} />
+          </View>
+          <View style={styles.flexMin}>
+            <Text style={styles.payLabel}>{paymentLabel(booking.paymentStatus)}</Text>
+            <Text style={styles.payNote}>
+              {booking.paymentStatus === 'captured'
+                ? 'Charged after the session completed.'
+                : booking.paymentStatus === 'requires_action'
+                  ? 'Your card needs confirmation to complete the hold.'
+                  : 'You’re charged only after the session completes.'}
+            </Text>
+          </View>
         </View>
 
-        {/* Manage this session */}
-        <Text style={[styles.eyebrow, styles.sectionEyebrow]}>Manage this session</Text>
-        <View style={styles.card}>
-          {MANAGE.map((r, i) => (
-            <Pressable
-              key={r.label}
-              accessibilityRole="button"
-              style={({ pressed }) => [styles.manageRow, i > 0 && styles.manageDivider, { opacity: pressed ? 0.85 : 1 }]}
-            >
-              <View style={styles.manageIcon}>
-                <Icon name={r.icon} size={17} color={colors.ink} />
-              </View>
-              <View style={styles.manageText}>
-                <Text style={styles.manageLabel}>{r.label}</Text>
-                <Text style={styles.manageSub}>{r.sub}</Text>
-              </View>
-              <Icon name="chevron-right" size={16} color={colors.ink3} />
-            </Pressable>
-          ))}
-        </View>
+        {actionError ? <Text style={styles.err}>{actionError}</Text> : null}
+
+        {actions.canDispute ? (
+          <Pressable style={styles.manageRow} onPress={() => setDisputeOpen(true)} accessibilityRole="button">
+            <View style={styles.manageIcon}>
+              <Icon name="shield" size={17} color={colors.ink} />
+            </View>
+            <View style={styles.manageText}>
+              <Text style={styles.manageLabel}>Report an issue</Text>
+              <Text style={styles.manageSub}>Dispute a charge or flag a problem</Text>
+            </View>
+            <Icon name="chevron-right" size={16} color={colors.ink3} />
+          </Pressable>
+        ) : null}
       </ScrollView>
 
-      {/* State-dependent actions */}
       <View style={styles.footer}>
         <Pressable
           onPress={() => router.push('/message-thread')}
@@ -177,19 +200,52 @@ export default function BookingDetailScreen() {
         >
           <Text style={styles.secondaryText}>Message</Text>
         </Pressable>
-        <PrimaryButton onPress={() => {}} style={styles.primaryBtn}>
-          {actions.primary}
-        </PrimaryButton>
+        {actions.canConfirm ? (
+          <PrimaryButton onPress={confirmHours} style={styles.primaryBtn} disabled={busy}>
+            {busy ? 'Confirming…' : 'Confirm hours'}
+          </PrimaryButton>
+        ) : actions.canCancel ? (
+          <Pressable
+            onPress={() => setCancelOpen(true)}
+            accessibilityRole="button"
+            style={({ pressed }) => [styles.cancelBtn, { opacity: pressed ? 0.9 : 1 }]}
+          >
+            <Text style={styles.cancelText}>Cancel booking</Text>
+          </Pressable>
+        ) : null}
       </View>
+
+      <CancelSheet
+        visible={cancelOpen}
+        bookingId={bookingId}
+        caregiver={booking.kind === 'caregiver'}
+        onClose={() => setCancelOpen(false)}
+        onCancelled={() => {
+          setCancelOpen(false);
+          void reload();
+        }}
+      />
+      <DisputeSheet
+        visible={disputeOpen}
+        bookingId={bookingId}
+        onClose={() => setDisputeOpen(false)}
+        onDisputed={() => {
+          setDisputeOpen(false);
+          void reload();
+        }}
+      />
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
   content: { flex: 1, paddingHorizontal: 0 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  emptyText: { fontFamily: fonts.regular, fontSize: 15, color: colors.ink2, textAlign: 'center' },
   appBar: { paddingHorizontal: 24 },
   scroll: { flex: 1 },
   scrollContent: { paddingHorizontal: 24, paddingTop: 12, paddingBottom: 28 },
+  flexMin: { flex: 1, minWidth: 0 },
 
   hero: { borderRadius: 28, overflow: 'hidden' },
   heroChip: { position: 'absolute', top: 12, left: 12 },
@@ -205,37 +261,56 @@ const styles = StyleSheet.create({
   dayHeadText: { fontFamily: fonts.semibold, fontSize: 13, color: colors.ink },
   dayDate: { fontFamily: fonts.bold, fontSize: 17, color: colors.ink, marginTop: 14 },
   dayTime: { fontFamily: fonts.bold, fontSize: 16, color: colors.ink, marginTop: 14, fontVariant: ['tabular-nums'] },
-  dayMeta: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
   dayMetaText: { fontFamily: fonts.regular, fontSize: 11, color: colors.ink, opacity: 0.7, marginTop: 8 },
 
   divider: { height: 1, backgroundColor: colors.hairline, marginVertical: 16 },
   eyebrow: { fontFamily: fonts.semibold, fontSize: 11, letterSpacing: 0.5, textTransform: 'uppercase', color: colors.ink2 },
-  sectionEyebrow: { marginBottom: 10 },
-  childRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 },
-  childText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.ink },
+  childText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.ink, marginTop: 8 },
 
-  tlRow: { flexDirection: 'row', gap: 12 },
-  tlRail: { alignItems: 'center', width: 22 },
-  tlDot: { width: 22, height: 22, borderRadius: radii.pill, alignItems: 'center', justifyContent: 'center' },
-  tlDotOn: { backgroundColor: colors.brand },
-  tlDotOff: { backgroundColor: colors.surfaceAlt, borderWidth: 1.5, borderColor: colors.hairline },
-  tlLine: { width: 2, flex: 1, marginVertical: 2 },
-  tlLineOn: { backgroundColor: colors.brand },
-  tlLineOff: { backgroundColor: colors.hairline },
-  tlText: { flex: 1, paddingBottom: 18 },
-  tlLabel: { fontFamily: fonts.semibold, fontSize: 14, color: colors.ink },
-  tlLabelOff: { color: colors.ink3 },
-  tlMeta: { fontFamily: fonts.regular, fontSize: 12, color: colors.ink2, marginTop: 2 },
+  payCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: colors.surface,
+    borderRadius: radii.lg,
+    padding: 14,
+    marginBottom: 12,
+    ...shadow.e1,
+  },
+  payIcon: { width: 36, height: 36, borderRadius: radii.pill, backgroundColor: colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' },
+  payLabel: { fontFamily: fonts.semibold, fontSize: 14, color: colors.ink },
+  payNote: { fontFamily: fonts.regular, fontSize: 11.5, lineHeight: 16, color: colors.ink2, marginTop: 2 },
 
-  manageRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14 },
-  manageDivider: { borderTopWidth: 1, borderTopColor: colors.hairline },
+  manageRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: colors.surface,
+    borderRadius: radii.lg,
+    padding: 14,
+    ...shadow.e1,
+  },
   manageIcon: { width: 36, height: 36, borderRadius: radii.pill, backgroundColor: colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' },
   manageText: { flex: 1, minWidth: 0 },
   manageLabel: { fontFamily: fonts.semibold, fontSize: 14.5, color: colors.ink },
   manageSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.ink2, marginTop: 1 },
 
-  footer: { flexDirection: 'row', gap: 10, backgroundColor: colors.surface, paddingHorizontal: 24, paddingTop: 14, paddingBottom: 24, borderTopLeftRadius: 28, borderTopRightRadius: 28, ...shadow.e2 },
+  err: { fontFamily: fonts.medium, fontSize: 13, color: colors.danger, textAlign: 'center', marginVertical: 8 },
+
+  footer: {
+    flexDirection: 'row',
+    gap: 10,
+    backgroundColor: colors.surface,
+    paddingHorizontal: 24,
+    paddingTop: 14,
+    paddingBottom: 24,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    ...shadow.e2,
+  },
   secondaryBtn: { flex: 1, height: 56, borderRadius: radii.pill, borderWidth: 1.5, borderColor: colors.ink, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
   secondaryText: { fontFamily: fonts.semibold, fontSize: 15, letterSpacing: -0.2, color: colors.ink },
   primaryBtn: { flex: 1 },
+  cancelBtn: { flex: 1, height: 56, borderRadius: radii.pill, borderWidth: 1.5, borderColor: colors.danger, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
+  cancelText: { fontFamily: fonts.semibold, fontSize: 15, color: colors.danger },
 });

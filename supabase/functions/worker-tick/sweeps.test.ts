@@ -1,19 +1,87 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  bookingAuthorizeDueSweep,
+  bookingRequestExpirySweep,
   consultationAutoCompleteSweep,
+  dueAutoConfirmQuery,
+  dueAuthorizeQuery,
   dueConsultationsQuery,
+  dueRequestExpiryQuery,
   dueScreeningsQuery,
   screeningDisposalSweep,
+  sessionAutoConfirmSweep,
   SWEEPS,
 } from './sweeps.ts';
 import { compileOnlyDb } from './_test/env.ts';
 
+/** A table-routed trx fake: select* resolve to `rows[table]`, writes are captured. */
+function makeTrx(rows: Record<string, Record<string, unknown>[]> = {}) {
+  const updates: Array<{ table: string; set: Record<string, unknown> }> = [];
+  const inserts: Array<{ table: string; values: Record<string, unknown> }> = [];
+  const selectChain = (table: string) => {
+    const c: Record<string, unknown> = {
+      select: () => c,
+      where: () => c,
+      orderBy: () => c,
+      limit: () => c,
+      forUpdate: () => c,
+      skipLocked: () => c,
+      execute: async () => rows[table] ?? [],
+      executeTakeFirst: async () => (rows[table] ?? [])[0],
+    };
+    return c;
+  };
+  const trx: Record<string, unknown> = {
+    selectFrom: (t: string) => selectChain(t),
+    updateTable: (t: string) => ({
+      set: (set: Record<string, unknown>) => ({
+        where: () => ({
+          execute: async () => {
+            updates.push({ table: t, set });
+            return [];
+          },
+        }),
+      }),
+    }),
+    insertInto: (t: string) => ({
+      values: (values: Record<string, unknown>) => ({
+        onConflict: () => ({
+          execute: async () => {
+            inserts.push({ table: t, values });
+            return [];
+          },
+        }),
+      }),
+    }),
+  };
+  const db = {
+    transaction: () => ({ execute: async (cb: (t: typeof trx) => Promise<unknown>) => cb(trx) }),
+  } as unknown as Parameters<typeof sessionAutoConfirmSweep.run>[0];
+  return { db, updates, inserts };
+}
+
+function makeStripe(over: Record<string, unknown> = {}) {
+  return {
+    retrieveCustomerDefaultPaymentMethod: async () => 'pm_x',
+    createBookingPaymentIntent: async () => ({ id: 'pi_new', client_secret: 's', status: 'requires_capture' }),
+    capturePaymentIntent: async () => ({ id: 'pi_1', status: 'succeeded', amount: 0 }),
+    cancelPaymentIntent: async () => ({ id: 'pi_1', status: 'canceled', amount: 0 }),
+    ...over,
+  } as unknown as NonNullable<Parameters<typeof sessionAutoConfirmSweep.run>[1]['stripe']>;
+}
+
+const NOW = new Date('2026-07-12T12:00:00Z');
+
 describe('SWEEPS registry', () => {
-  it('includes the screening-disposal + consultation auto-complete sweeps', () => {
-    expect(SWEEPS.map((s) => s.name)).toEqual(['screening_disposal', 'consultation_auto_complete']);
-    expect(screeningDisposalSweep.name).toBe('screening_disposal');
-    expect(consultationAutoCompleteSweep.name).toBe('consultation_auto_complete');
+  it('includes screening + consultation + the three booking-payment sweeps in order', () => {
+    expect(SWEEPS.map((s) => s.name)).toEqual([
+      'screening_disposal',
+      'consultation_auto_complete',
+      'booking_authorize_due',
+      'booking_request_expiry',
+      'session_auto_confirm',
+    ]);
   });
 });
 
@@ -100,5 +168,117 @@ describe('dueScreeningsQuery (SKIP LOCKED claim)', () => {
     expect(lower).toContain('"vendor_report_id" is not null');
     expect(lower).toContain('"candidate_action_url" is not null');
     expect(lower).toContain("'{}'::jsonb");
+  });
+});
+
+// ── Booking payment sweeps (OH-211) ────────────────────────────────────────────
+describe('booking-payment due queries (SKIP LOCKED claims)', () => {
+  it('dueAuthorizeQuery scans scheduled rows by authorize_at', () => {
+    const { sql } = dueAuthorizeQuery(compileOnlyDb(), NOW, 1000).compile();
+    const lower = sql.toLowerCase();
+    expect(lower).toContain('for update');
+    expect(lower).toContain('skip locked');
+    expect(lower).toContain('"payment_status" =');
+    expect(lower).toContain('"authorize_at" <=');
+  });
+  it('dueRequestExpiryQuery scans requested rows by request_expires_at', () => {
+    const { sql } = dueRequestExpiryQuery(compileOnlyDb(), NOW, 1000).compile();
+    const lower = sql.toLowerCase();
+    expect(lower).toContain('for update');
+    expect(lower).toContain('skip locked');
+    expect(lower).toContain('"request_expires_at" <=');
+  });
+  it('dueAutoConfirmQuery scans awaiting-confirmation rows by confirm_deadline_at', () => {
+    const { sql } = dueAutoConfirmQuery(compileOnlyDb(), NOW, 1000).compile();
+    const lower = sql.toLowerCase();
+    expect(lower).toContain('for update');
+    expect(lower).toContain('skip locked');
+    expect(lower).toContain('"confirm_deadline_at" <=');
+  });
+});
+
+describe('bookingAuthorizeDueSweep', () => {
+  it('skips (records an error) when Stripe is unconfigured', async () => {
+    const { db } = makeTrx();
+    const res = await bookingAuthorizeDueSweep.run(db, { now: NOW, limit: 100 });
+    expect(res).toMatchObject({ name: 'booking_authorize_due', processed: 0, error: 'stripe_unconfigured' });
+  });
+
+  it('authorizes a scheduled occurrence off-session and clears authorize_at', async () => {
+    const { db, updates } = makeTrx({
+      bookings: [
+        { id: 'b1', parent_uid: 'u1', provider_id: 'p1', authorized_amount_cents: 10000, commission_bp: 1500, commission_cents: 1500 },
+      ],
+      provider_connect_accounts: [{ stripe_account_id: 'acct', charges_enabled: true, payouts_enabled: true }],
+      parent_subscriptions: [{ stripe_customer_id: 'cus' }],
+    });
+    const res = await bookingAuthorizeDueSweep.run(db, { now: NOW, limit: 100, stripe: makeStripe(), commissionBp: 1500 });
+    expect(res).toEqual({ name: 'booking_authorize_due', processed: 1 });
+    expect(updates[0]!.set).toMatchObject({
+      payment_status: 'authorized',
+      payment_intent_id: 'pi_new',
+      authorize_at: null,
+    });
+  });
+
+  it('leaves a row scheduled when the caregiver has no ready payout account', async () => {
+    const { db, updates } = makeTrx({
+      bookings: [{ id: 'b1', parent_uid: 'u1', provider_id: 'p1', authorized_amount_cents: 10000, commission_bp: 1500, commission_cents: 1500 }],
+      provider_connect_accounts: [],
+      parent_subscriptions: [{ stripe_customer_id: 'cus' }],
+    });
+    const res = await bookingAuthorizeDueSweep.run(db, { now: NOW, limit: 100, stripe: makeStripe(), commissionBp: 1500 });
+    expect(res.processed).toBe(0);
+    expect(updates).toHaveLength(0);
+  });
+});
+
+describe('bookingRequestExpirySweep', () => {
+  it('expires a stale requested Booking and releases the hold', async () => {
+    const { db, updates } = makeTrx({
+      bookings: [{ id: 'b1', state: 'requested', origin: 'posted-job', payment_intent_id: 'pi_1', payment_status: 'authorized' }],
+    });
+    const res = await bookingRequestExpirySweep.run(db, { now: NOW, limit: 100, stripe: makeStripe() });
+    expect(res).toEqual({ name: 'booking_request_expiry', processed: 1 });
+    expect(updates[0]!.set).toMatchObject({ state: 'expired', payment_status: 'canceled' });
+  });
+});
+
+describe('sessionAutoConfirmSweep', () => {
+  it('captures + completes a Booking past its review deadline', async () => {
+    const { db, updates } = makeTrx({
+      bookings: [
+        {
+          id: 'b1',
+          state: 'awaiting-confirmation',
+          origin: 'posted-job',
+          payment_intent_id: 'pi_1',
+          authorized_amount_cents: 10000,
+          computed_total_cents: 10000,
+          proposed_amount_cents: null,
+          commission_bp: 1500,
+        },
+      ],
+    });
+    const res = await sessionAutoConfirmSweep.run(db, { now: NOW, limit: 100, stripe: makeStripe() });
+    expect(res).toEqual({ name: 'session_auto_confirm', processed: 1 });
+    expect(updates[0]!.set).toMatchObject({
+      state: 'completed',
+      payment_status: 'captured',
+      captured_amount_cents: 10000,
+      commission_cents: 1500,
+    });
+    expect(updates[0]!.set.confirmed_at).toBe(NOW);
+  });
+
+  it('skips a Booking that never authorized (no PaymentIntent)', async () => {
+    const { db, updates } = makeTrx({
+      bookings: [
+        { id: 'b1', state: 'awaiting-confirmation', origin: 'posted-job', payment_intent_id: null, authorized_amount_cents: 10000, computed_total_cents: 10000, proposed_amount_cents: null, commission_bp: 1500 },
+      ],
+    });
+    const res = await sessionAutoConfirmSweep.run(db, { now: NOW, limit: 100, stripe: makeStripe() });
+    expect(res.processed).toBe(0);
+    expect(updates).toHaveLength(0);
   });
 });

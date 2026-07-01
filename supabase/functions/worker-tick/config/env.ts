@@ -31,6 +31,32 @@ const EnvSchema = z.object({
       'Shared secret presented as `Authorization: Bearer <secret>` by the pg_cron + pg_net minute tick. The function rejects any caller that does not match it (constant-time). Set via `supabase secrets set` and mirrored into the `app.worker_tick_secret` DB GUC the cron command reads. NOT SUPABASE_-prefixed: the platform reserves that prefix for its own auto-injected vars.',
     ),
 
+  // ── Booking payment sweeps (OH-211) ──────────────────────────────────────
+  // The tick authorizes far-future / Series occurrences off-session, captures at
+  // the ~24h review deadline (session-auto-confirm), and releases holds on the
+  // 24h request expiry — all via the shared Stripe adapter (api/vendors/stripe).
+  // Optional: absent config just means those sweeps make no Stripe call (they log
+  // + skip), the same posture as the api function's optional Stripe secrets.
+  STRIPE_SECRET_KEY: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Stripe secret API key (sk_test_… / sk_live_…). Server-only; enables the booking-payment sweeps.'),
+  STRIPE_API_BASE: z
+    .string()
+    .url()
+    .default('https://api.stripe.com/v1')
+    .describe('Stripe API base URL. Overridable for staging / sandbox; tests inject a fetch stub instead.'),
+  BOOKING_COMMISSION_BP: z
+    .coerce.number()
+    .int()
+    .min(0)
+    .max(10_000)
+    .default(1500)
+    .describe(
+      'Platform Commission on Caregiver Bookings, basis points (default 1500 = 15%). Must match the api function value; used when the authorize-due sweep authorizes a scheduled occurrence.',
+    ),
+
   // ── Background screening (OH-185; ADR-0007) ──────────────────────────────
   // The worker-tick is the ONLY host that calls Checkr's REST API: the
   // screening-invite dispatcher drains `screening.invite` outbox rows and makes

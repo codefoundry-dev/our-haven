@@ -2,66 +2,95 @@
  * ParentBookingDetailWeb — the Parent's single-booking detail on desktop web.
  * Content-only: the dispatcher wraps this in <ParentWebShell active="bookings">.
  *
- * Ported from the Claude Design web project (parent-web/pw-bookings.jsx — the
- * PWBookings accepted-detail layout) over the native Parent BookingDetail
- * (`@/screens/parent/BookingDetail`), which stays the source of truth for the
- * booking status, date/time, pricing breakdown, children-on-booking, the state
- * timeline, and the manage actions (adjust time / report issue). Two columns:
- * the booking hero + date band + pricing + actions on the left; the progress
- * timeline + "Manage this session" list on the right. RN primitives only
- * (renders via RN-web) — multi-column via flexDirection:'row' + gap + flexWrap.
+ * OH-211 made this LIVE (was a static scaffold ported from parent-web/pw-bookings):
+ * it reads `?bookingId=`, fetches `GET /v1/bookings/{id}` via the shared
+ * `useBookingDetail` hook, and drives the two-column layout + the payment-aware
+ * actions (Cancel with the M2.5 preview, Confirm hours, Report an issue) from the
+ * real booking — the same behaviour as the native `@/screens/parent/BookingDetail`.
  */
-import { useRouter } from 'expo-router';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 
-import { Icon, type IconName } from '@/components/Icon';
+import { Icon } from '@/components/Icon';
 import { WebPageHeader } from '@/components/web/ParentWebShell';
-import { AvatarGroup } from '@/components/ui/Avatar';
 import { Card } from '@/components/ui/Card';
-import { CategoryChip } from '@/components/ui/CategoryChip';
+import { CategoryChip, type Category } from '@/components/ui/CategoryChip';
 import { Portrait } from '@/components/ui/PhotoPlaceholder';
 import { PricingSummary } from '@/components/ui/PricingSummary';
-import { StatusPill, type BookingState } from '@/components/ui/StatusPill';
+import { StatusPill } from '@/components/ui/StatusPill';
+import { CancelSheet } from '@/components/parent/CancelSheet';
+import { DisputeSheet } from '@/components/parent/DisputeSheet';
+import { ApiError, confirmBookingHours } from '@/api/client';
+import { formatMoney } from '@/lib/offerCopy';
+import {
+  bookingActionsFor,
+  durationHours,
+  formatBookingDate,
+  formatTimeRange,
+  paymentLabel,
+  useBookingDetail,
+} from '@/lib/bookingView';
 import { colors, fonts, radii, shadow } from '@/theme/tokens';
 
-const STATE: BookingState = 'accepted';
-const STATE_ORDER: BookingState[] = ['requested', 'accepted', 'in-progress', 'completed'];
-
-const TIMELINE: { state: BookingState; label: string; meta: string }[] = [
-  { state: 'requested', label: 'Request sent', meta: 'Mon, May 8 · 2:14 PM' },
-  { state: 'accepted', label: 'Accepted by Maya', meta: 'Mon, May 8 · 4:02 PM' },
-  { state: 'in-progress', label: 'Session', meta: 'Wed, May 10 · 9:00 AM' },
-  { state: 'completed', label: 'Completed & charged', meta: 'Pending' },
-];
-
-const MANAGE: { icon: IconName; label: string; sub: string }[] = [
-  { icon: 'clock', label: 'Adjust session time', sub: 'Extend now, or request a shorter time' },
-  { icon: 'shield', label: 'Report an issue', sub: 'Dispute a charge, even after the window' },
-];
-
-function primaryFor(state: BookingState): string {
-  switch (state) {
-    case 'requested':
-      return 'Cancel request';
-    case 'accepted':
-    case 'awaiting-confirmation':
-      return 'Confirm hours';
-    case 'completed':
-      return 'Leave a review';
-    default:
-      return 'View receipt';
-  }
-}
+const CATEGORY_LABEL: Record<string, Category> = { babysitter: 'Babysitter', tutor: 'Tutor', nanny: 'Nanny' };
 
 export function ParentBookingDetailWeb() {
   const router = useRouter();
-  const go = (r: string) => router.push(r as never);
-  const currentIndex = STATE_ORDER.indexOf(STATE);
-  const primary = primaryFor(STATE);
+  const params = useLocalSearchParams<{ bookingId?: string }>();
+  const bookingId = typeof params.bookingId === 'string' ? params.bookingId : null;
+  const { booking, loading, error, reload } = useBookingDetail(bookingId);
+
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [disputeOpen, setDisputeOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const confirmHours = async () => {
+    if (!bookingId || busy) return;
+    setBusy(true);
+    setActionError(null);
+    try {
+      await confirmBookingHours(bookingId);
+      await reload();
+    } catch (e) {
+      setActionError(e instanceof ApiError ? e.message : 'Could not confirm the hours.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator color={colors.brand} />
+      </View>
+    );
+  }
+  if (error || !booking) {
+    return (
+      <View>
+        <WebPageHeader greet="Family · Bookings" title="Booking detail" actions={['bell']} />
+        <View style={styles.center}>
+          <Text style={styles.emptyText}>{error ?? 'Booking not found.'}</Text>
+        </View>
+      </View>
+    );
+  }
+
+  const actions = bookingActionsFor(booking);
+  const hours = durationHours(booking.startMin, booking.endMin);
+  const rateCents = booking.agreedRateCents ?? 0;
+  const totalCents = booking.computedTotalCents ?? booking.authorizedAmountCents ?? 0;
+  const catLabel = booking.category ? CATEGORY_LABEL[booking.category] : null;
+  const title = booking.counterpartyName
+    ? `${catLabel ?? 'Care'} with ${booking.counterpartyName}`
+    : (catLabel ?? 'Booking');
+  const surcharge = totalCents - rateCents * hours;
 
   return (
     <View>
-      <WebPageHeader greet="Family · Bookings" title="Math tutoring with Maya" actions={['calendar', 'bell']} />
+      <WebPageHeader greet="Family · Bookings" title={title} actions={['calendar', 'bell']} />
 
       <View style={styles.body}>
         <View style={styles.layout}>
@@ -69,44 +98,46 @@ export function ParentBookingDetailWeb() {
           <View style={styles.mainCol}>
             <Card radius={radii.xl} padding={26} style={styles.bookingCard}>
               <View style={styles.idRow}>
-                <Text style={styles.bookingId}>OH-B-4F92K3</Text>
-                <StatusPill state={STATE} label="Accepted" />
+                <Text style={styles.bookingId}>{`OH-B-${booking.id.slice(0, 6).toUpperCase()}`}</Text>
+                <StatusPill state={booking.state} />
               </View>
 
-              {/* hero */}
               <View style={styles.hero}>
-                <Portrait height={200} tint={colors.catTutor} label="provider · maya okafor" radius={radii.xl} />
-                <CategoryChip category="Tutor" style={styles.heroChip} />
+                <Portrait height={200} tint={colors.catTutor} label={booking.counterpartyName ?? 'caregiver'} radius={radii.xl} />
+                {catLabel ? <CategoryChip category={catLabel} style={styles.heroChip} /> : null}
               </View>
 
-              <Text style={styles.title}>Math tutoring with Maya</Text>
-              <Text style={styles.subtitle}>Wed, May 10 · 9:00–9:30 AM · For Anika (9)</Text>
+              <Text style={styles.title}>{title}</Text>
+              <Text style={styles.subtitle}>
+                {formatBookingDate(booking.scheduledDate)} · {formatTimeRange(booking.startMin, booking.endMin)}
+              </Text>
 
-              {/* date / time / children band */}
+              {/* date / time band */}
               <View style={styles.band}>
                 <View style={[styles.bandCard, { backgroundColor: colors.catNanny }]}>
                   <View style={styles.bandHead}>
                     <Text style={styles.bandHeadText}>Date</Text>
                     <Icon name="calendar" size={16} color={colors.ink} />
                   </View>
-                  <Text style={styles.bandValue}>Wed, May 10</Text>
-                  <Text style={styles.bandMeta}>Week 19 · 2026</Text>
+                  <Text style={styles.bandValue}>{formatBookingDate(booking.scheduledDate)}</Text>
                 </View>
                 <View style={[styles.bandCard, { backgroundColor: colors.highlight }]}>
                   <View style={styles.bandHead}>
                     <Text style={styles.bandHeadText}>Time</Text>
                     <Icon name="clock" size={16} color={colors.ink} />
                   </View>
-                  <Text style={[styles.bandValue, styles.bandNum]}>9:00–9:30 AM</Text>
-                  <Text style={styles.bandMeta}>30 min</Text>
+                  <Text style={[styles.bandValue, styles.bandNum]}>{formatTimeRange(booking.startMin, booking.endMin)}</Text>
+                  <Text style={styles.bandMeta}>{hours}h</Text>
                 </View>
-                <View style={[styles.bandCard, styles.bandCardSurface]}>
-                  <Text style={styles.bandEyebrow}>Children on booking</Text>
-                  <View style={styles.childRow}>
-                    <AvatarGroup items={[{ label: 'A', tone: 'catTutor' }]} size={28} />
-                    <Text style={styles.childText}>1 child · age 9</Text>
+                {booking.childCount != null ? (
+                  <View style={[styles.bandCard, styles.bandCardSurface]}>
+                    <Text style={styles.bandEyebrow}>Children</Text>
+                    <Text style={styles.childText}>
+                      {booking.childCount} {booking.childCount === 1 ? 'child' : 'children'}
+                      {booking.childAges.length ? ` · ages ${booking.childAges.join(', ')}` : ''}
+                    </Text>
                   </View>
-                </View>
+                ) : null}
               </View>
 
               {/* pricing */}
@@ -114,102 +145,124 @@ export function ParentBookingDetailWeb() {
                 <Text style={styles.priceEyebrow}>Pricing</Text>
                 <PricingSummary
                   lines={[
-                    { label: 'Tutor rate · 0.5h', value: '$17.50', muted: true },
-                    { label: 'Service fee', value: '$2.10', muted: true },
-                    { label: 'Tax', value: '$1.40', muted: true },
+                    { label: `Rate · ${hours}h`, value: formatMoney(rateCents * hours || 0), muted: true },
+                    ...(surcharge > 0
+                      ? [{ label: 'Per-child surcharge', value: formatMoney(surcharge), muted: true }]
+                      : []),
                   ]}
-                  total={{ label: 'Total', value: '$21.00' }}
+                  total={{ label: 'Total', value: formatMoney(totalCents) }}
                 />
               </View>
+
+              {actionError ? <Text style={styles.err}>{actionError}</Text> : null}
 
               {/* actions */}
               <View style={styles.actions}>
                 <Pressable
-                  onPress={() => go('/message-thread')}
+                  onPress={() => router.push('/message-thread' as never)}
                   accessibilityRole="button"
                   style={({ pressed }) => [styles.secondaryBtn, { opacity: pressed ? 0.9 : 1 }]}
                 >
                   <Icon name="message" size={17} color={colors.ink} />
                   <Text style={styles.secondaryText}>Message</Text>
                 </Pressable>
-                <Pressable
-                  onPress={() => {}}
-                  accessibilityRole="button"
-                  style={({ pressed }) => [styles.primaryBtn, { opacity: pressed ? 0.92 : 1 }]}
-                >
-                  <Icon name="check" size={16} color={colors.inkInv} />
-                  <Text style={styles.primaryText}>{primary}</Text>
-                </Pressable>
+                {actions.canConfirm ? (
+                  <Pressable
+                    onPress={confirmHours}
+                    disabled={busy}
+                    accessibilityRole="button"
+                    style={({ pressed }) => [styles.primaryBtn, { opacity: pressed || busy ? 0.92 : 1 }]}
+                  >
+                    <Icon name="check" size={16} color={colors.inkInv} />
+                    <Text style={styles.primaryText}>{busy ? 'Confirming…' : 'Confirm hours'}</Text>
+                  </Pressable>
+                ) : actions.canCancel ? (
+                  <Pressable
+                    onPress={() => setCancelOpen(true)}
+                    accessibilityRole="button"
+                    style={({ pressed }) => [styles.cancelBtn, { opacity: pressed ? 0.9 : 1 }]}
+                  >
+                    <Text style={styles.cancelText}>Cancel booking</Text>
+                  </Pressable>
+                ) : null}
               </View>
             </Card>
           </View>
 
-          {/* ── right · progress + manage ──────────────────────────── */}
+          {/* ── right · payment + manage ───────────────────────────── */}
           <View style={styles.sideCol}>
             <Card radius={radii.xl} padding={22} style={styles.sideCard}>
-              <Text style={styles.secHead}>Progress</Text>
-              {TIMELINE.map((step, i) => {
-                const done = i <= currentIndex;
-                const isLast = i === TIMELINE.length - 1;
-                return (
-                  <View key={step.state} style={styles.tlRow}>
-                    <View style={styles.tlRail}>
-                      <View style={[styles.tlDot, done ? styles.tlDotOn : styles.tlDotOff]}>
-                        {done ? <Icon name="check" size={11} color={colors.inkInv} /> : null}
-                      </View>
-                      {!isLast ? <View style={[styles.tlLine, i < currentIndex ? styles.tlLineOn : styles.tlLineOff]} /> : null}
-                    </View>
-                    <View style={styles.tlText}>
-                      <Text style={[styles.tlLabel, !done && styles.tlLabelOff]}>{step.label}</Text>
-                      <Text style={styles.tlMeta}>{step.meta}</Text>
-                    </View>
-                  </View>
-                );
-              })}
+              <Text style={styles.secHead}>Payment</Text>
+              <Text style={styles.payLabel}>{paymentLabel(booking.paymentStatus)}</Text>
+              <Text style={styles.payNote}>
+                {booking.paymentStatus === 'captured'
+                  ? 'Charged after the session completed.'
+                  : 'You’re charged only after the session completes.'}
+              </Text>
             </Card>
 
-            <Card radius={radii.xl} padding={6} style={styles.sideCard}>
-              <Text style={[styles.secHead, styles.manageHead]}>Manage this session</Text>
-              {MANAGE.map((r, i) => (
+            {actions.canDispute ? (
+              <Card radius={radii.xl} padding={6} style={styles.sideCard}>
                 <Pressable
-                  key={r.label}
+                  onPress={() => setDisputeOpen(true)}
                   accessibilityRole="button"
-                  style={({ pressed }) => [styles.manageRow, i > 0 && styles.manageDivider, { opacity: pressed ? 0.85 : 1 }]}
+                  style={({ pressed }) => [styles.manageRow, { opacity: pressed ? 0.85 : 1 }]}
                 >
                   <View style={styles.manageIcon}>
-                    <Icon name={r.icon} size={17} color={colors.ink} />
+                    <Icon name="shield" size={17} color={colors.ink} />
                   </View>
                   <View style={styles.manageText}>
-                    <Text style={styles.manageLabel}>{r.label}</Text>
-                    <Text style={styles.manageSub}>{r.sub}</Text>
+                    <Text style={styles.manageLabel}>Report an issue</Text>
+                    <Text style={styles.manageSub}>Dispute a charge or flag a problem</Text>
                   </View>
                   <Icon name="chevron-right" size={16} color={colors.ink3} />
                 </Pressable>
-              ))}
-            </Card>
+              </Card>
+            ) : null}
 
             <View style={styles.note}>
               <Icon name="info" size={18} color={colors.brand} />
               <Text style={styles.noteText}>
-                Confirming releases the agreed amount to Maya. You can still report an issue and dispute a charge,
-                even after the window closes.
+                Confirming releases the agreed amount to the caregiver. If no dispute is filed within ~24 hours of the
+                session, it auto-confirms.
               </Text>
             </View>
           </View>
         </View>
       </View>
+
+      <CancelSheet
+        visible={cancelOpen}
+        bookingId={bookingId}
+        caregiver={booking.kind === 'caregiver'}
+        onClose={() => setCancelOpen(false)}
+        onCancelled={() => {
+          setCancelOpen(false);
+          void reload();
+        }}
+      />
+      <DisputeSheet
+        visible={disputeOpen}
+        bookingId={bookingId}
+        onClose={() => setDisputeOpen(false)}
+        onDisputed={() => {
+          setDisputeOpen(false);
+          void reload();
+        }}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   body: { paddingHorizontal: 36, paddingBottom: 48, maxWidth: 1180 },
+  center: { minHeight: 320, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  emptyText: { fontFamily: fonts.regular, fontSize: 15, color: colors.ink2, textAlign: 'center' },
 
   layout: { flexDirection: 'row', flexWrap: 'wrap', gap: 18, alignItems: 'flex-start' },
   mainCol: { flexGrow: 1.6, flexBasis: 560, minWidth: 360 },
   sideCol: { flexGrow: 1, flexBasis: 320, minWidth: 280, gap: 16 },
 
-  // booking card
   bookingCard: { ...shadow.e1 },
   idRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 16 },
   bookingId: { fontFamily: fonts.mono, fontSize: 12, color: colors.ink3 },
@@ -219,7 +272,6 @@ const styles = StyleSheet.create({
   title: { fontFamily: fonts.bold, fontSize: 26, lineHeight: 32, letterSpacing: -0.6, color: colors.ink, marginTop: 20 },
   subtitle: { fontFamily: fonts.regular, fontSize: 14, color: colors.ink2, marginTop: 6 },
 
-  // date / time / children band
   band: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginTop: 22 },
   bandCard: { flexGrow: 1, flexBasis: 150, minWidth: 140, borderRadius: radii.lg, padding: 16 },
   bandCardSurface: { backgroundColor: colors.surfaceAlt },
@@ -229,48 +281,32 @@ const styles = StyleSheet.create({
   bandNum: { fontSize: 16, fontVariant: ['tabular-nums'] },
   bandMeta: { fontFamily: fonts.regular, fontSize: 11, color: colors.ink, opacity: 0.7, marginTop: 6 },
   bandEyebrow: { fontFamily: fonts.semibold, fontSize: 11, letterSpacing: 0.5, textTransform: 'uppercase', color: colors.ink2 },
-  childRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 },
-  childText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.ink },
+  childText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.ink, marginTop: 12 },
 
-  // pricing
   priceCard: { marginTop: 18, backgroundColor: colors.surfaceAlt, borderRadius: radii.lg, padding: 20, maxWidth: 440 },
   priceEyebrow: { fontFamily: fonts.semibold, fontSize: 11, letterSpacing: 0.5, textTransform: 'uppercase', color: colors.ink2, marginBottom: 12 },
 
-  // actions
+  err: { fontFamily: fonts.medium, fontSize: 13, color: colors.danger, marginTop: 14 },
+
   actions: { flexDirection: 'row', gap: 12, marginTop: 22, maxWidth: 480 },
   secondaryBtn: { flexGrow: 1, flexBasis: 160, height: 52, borderRadius: radii.pill, borderWidth: 1.5, borderColor: colors.hairline, backgroundColor: colors.surface, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   secondaryText: { fontFamily: fonts.semibold, fontSize: 15, color: colors.ink },
   primaryBtn: { flexGrow: 1.3, flexBasis: 180, height: 52, borderRadius: radii.pill, backgroundColor: colors.brand, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   primaryText: { fontFamily: fonts.semibold, fontSize: 15, color: colors.inkInv },
+  cancelBtn: { flexGrow: 1.3, flexBasis: 180, height: 52, borderRadius: radii.pill, borderWidth: 1.5, borderColor: colors.danger, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
+  cancelText: { fontFamily: fonts.semibold, fontSize: 15, color: colors.danger },
 
-  // right column
   sideCard: { ...shadow.e1 },
-  secHead: { fontFamily: fonts.bold, fontSize: 11.5, letterSpacing: 0.5, textTransform: 'uppercase', color: colors.ink2, marginBottom: 16 },
-  manageHead: { marginLeft: 16, marginTop: 16, marginBottom: 4 },
+  secHead: { fontFamily: fonts.bold, fontSize: 11.5, letterSpacing: 0.5, textTransform: 'uppercase', color: colors.ink2, marginBottom: 12 },
+  payLabel: { fontFamily: fonts.semibold, fontSize: 15, color: colors.ink },
+  payNote: { fontFamily: fonts.regular, fontSize: 13, lineHeight: 19, color: colors.ink2, marginTop: 4 },
 
-  // timeline
-  tlRow: { flexDirection: 'row', gap: 12 },
-  tlRail: { alignItems: 'center', width: 22 },
-  tlDot: { width: 22, height: 22, borderRadius: radii.pill, alignItems: 'center', justifyContent: 'center' },
-  tlDotOn: { backgroundColor: colors.brand },
-  tlDotOff: { backgroundColor: colors.surfaceAlt, borderWidth: 1.5, borderColor: colors.hairline },
-  tlLine: { width: 2, flex: 1, marginVertical: 2 },
-  tlLineOn: { backgroundColor: colors.brand },
-  tlLineOff: { backgroundColor: colors.hairline },
-  tlText: { flex: 1, paddingBottom: 18 },
-  tlLabel: { fontFamily: fonts.semibold, fontSize: 14, color: colors.ink },
-  tlLabelOff: { color: colors.ink3 },
-  tlMeta: { fontFamily: fonts.regular, fontSize: 12, color: colors.ink2, marginTop: 2 },
-
-  // manage rows
   manageRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, paddingHorizontal: 12 },
-  manageDivider: { borderTopWidth: 1, borderTopColor: colors.hairline },
   manageIcon: { width: 36, height: 36, borderRadius: radii.pill, backgroundColor: colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' },
   manageText: { flex: 1, minWidth: 0 },
   manageLabel: { fontFamily: fonts.semibold, fontSize: 14.5, color: colors.ink },
   manageSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.ink2, marginTop: 1 },
 
-  // note
   note: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 16, borderRadius: radii.md, backgroundColor: colors.brandSoft },
   noteText: { flex: 1, fontFamily: fonts.regular, fontSize: 13, lineHeight: 19, color: colors.ink2 },
 });

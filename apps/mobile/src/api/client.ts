@@ -297,9 +297,53 @@ export function getBookings(): Promise<BookingSummary[]> {
   return get<{ bookings: BookingSummary[] }>('/v1/bookings').then((r) => r.bookings);
 }
 
-/** Cancel a still-`accepted` consultation Booking, releasing the held slot (OH-203). */
-export function cancelBooking(bookingId: string): Promise<{ id: string; state: BookingSummary['state'] }> {
-  return post<{ id: string; state: BookingSummary['state'] }>(`/v1/bookings/${bookingId}/cancel`, {});
+/**
+ * Caregiver Booking payment lifecycle (OH-211) — the Parent read/confirm/dispute
+ * surface + the cancellation charge. `getBooking` is the detail (payment + schedule
+ * + reveal-at-accept address); `getBookingCancelPreview` returns the M2.5 charge
+ * split for the CancelSheet; `cancelBooking` executes it (free release / partial
+ * capture); `confirmBookingHours` captures + completes inside the ~24h review
+ * window; `disputeBooking` holds the payout (in-window) or files an admin
+ * escalation (out-of-window). Provider consultations reuse `cancelBooking` (no fee).
+ */
+export type BookingDetail = paths['/v1/bookings/{bookingId}']['get']['responses'][200]['content']['application/json'];
+export type BookingCancelPreview =
+  paths['/v1/bookings/{bookingId}/cancel-preview']['get']['responses'][200]['content']['application/json'];
+export type BookingCancelResult =
+  paths['/v1/bookings/{bookingId}/cancel']['post']['responses'][200]['content']['application/json'];
+export type BookingConfirmResult =
+  paths['/v1/bookings/{bookingId}/confirm-hours']['post']['responses'][200]['content']['application/json'];
+export type BookingDisputeBody =
+  paths['/v1/bookings/{bookingId}/dispute']['post']['requestBody']['content']['application/json'];
+export type BookingDisputeResult =
+  paths['/v1/bookings/{bookingId}/dispute']['post']['responses'][200]['content']['application/json'];
+export type BookingDisputeReason = BookingDisputeBody['reason'];
+export type BookingPaymentStatus = NonNullable<BookingDetail['paymentStatus']>;
+export type CancellationTier = BookingCancelPreview['tier'];
+
+/** One Booking's detail (payment + schedule + counterparty). */
+export function getBooking(bookingId: string): Promise<BookingDetail> {
+  return get<BookingDetail>(`/v1/bookings/${bookingId}`);
+}
+
+/** Preview the cancellation charge (M2.5 calculator) before confirming. */
+export function getBookingCancelPreview(bookingId: string): Promise<BookingCancelPreview> {
+  return get<BookingCancelPreview>(`/v1/bookings/${bookingId}/cancel-preview`);
+}
+
+/** Cancel a Booking — provider (release slot) or caregiver (M2.5 charge). */
+export function cancelBooking(bookingId: string): Promise<BookingCancelResult> {
+  return post<BookingCancelResult>(`/v1/bookings/${bookingId}/cancel`, {});
+}
+
+/** Confirm the session hours within the review window → capture + payout. */
+export function confirmBookingHours(bookingId: string): Promise<BookingConfirmResult> {
+  return post<BookingConfirmResult>(`/v1/bookings/${bookingId}/confirm-hours`, undefined);
+}
+
+/** File a charge dispute (in-window payout hold / out-of-window admin escalation). */
+export function disputeBooking(bookingId: string, body: BookingDisputeBody): Promise<BookingDisputeResult> {
+  return post<BookingDisputeResult>(`/v1/bookings/${bookingId}/dispute`, body);
 }
 
 /**
@@ -446,6 +490,8 @@ export type ApplicationCaregiver = JobApplication['caregiver'];
 export type ApplicationState = JobApplication['state'];
 export type AwardResult =
   paths['/v1/applications/{applicationId}/award']['post']['responses'][200]['content']['application/json'];
+/** Per-Booking authorize outcome (OH-211) — the client runs 3DS on `requires_action`. */
+export type AwardPayment = AwardResult['payments'][number];
 export type CounterApplicationBody =
   paths['/v1/applications/{applicationId}/counter']['post']['requestBody']['content']['application/json'];
 export type CounterApplicationResult =
@@ -478,12 +524,15 @@ export function getApplication(applicationId: string): Promise<JobApplication> {
   return get<JobApplication>(`/v1/applications/${applicationId}`);
 }
 
-/** Award the Job to this Application's Caregiver — mock payment (Phase 0). */
-export function awardApplication(applicationId: string, paymentMethodId?: string): Promise<AwardResult> {
-  return post<AwardResult>(
-    `/v1/applications/${applicationId}/award`,
-    paymentMethodId ? { paymentMethodId } : {},
-  );
+/**
+ * Award the Job to this Application's Caregiver (OH-211). The card is resolved
+ * server-side from the Parent's subscription; a near-term one-off is authorized
+ * immediately (the response's `payments[]` carry a `clientSecret` the client uses
+ * to run opportunistic 3DS on `requires_action`), Series/far-future occurrences
+ * are `scheduled`. Booking(s) born `requested`; the other applicants auto-decline.
+ */
+export function awardApplication(applicationId: string): Promise<AwardResult> {
+  return post<AwardResult>(`/v1/applications/${applicationId}/award`, {});
 }
 
 export function declineApplication(applicationId: string): Promise<{ applicationId: string; state: 'declined' }> {

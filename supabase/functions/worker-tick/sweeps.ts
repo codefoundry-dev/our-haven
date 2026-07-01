@@ -8,6 +8,16 @@ import {
   transitionBooking,
   type BookingState,
 } from '../../../packages/domain/src/booking-lifecycle/index.ts';
+// The Stripe adapter + booking-payment orchestration live on the `api` function;
+// the payment sweeps reuse them cross-function (Deno resolves the relative `.ts`
+// at bundle time — same mechanism as the domain import above).
+import type { StripeAdapter } from '../api/vendors/stripe.ts';
+import {
+  authorizeBooking,
+  captureBooking,
+  commissionOn,
+  releaseBookingHold,
+} from '../api/services/booking-payments.ts';
 
 /**
  * Due-row sweeps for the minute tick (ADR-0019 § Decision 4; OH-237).
@@ -39,6 +49,11 @@ export interface SweepContext {
   now: Date;
   /** Per-sweep row cap so a runaway backlog cannot blow up one tick. */
   limit: number;
+  /** Stripe adapter for the booking-payment sweeps (OH-211). Absent when Stripe
+   *  is unconfigured — those sweeps then log + skip rather than throw. */
+  stripe?: StripeAdapter;
+  /** Platform Commission (basis points) for the lazy authorize-due sweep. */
+  commissionBp?: number;
 }
 
 export interface SweepResult {
@@ -167,5 +182,272 @@ export const consultationAutoCompleteSweep: Sweep = {
   },
 };
 
+/* ── Booking payment sweeps (OH-211) ───────────────────────────────────────────
+ * Three deadline sweeps drive the Caregiver payment lifecycle off the request
+ * path. Each routes its transition through `transitionBooking` (the state-machine
+ * authority) and its money move through the shared booking-payment orchestration.
+ * Stripe calls carry deterministic idempotency keys, so a redelivered/overlapping
+ * tick is a no-op; a per-row try/catch isolates one bad PaymentIntent from the
+ * rest of the batch (a JS throw does not abort the surrounding PG transaction).
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** A `scheduled` occurrence due for its lazy off-session authorization. */
+interface AuthorizeDueRow {
+  id: string;
+  parent_uid: string;
+  provider_id: string;
+  authorized_amount_cents: number | null;
+  commission_bp: number | null;
+  commission_cents: number | null;
+}
+
+export function dueAuthorizeQuery(db: Db, now: Date, limit: number) {
+  return db
+    .selectFrom('bookings')
+    .select(['id', 'parent_uid', 'provider_id', 'authorized_amount_cents', 'commission_bp', 'commission_cents'])
+    .where('payment_status', '=', 'scheduled')
+    .where('authorize_at', 'is not', null)
+    .where('authorize_at', '<=', now)
+    .orderBy('authorize_at', 'asc')
+    .limit(limit)
+    .forUpdate()
+    .skipLocked();
+}
+
+/**
+ * Lazy authorize-due (OH-211): a Booking born `scheduled` at Award (far-future
+ * one-off / every Series occurrence) is authorized off-session ~48h before its
+ * start, holding the estimated total on the Parent's saved card. Opportunistic
+ * 3DS surfaces as `requires_action` — the row leaves `scheduled` (so it is not
+ * re-swept) and the Parent is notified to complete authentication.
+ */
+export const bookingAuthorizeDueSweep: Sweep = {
+  name: 'booking_authorize_due',
+  async run(db, { now, limit, stripe, commissionBp }) {
+    if (!stripe) return { name: 'booking_authorize_due', processed: 0, error: 'stripe_unconfigured' };
+    return db.transaction().execute(async (trx) => {
+      const due = (await dueAuthorizeQuery(trx, now, limit).execute()) as AuthorizeDueRow[];
+      let processed = 0;
+      for (const row of due) {
+        try {
+          const connect = (await trx
+            .selectFrom('provider_connect_accounts')
+            .select(['stripe_account_id', 'charges_enabled', 'payouts_enabled'])
+            .where('provider_id', '=', row.provider_id)
+            .executeTakeFirst()) as
+            | { stripe_account_id: string | null; charges_enabled: boolean; payouts_enabled: boolean }
+            | undefined;
+          const sub = (await trx
+            .selectFrom('parent_subscriptions')
+            .select(['stripe_customer_id'])
+            .where('uid', '=', row.parent_uid)
+            .executeTakeFirst()) as { stripe_customer_id: string | null } | undefined;
+          const connectAccountId = connect?.stripe_account_id;
+          const customerId = sub?.stripe_customer_id;
+          if (!connectAccountId || !connect?.charges_enabled || !connect?.payouts_enabled || !customerId) {
+            continue; // not payable yet — leave `scheduled` for a later tick
+          }
+          const paymentMethodId = await stripe.retrieveCustomerDefaultPaymentMethod(customerId);
+          if (!paymentMethodId) continue;
+
+          const amountCents = row.authorized_amount_cents ?? 0;
+          const bp = row.commission_bp ?? commissionBp ?? 0;
+          const commissionCents = row.commission_cents ?? commissionOn(amountCents, bp);
+          const { patch, clientSecret } = await authorizeBooking(stripe, {
+            bookingId: row.id,
+            amountCents,
+            commissionCents,
+            commissionBp: bp,
+            connectAccountId,
+            customerId,
+            paymentMethodId,
+            description: `Our Haven booking ${row.id}`,
+            offSession: true,
+          });
+          await trx
+            .updateTable('bookings')
+            .set({ ...patch, authorize_at: null, updated_at: now })
+            .where('id', '=', row.id)
+            .execute();
+          // 3DS needed off-session → nudge the Parent to complete it on-session.
+          if (patch.payment_status === 'requires_action') {
+            await trx
+              .insertInto('notification_outbox')
+              .values({
+                recipient_uid: row.parent_uid,
+                event_type: 'booking_authorization_action_required',
+                payload: { bookingId: row.id },
+                dedupe_key: `booking_auth_action:${patch.payment_intent_id ?? row.id}`,
+              })
+              .onConflict((oc) => oc.column('dedupe_key').doNothing())
+              .execute();
+          }
+          void clientSecret;
+          processed++;
+        } catch (e) {
+          console.error('[booking_authorize_due] authorize failed', row.id, e);
+        }
+      }
+      return { name: 'booking_authorize_due', processed };
+    });
+  },
+};
+
+/** A `requested` Booking whose 24h Caregiver-accept window has elapsed. */
+interface RequestExpiryRow {
+  id: string;
+  state: BookingState;
+  origin: 'posted-job' | 'direct-message' | null;
+  payment_intent_id: string | null;
+  payment_status:
+    | 'scheduled'
+    | 'requires_action'
+    | 'authorized'
+    | 'captured'
+    | 'canceled'
+    | 'refunded'
+    | 'failed'
+    | null;
+}
+
+export function dueRequestExpiryQuery(db: Db, now: Date, limit: number) {
+  return db
+    .selectFrom('bookings')
+    .select(['id', 'state', 'origin', 'payment_intent_id', 'payment_status'])
+    .where('state', '=', 'requested')
+    .where('request_expires_at', 'is not', null)
+    .where('request_expires_at', '<=', now)
+    .orderBy('request_expires_at', 'asc')
+    .limit(limit)
+    .forUpdate()
+    .skipLocked();
+}
+
+/**
+ * Request-expiry (OH-211; closes OH-210's flagged hole): a posted-Job Booking is
+ * born `requested` with a 24h Caregiver-accept window. On expiry it auto-declines
+ * (`request-expire` → `expired`) and the authorization hold is released.
+ */
+export const bookingRequestExpirySweep: Sweep = {
+  name: 'booking_request_expiry',
+  async run(db, { now, limit, stripe }) {
+    if (!stripe) return { name: 'booking_request_expiry', processed: 0, error: 'stripe_unconfigured' };
+    return db.transaction().execute(async (trx) => {
+      const due = (await dueRequestExpiryQuery(trx, now, limit).execute()) as RequestExpiryRow[];
+      let processed = 0;
+      for (const row of due) {
+        const r = transitionBooking(
+          { kind: 'caregiver', origin: row.origin ?? 'posted-job', state: row.state },
+          { type: 'request-expire' },
+        );
+        if (!r.ok || r.next !== 'expired') continue;
+        try {
+          const { patch } = await releaseBookingHold(stripe, {
+            bookingId: row.id,
+            paymentIntentId: row.payment_intent_id,
+            paymentStatus: row.payment_status,
+          });
+          await trx
+            .updateTable('bookings')
+            .set({ state: 'expired', ...patch, updated_at: now })
+            .where('id', '=', row.id)
+            .execute();
+          processed++;
+        } catch (e) {
+          console.error('[booking_request_expiry] release failed', row.id, e);
+        }
+      }
+      return { name: 'booking_request_expiry', processed };
+    });
+  },
+};
+
+/** An `awaiting-confirmation` Booking past its ~24h review deadline. */
+interface AutoConfirmRow {
+  id: string;
+  state: BookingState;
+  origin: 'posted-job' | 'direct-message' | null;
+  payment_intent_id: string | null;
+  authorized_amount_cents: number | null;
+  computed_total_cents: number | null;
+  proposed_amount_cents: number | null;
+  commission_bp: number | null;
+}
+
+export function dueAutoConfirmQuery(db: Db, now: Date, limit: number) {
+  return db
+    .selectFrom('bookings')
+    .select([
+      'id',
+      'state',
+      'origin',
+      'payment_intent_id',
+      'authorized_amount_cents',
+      'computed_total_cents',
+      'proposed_amount_cents',
+      'commission_bp',
+    ])
+    .where('state', '=', 'awaiting-confirmation')
+    .where('confirm_deadline_at', 'is not', null)
+    .where('confirm_deadline_at', '<=', now)
+    .orderBy('confirm_deadline_at', 'asc')
+    .limit(limit)
+    .forUpdate()
+    .skipLocked();
+}
+
+/**
+ * Session auto-confirm (OH-211; ADR-0013): when the ~24h review window closes
+ * with no dispute, the Booking auto-confirms (`session-auto-confirm` →
+ * `completed`), the held amount is captured, and the payout releases (the
+ * destination-charge capture IS the payout). Capture uses the Caregiver's
+ * proposed hours (OH-218/219) when present, else the booked estimate.
+ */
+export const sessionAutoConfirmSweep: Sweep = {
+  name: 'session_auto_confirm',
+  async run(db, { now, limit, stripe }) {
+    if (!stripe) return { name: 'session_auto_confirm', processed: 0, error: 'stripe_unconfigured' };
+    return db.transaction().execute(async (trx) => {
+      const due = (await dueAutoConfirmQuery(trx, now, limit).execute()) as AutoConfirmRow[];
+      let processed = 0;
+      for (const row of due) {
+        const r = transitionBooking(
+          { kind: 'caregiver', origin: row.origin ?? 'posted-job', state: row.state },
+          { type: 'session-auto-confirm' },
+        );
+        if (!r.ok || r.next !== 'completed') continue;
+        if (!row.payment_intent_id) continue; // never authorized — nothing to capture
+        try {
+          const authorized = row.authorized_amount_cents ?? row.computed_total_cents ?? 0;
+          const captureAmountCents =
+            row.proposed_amount_cents != null ? Math.min(row.proposed_amount_cents, authorized) : authorized;
+          const commissionCents = commissionOn(captureAmountCents, row.commission_bp ?? 0);
+          const { patch } = await captureBooking(stripe, {
+            bookingId: row.id,
+            paymentIntentId: row.payment_intent_id,
+            captureAmountCents,
+            commissionCents,
+          });
+          await trx
+            .updateTable('bookings')
+            .set({ state: 'completed', confirmed_at: now, ...patch, updated_at: now })
+            .where('id', '=', row.id)
+            .execute();
+          processed++;
+        } catch (e) {
+          console.error('[session_auto_confirm] capture failed', row.id, e);
+        }
+      }
+      return { name: 'session_auto_confirm', processed };
+    });
+  },
+};
+
 /** Every sweep the minute tick runs. Append future deadline sweeps here. */
-export const SWEEPS: readonly Sweep[] = [screeningDisposalSweep, consultationAutoCompleteSweep];
+export const SWEEPS: readonly Sweep[] = [
+  screeningDisposalSweep,
+  consultationAutoCompleteSweep,
+  bookingAuthorizeDueSweep,
+  bookingRequestExpirySweep,
+  sessionAutoConfirmSweep,
+];
