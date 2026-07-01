@@ -71,6 +71,14 @@ tags:
       (402); the disclosure consent is timestamped (ADR-0016). A multi-day
       one-off fans out into one Job per date; a recurring rule posts a single
       Job (ADR-0014).
+  - name: opportunities
+    description: "Caregiver Opportunities (OH-218) — the Caregiver-facing READ side
+      of the Posted-Job chain: the open-Jobs feed across the categories a
+      Caregiver offers (ranked recency + distance, one-off/recurring + category
+      filters), one Job's detail (disclosed child bundle + approximate distance,
+      exact street reveal-at-accept), and My Applications with the derived
+      monthly quota. Filing/Counter/Withdraw + cap enforcement are the
+      Application composer (OH-219)."
   - name: verification
     description: Supply verification — state + email/phone/ID-doc facts (OH-184)
   - name: screening
@@ -3979,6 +3987,294 @@ components:
           maxLength: 280
       required:
         - proposedRateCents
+    OpportunityList:
+      type: object
+      properties:
+        jobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/Opportunity"
+      required:
+        - jobs
+    Opportunity:
+      type: object
+      properties:
+        id:
+          type: string
+        category:
+          type: string
+          enum:
+            - babysitter
+            - tutor
+            - nanny
+        description:
+          type: string
+        scheduleKind:
+          type: string
+          nullable: true
+          enum:
+            - one-off
+            - recurring
+            - null
+        slots:
+          type: array
+          items:
+            $ref: "#/components/schemas/OpportunitySlot"
+        recurrence:
+          $ref: "#/components/schemas/OpportunityRecurrence"
+        childCount:
+          type: integer
+          nullable: true
+        childAges:
+          type: array
+          items:
+            type: integer
+        safetyBehaviors:
+          type: array
+          items:
+            type: string
+            enum:
+              - aggression
+              - self-injury
+              - wandering
+              - meltdowns
+              - property-destruction
+              - pica
+              - sensory-sensitivity
+              - communication-support
+              - transition-difficulty
+              - sleep-disturbance
+        budgetHintCents:
+          type: integer
+          nullable: true
+        location:
+          $ref: "#/components/schemas/OpportunityLocation"
+        applicantCount:
+          type: integer
+        myApplicationState:
+          type: string
+          nullable: true
+          enum:
+            - submitted
+            - countered
+            - awarded
+            - declined
+            - withdrawn
+            - expired
+            - null
+        createdAt:
+          type: string
+      required:
+        - id
+        - category
+        - description
+        - scheduleKind
+        - slots
+        - recurrence
+        - childCount
+        - childAges
+        - safetyBehaviors
+        - budgetHintCents
+        - location
+        - applicantCount
+        - myApplicationState
+        - createdAt
+    OpportunitySlot:
+      type: object
+      properties:
+        date:
+          type: string
+        startMin:
+          type: integer
+        endMin:
+          type: integer
+      required:
+        - date
+        - startMin
+        - endMin
+    OpportunityRecurrence:
+      type: object
+      nullable: true
+      properties:
+        startDate:
+          type: string
+        endDate:
+          type: string
+        weekdays:
+          type: array
+          items:
+            type: integer
+        startMin:
+          type: integer
+        endMin:
+          type: integer
+      required:
+        - startDate
+        - endDate
+        - weekdays
+        - startMin
+        - endMin
+    OpportunityLocation:
+      type: object
+      properties:
+        city:
+          type: string
+          nullable: true
+        state:
+          type: string
+          nullable: true
+        postalCode:
+          type: string
+          nullable: true
+        areaLabel:
+          type: string
+          nullable: true
+        distanceMiles:
+          type: number
+          nullable: true
+      required:
+        - city
+        - state
+        - postalCode
+        - areaLabel
+        - distanceMiles
+    OpportunityError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
+    MyApplicationList:
+      type: object
+      properties:
+        applications:
+          type: array
+          items:
+            $ref: "#/components/schemas/MyApplicationItem"
+        quota:
+          $ref: "#/components/schemas/MyApplicationQuota"
+      required:
+        - applications
+        - quota
+    MyApplicationItem:
+      type: object
+      properties:
+        id:
+          type: string
+        state:
+          type: string
+          enum:
+            - submitted
+            - countered
+            - awarded
+            - declined
+            - withdrawn
+            - expired
+        origin:
+          type: string
+          enum:
+            - posted
+            - direct-message
+        proposal:
+          type: string
+          nullable: true
+        acceptedOfferId:
+          type: string
+          nullable: true
+        awardedAt:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+        job:
+          $ref: "#/components/schemas/MyApplicationJob"
+      required:
+        - id
+        - state
+        - origin
+        - proposal
+        - acceptedOfferId
+        - awardedAt
+        - createdAt
+        - job
+    MyApplicationJob:
+      type: object
+      properties:
+        id:
+          type: string
+        category:
+          type: string
+          enum:
+            - babysitter
+            - tutor
+            - nanny
+        description:
+          type: string
+        state:
+          type: string
+          enum:
+            - draft
+            - open
+            - awarded
+            - expired
+            - cancelled
+            - closed
+        scheduleKind:
+          type: string
+          nullable: true
+          enum:
+            - one-off
+            - recurring
+            - null
+        slots:
+          type: array
+          items:
+            $ref: "#/components/schemas/OpportunitySlot"
+        recurrence:
+          $ref: "#/components/schemas/OpportunityRecurrence"
+        childCount:
+          type: integer
+          nullable: true
+        childAges:
+          type: array
+          items:
+            type: integer
+        location:
+          $ref: "#/components/schemas/OpportunityLocation"
+        budgetHintCents:
+          type: integer
+          nullable: true
+      required:
+        - id
+        - category
+        - description
+        - state
+        - scheduleKind
+        - slots
+        - recurrence
+        - childCount
+        - childAges
+        - location
+        - budgetHintCents
+    MyApplicationQuota:
+      type: object
+      properties:
+        used:
+          type: integer
+        cap:
+          type: integer
+        remaining:
+          type: integer
+        periodYearMonth:
+          type: string
+      required:
+        - used
+        - cap
+        - remaining
+        - periodYearMonth
     ContactUsResponse:
       type: object
       properties:
@@ -8301,6 +8597,171 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApplicationError"
+  /v1/opportunities:
+    get:
+      tags:
+        - opportunities
+      summary: Open posted Jobs across my categories (Opportunities feed) — OH-218
+      description: Returns the open posted Jobs whose Category is one the
+        authenticated Caregiver offers, ranked by recency + distance (from the
+        Caregiver's ZIP), filterable by one-off/recurring and a single Category.
+        Each carries the disclosed child bundle + an approximate distance; the
+        exact street address is never included (reveal-at-accept). 404 when the
+        caller has not claimed a supply role.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            description: Restrict the feed to a single Caregiver Category
+              (babysitter|tutor|nanny). Must be one the Caregiver offers, else
+              the feed is empty. Omit to span all of the Caregiver's categories.
+          required: false
+          description: Restrict the feed to a single Caregiver Category
+            (babysitter|tutor|nanny). Must be one the Caregiver offers, else the
+            feed is empty. Omit to span all of the Caregiver's categories.
+          name: category
+          in: query
+        - schema:
+            type: string
+            enum:
+              - one-off
+              - recurring
+            description: Filter by schedule kind — one-off or recurring. Omit for both.
+          required: false
+          description: Filter by schedule kind — one-off or recurring. Omit for both.
+          name: schedule
+          in: query
+        - schema:
+            type: number
+            minimum: 0
+            exclusiveMinimum: true
+            maximum: 500
+            description: Optional hard distance cut in miles (also the proximity
+              normalisation radius; default 5). Applied only to Jobs whose ZIP
+              resolves to a centroid.
+          required: false
+          description: Optional hard distance cut in miles (also the proximity
+            normalisation radius; default 5). Applied only to Jobs whose ZIP
+            resolves to a centroid.
+          name: radiusMiles
+          in: query
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 60
+            description: Max results (the top-ranked page). Default 60.
+          required: false
+          description: Max results (the top-ranked page). Default 60.
+          name: limit
+          in: query
+      responses:
+        "200":
+          description: The ranked Opportunities feed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpportunityList"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpportunityError"
+        "403":
+          description: Wrong role (parent / provider / admin)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpportunityError"
+        "404":
+          description: Supply (caregiver) row not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpportunityError"
+  /v1/opportunities/{jobId}:
+    get:
+      tags:
+        - opportunities
+      summary: One open Job's detail — OH-218
+      description: Returns one posted Job's detail for a browsing Caregiver — the
+        disclosed child bundle (count + ages + Safety-Behaviors subset),
+        schedule, budget hint, and approximate distance. The exact street is
+        never included. 404 unless the Job is a posted Job in one of the
+        Caregiver's categories OR one they have applied to.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: jobId
+          in: path
+      responses:
+        "200":
+          description: The Job detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Opportunity"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpportunityError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpportunityError"
+        "404":
+          description: Job not found (or not visible to this Caregiver)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpportunityError"
+  /v1/applications:
+    get:
+      tags:
+        - opportunities
+      summary: My Applications + monthly quota — OH-218
+      description: Returns the authenticated Caregiver's own posted-Job Applications
+        (newest first; the client date-groups), each with a Job summary, plus
+        the monthly Application quota (used / cap / remaining for this calendar
+        month). The quota `used` is derived from a COUNT of this month's
+        Applications; OH-219 owns the authoritative counter + enforcement.
+      security:
+        - supabaseAccessToken: []
+      responses:
+        "200":
+          description: My Applications + quota
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyApplicationList"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpportunityError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpportunityError"
+        "404":
+          description: Supply (caregiver) row not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpportunityError"
   /v1/providers/contact-us:
     post:
       tags:

@@ -5648,6 +5648,215 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/opportunities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Open posted Jobs across my categories (Opportunities feed) — OH-218
+         * @description Returns the open posted Jobs whose Category is one the authenticated Caregiver offers, ranked by recency + distance (from the Caregiver's ZIP), filterable by one-off/recurring and a single Category. Each carries the disclosed child bundle + an approximate distance; the exact street address is never included (reveal-at-accept). 404 when the caller has not claimed a supply role.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Restrict the feed to a single Caregiver Category (babysitter|tutor|nanny). Must be one the Caregiver offers, else the feed is empty. Omit to span all of the Caregiver's categories. */
+                    category?: string;
+                    /** @description Filter by schedule kind — one-off or recurring. Omit for both. */
+                    schedule?: "one-off" | "recurring";
+                    /** @description Optional hard distance cut in miles (also the proximity normalisation radius; default 5). Applied only to Jobs whose ZIP resolves to a centroid. */
+                    radiusMiles?: number;
+                    /** @description Max results (the top-ranked page). Default 60. */
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The ranked Opportunities feed */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityList"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityError"];
+                    };
+                };
+                /** @description Wrong role (parent / provider / admin) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityError"];
+                    };
+                };
+                /** @description Supply (caregiver) row not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/opportunities/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One open Job's detail — OH-218
+         * @description Returns one posted Job's detail for a browsing Caregiver — the disclosed child bundle (count + ages + Safety-Behaviors subset), schedule, budget hint, and approximate distance. The exact street is never included. 404 unless the Job is a posted Job in one of the Caregiver's categories OR one they have applied to.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The Job detail */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Opportunity"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityError"];
+                    };
+                };
+                /** @description Job not found (or not visible to this Caregiver) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/applications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My Applications + monthly quota — OH-218
+         * @description Returns the authenticated Caregiver's own posted-Job Applications (newest first; the client date-groups), each with a Job summary, plus the monthly Application quota (used / cap / remaining for this calendar month). The quota `used` is derived from a COUNT of this month's Applications; OH-219 owns the authoritative counter + enforcement.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description My Applications + quota */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MyApplicationList"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityError"];
+                    };
+                };
+                /** @description Supply (caregiver) row not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/providers/contact-us": {
         parameters: {
             query?: never;
@@ -7347,6 +7556,89 @@ export interface components {
         CounterApplicationRequest: {
             proposedRateCents: number;
             scopeNote?: string;
+        };
+        OpportunityList: {
+            jobs: components["schemas"]["Opportunity"][];
+        };
+        Opportunity: {
+            id: string;
+            /** @enum {string} */
+            category: "babysitter" | "tutor" | "nanny";
+            description: string;
+            /** @enum {string|null} */
+            scheduleKind: "one-off" | "recurring" | null;
+            slots: components["schemas"]["OpportunitySlot"][];
+            recurrence: components["schemas"]["OpportunityRecurrence"];
+            childCount: number | null;
+            childAges: number[];
+            safetyBehaviors: ("aggression" | "self-injury" | "wandering" | "meltdowns" | "property-destruction" | "pica" | "sensory-sensitivity" | "communication-support" | "transition-difficulty" | "sleep-disturbance")[];
+            budgetHintCents: number | null;
+            location: components["schemas"]["OpportunityLocation"];
+            applicantCount: number;
+            /** @enum {string|null} */
+            myApplicationState: "submitted" | "countered" | "awarded" | "declined" | "withdrawn" | "expired" | null;
+            createdAt: string;
+        };
+        OpportunitySlot: {
+            date: string;
+            startMin: number;
+            endMin: number;
+        };
+        OpportunityRecurrence: {
+            startDate: string;
+            endDate: string;
+            weekdays: number[];
+            startMin: number;
+            endMin: number;
+        } | null;
+        OpportunityLocation: {
+            city: string | null;
+            state: string | null;
+            postalCode: string | null;
+            areaLabel: string | null;
+            distanceMiles: number | null;
+        };
+        OpportunityError: {
+            error: string;
+            reason?: string;
+        };
+        MyApplicationList: {
+            applications: components["schemas"]["MyApplicationItem"][];
+            quota: components["schemas"]["MyApplicationQuota"];
+        };
+        MyApplicationItem: {
+            id: string;
+            /** @enum {string} */
+            state: "submitted" | "countered" | "awarded" | "declined" | "withdrawn" | "expired";
+            /** @enum {string} */
+            origin: "posted" | "direct-message";
+            proposal: string | null;
+            acceptedOfferId: string | null;
+            awardedAt: string | null;
+            createdAt: string;
+            job: components["schemas"]["MyApplicationJob"];
+        };
+        MyApplicationJob: {
+            id: string;
+            /** @enum {string} */
+            category: "babysitter" | "tutor" | "nanny";
+            description: string;
+            /** @enum {string} */
+            state: "draft" | "open" | "awarded" | "expired" | "cancelled" | "closed";
+            /** @enum {string|null} */
+            scheduleKind: "one-off" | "recurring" | null;
+            slots: components["schemas"]["OpportunitySlot"][];
+            recurrence: components["schemas"]["OpportunityRecurrence"];
+            childCount: number | null;
+            childAges: number[];
+            location: components["schemas"]["OpportunityLocation"];
+            budgetHintCents: number | null;
+        };
+        MyApplicationQuota: {
+            used: number;
+            cap: number;
+            remaining: number;
+            periodYearMonth: string;
         };
         ContactUsResponse: {
             id: string;

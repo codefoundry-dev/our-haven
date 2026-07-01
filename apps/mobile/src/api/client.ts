@@ -601,3 +601,46 @@ export function counterApplication(
 ): Promise<CounterApplicationResult> {
   return post<CounterApplicationResult>(`/v1/applications/${applicationId}/counter`, body);
 }
+
+// ── Caregiver Opportunities (OH-218) ──────────────────────────────────────────
+/**
+ * The Caregiver-facing READ side of the Posted-Job chain. `getOpportunities`
+ * powers the Opportunities feed (open Jobs across the Caregiver's categories,
+ * ranked recency + distance, filterable by one-off/recurring + a single
+ * category); `getOpportunity` powers Job detail; `getMyApplications` powers the
+ * date-grouped My Applications list + the monthly N/30 quota subheader. Filing an
+ * Application (write) is the composer, OH-219 — so these are read-only.
+ */
+export type Opportunity =
+  paths['/v1/opportunities']['get']['responses'][200]['content']['application/json']['jobs'][number];
+export type OpportunityQuery = NonNullable<paths['/v1/opportunities']['get']['parameters']['query']>;
+export type OpportunityLocation = Opportunity['location'];
+export type OpportunityCategory = Opportunity['category'];
+export type OpportunityScheduleKind = Opportunity['scheduleKind'];
+export type MyApplication =
+  paths['/v1/applications']['get']['responses'][200]['content']['application/json']['applications'][number];
+export type MyApplicationState = MyApplication['state'];
+export type ApplicationQuota =
+  paths['/v1/applications']['get']['responses'][200]['content']['application/json']['quota'];
+export type MyApplications = { applications: MyApplication[]; quota: ApplicationQuota };
+
+/** Open Jobs across the Caregiver's categories (feed), recency + distance ranked. */
+export function getOpportunities(query: OpportunityQuery = {}): Promise<Opportunity[]> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null || value === '') continue;
+    params.set(key, String(value));
+  }
+  const qs = params.toString();
+  return get<{ jobs: Opportunity[] }>(`/v1/opportunities${qs ? `?${qs}` : ''}`).then((r) => r.jobs);
+}
+
+/** One open Job's detail (in-category, or one the Caregiver has applied to). */
+export function getOpportunity(jobId: string): Promise<Opportunity> {
+  return get<Opportunity>(`/v1/opportunities/${jobId}`);
+}
+
+/** The Caregiver's own posted-Job Applications (newest first) + the N/30 quota. */
+export function getMyApplications(): Promise<MyApplications> {
+  return get<MyApplications>('/v1/applications');
+}
