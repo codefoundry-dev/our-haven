@@ -111,6 +111,23 @@ export default function AccountScreen() {
         </Pressable>
       ) : null}
 
+      {role === 'provider' ? (
+        <Pressable
+          onPress={() => router.push('/subscription' as Href)}
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.linkCard, { opacity: pressed ? 0.85 : 1 }]}
+        >
+          <View style={styles.linkIcon}>
+            <Icon name="dollar" size={18} color={colors.brand} />
+          </View>
+          <View style={styles.linkText}>
+            <Text style={styles.linkTitle}>Subscription & listing</Text>
+            <Text style={styles.linkSub}>Go live in Search, manage billing, cancel anytime.</Text>
+          </View>
+          <Icon name="chevron-right" size={20} color={colors.ink3} />
+        </Pressable>
+      ) : null}
+
       <View style={styles.spacer} />
 
       <PrimaryButton onPress={signOut}>Sign out</PrimaryButton>

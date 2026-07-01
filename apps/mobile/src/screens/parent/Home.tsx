@@ -20,23 +20,10 @@ import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { SectionHeader } from '@/components/ui/SectionHeader';
 import { usePreview } from '@/preview/PreviewProvider';
 import { shapeBrowse, summarizeAnswers } from '@/preview/questionnaire';
+import { categoryChip, jobScheduleLabel, useMyJobs } from '@/lib/jobsHub';
 import { colors, fonts, radii, shadow, type ColorToken } from '@/theme/tokens';
 
 const ADJUST_QUESTIONNAIRE = '/(app)/preview-questionnaire?adjust=1' as Href;
-
-interface OpenJob {
-  cat: Category;
-  tone: ColorToken;
-  desc: string;
-  apps: number;
-  days: string;
-}
-
-const OPEN_JOBS: OpenJob[] = [
-  { cat: 'Babysitter', tone: 'catBaby', desc: 'Saturday evening sitter for 2 kids', apps: 4, days: '2 days left' },
-  { cat: 'Tutor', tone: 'catTutor', desc: '5th-grade math support, twice weekly after school', apps: 7, days: '6 days left' },
-  { cat: 'Nanny', tone: 'catNanny', desc: 'After-school nanny for two kids, ages 4–6', apps: 2, days: '11 days left' },
-];
 
 interface CategoryTile {
   name: Category;
@@ -57,11 +44,15 @@ const APP_TONES: ColorToken[] = ['catTutor', 'catBaby', 'catNanny'];
 export function ParentHome() {
   const router = useRouter();
   const { answers } = usePreview();
+  // Live "My open Jobs" rail (OH-210) — the Parent's still-open posted Jobs.
+  const { jobs } = useMyJobs();
+  const openJobs = jobs.filter((j) => j.state === 'open');
 
   // Composing a Job is open to everyone; the Subscription gate fires on PUBLISH
   // inside the composer (OH-209 / CONTEXT § Subscription), so an unsubscribed
   // Parent can compose + autosave a draft and only hit the paywall at publish.
   const postJob = () => router.push('/post-job');
+  const seeAllJobs = () => router.push('/my-jobs');
 
   // The ephemeral preview answers re-order the category grid so the most relevant
   // care leads the first browse (story 111). No answers → the default order.
@@ -136,43 +127,51 @@ export function ParentHome() {
         Can&apos;t find the right fit? Describe what you need — Caregivers apply to you.
       </Text>
 
-      {/* My open Jobs rail */}
-      <SectionHeader
-        title="My open Jobs"
-        action="See all"
-        size="md"
-        onAction={postJob}
-        style={styles.jobsHeader}
-      />
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.rail}
-        contentContainerStyle={styles.railContent}
-      >
-        {OPEN_JOBS.map((job, i) => (
-          <Pressable
-            key={i}
-            onPress={postJob}
-            accessibilityRole="button"
-            style={({ pressed }) => [styles.jobCard, { opacity: pressed ? 0.94 : 1 }]}
+      {/* My open Jobs rail — live (OH-210); shown only when the Parent has open Jobs */}
+      {openJobs.length > 0 ? (
+        <>
+          <SectionHeader
+            title="My open Jobs"
+            action="See all"
+            size="md"
+            onAction={seeAllJobs}
+            style={styles.jobsHeader}
+          />
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.rail}
+            contentContainerStyle={styles.railContent}
           >
-            <View style={styles.jobTop}>
-              <CategoryChip category={job.cat} />
-              <Chip tone="info" label={`Open · ${job.apps}/15`} />
-            </View>
-            <Text style={styles.jobDesc} numberOfLines={2}>
-              {job.desc}
-            </Text>
-            <View style={styles.jobBottom}>
-              <AvatarGroup
-                items={Array.from({ length: job.apps }, (_, k) => ({ tone: APP_TONES[k % APP_TONES.length] }))}
-              />
-              <Text style={styles.jobDays}>{job.days}</Text>
-            </View>
-          </Pressable>
-        ))}
-      </ScrollView>
+            {openJobs.map((job) => (
+              <Pressable
+                key={job.id}
+                onPress={() => router.push({ pathname: '/job-applicants', params: { jobId: job.id } })}
+                accessibilityRole="button"
+                style={({ pressed }) => [styles.jobCard, { opacity: pressed ? 0.94 : 1 }]}
+              >
+                <View style={styles.jobTop}>
+                  <CategoryChip category={categoryChip(job.category)} />
+                  <Chip tone="info" label={`Open · ${job.applicationCount}/15`} />
+                </View>
+                <Text style={styles.jobDesc} numberOfLines={2}>
+                  {job.description}
+                </Text>
+                <View style={styles.jobBottom}>
+                  <AvatarGroup
+                    items={Array.from({ length: Math.min(job.applicationCount, 4) }, (_, k) => ({
+                      tone: APP_TONES[k % APP_TONES.length],
+                    }))}
+                  />
+                  <Text style={styles.jobDays} numberOfLines={1}>
+                    {jobScheduleLabel(job)}
+                  </Text>
+                </View>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </>
+      ) : null}
 
       {/* Personalised browse banner — shows when the ephemeral preview answers
           actually re-shaped the grid; taps back into the questionnaire. */}

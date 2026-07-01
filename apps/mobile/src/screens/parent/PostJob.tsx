@@ -21,10 +21,10 @@
  * native body renders on native and narrow web.
  */
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { getParentProfile, postJob, ApiError, type ParentProfile } from '@/api/client';
+import { editJob, getJob, getParentProfile, postJob, ApiError, type ParentProfile } from '@/api/client';
 import { AppBar } from '@/components/AppBar';
 import { Icon, type IconName } from '@/components/Icon';
 import { Screen } from '@/components/Screen';
@@ -65,6 +65,10 @@ function emptyRecurrence(): RecurrenceDraft {
 export default function PostJobScreen() {
   const router = useRouter();
   const { entitled, openPaywall } = useParentGate();
+  // Edit mode (OH-210, story 92): with a `jobId` param the composer edits an
+  // existing open Job in place (PATCH) instead of composing + publishing a new one.
+  const { jobId } = useLocalSearchParams<{ jobId?: string }>();
+  const editing = Boolean(jobId);
 
   const [hydrating, setHydrating] = useState(true);
   const [profileBehaviors, setProfileBehaviors] = useState<string[]>([]);
@@ -118,6 +122,53 @@ export default function PostJobScreen() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      // EDIT mode: hydrate from the existing Job (never the create draft). The
+      // disclosure consent is intentionally NOT pre-set — the Parent must
+      // re-acknowledge it on save (the server re-stamps it).
+      if (editing && jobId) {
+        try {
+          const job = await getJob(jobId);
+          if (cancelled) return;
+          setCategory(job.category);
+          setMode(job.scheduleKind === 'recurring' ? 'recurring' : 'one-off');
+          setDescription(job.description);
+          if (job.scheduleKind === 'recurring' && job.recurrence) {
+            const r = job.recurrence;
+            setRecurrence({
+              startDate: r.startDate,
+              endDate: r.endDate,
+              weekdays: [...r.weekdays],
+              start: formatMin(r.startMin),
+              end: formatMin(r.endMin),
+            });
+          } else if (job.slots.length > 0) {
+            setSlots(job.slots.map((s) => ({ date: s.date, start: formatMin(s.startMin), end: formatMin(s.endMin) })));
+          }
+          setChildCount(job.childCount ?? 1);
+          setChildAges((job.childAges ?? []).length ? job.childAges.map(String) : ['']);
+          setDisclosed(job.safetyBehaviors ?? []);
+          setDiscloseNone((job.safetyBehaviors ?? []).length === 0);
+          if (job.serviceAddress) {
+            setLine1(job.serviceAddress.line1 ?? '');
+            setLine2(job.serviceAddress.line2 ?? '');
+            setCity(job.serviceAddress.city ?? '');
+            setStateCode(job.serviceAddress.state ?? '');
+            setPostal(job.serviceAddress.postalCode ?? '');
+          }
+          setBudget(job.budgetHintCents != null ? String(job.budgetHintCents / 100) : '');
+        } catch (e) {
+          if (!cancelled) setError(e instanceof ApiError ? e.message : 'Could not load this Job to edit.');
+        }
+        try {
+          const p: ParentProfile = await getParentProfile();
+          if (!cancelled) setProfileBehaviors(p.safetyBehaviors ?? []);
+        } catch {
+          /* disclosure options are optional */
+        }
+        if (!cancelled) setHydrating(false);
+        return;
+      }
+
       const draft = await readJobDraft();
       if (cancelled) return;
       if (draft) {
@@ -158,15 +209,16 @@ export default function PostJobScreen() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [editing, jobId]);
 
   // ── debounced autosave (consent is intentionally never stashed) ─────────────
+  // Edit mode never autosaves — it must not pollute the create draft.
   const hydrated = !hydrating;
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || editing) return;
     const t = setTimeout(() => void saveJobDraft(state), 400);
     return () => clearTimeout(t);
-  }, [state, hydrated]);
+  }, [state, hydrated, editing]);
 
   const onPickCategory = (c: JobCategory) => {
     setCategory(c);
@@ -248,16 +300,22 @@ export default function PostJobScreen() {
     }
     setPublishing(true);
     try {
-      const res = await postJob(built.body);
-      await clearJobDraft();
-      const n = res.jobs.length;
-      router.replace({ pathname: '/home', params: { posted: String(n) } });
+      if (editing && jobId) {
+        await editJob(jobId, built.body);
+        // Back to this Job's detail (the create draft is untouched in edit mode).
+        router.replace({ pathname: '/job-applicants', params: { jobId } });
+      } else {
+        const res = await postJob(built.body);
+        await clearJobDraft();
+        const n = res.jobs.length;
+        router.replace({ pathname: '/home', params: { posted: String(n) } });
+      }
     } catch (e) {
       if (e instanceof ApiError && e.status === 402) {
         openPaywall({ kind: 'post-job' });
         return;
       }
-      setError(e instanceof Error ? e.message : 'Could not publish your Job. Please try again.');
+      setError(e instanceof Error ? e.message : `Could not ${editing ? 'save' : 'publish'} your Job. Please try again.`);
     } finally {
       setPublishing(false);
     }
@@ -267,7 +325,7 @@ export default function PostJobScreen() {
 
   return (
     <Screen edges={['top']} scroll contentStyle={styles.content}>
-      <AppBar title="Post a Job" onBack={() => (step === 0 ? router.back() : setStep((s) => s - 1))} />
+      <AppBar title={editing ? 'Edit Job' : 'Post a Job'} onBack={() => (step === 0 ? router.back() : setStep((s) => s - 1))} />
 
       {/* progress */}
       <View style={styles.progressRow}>
@@ -357,10 +415,12 @@ export default function PostJobScreen() {
                 disabled={!stepValid || publishing}
                 icon={publishing ? undefined : <Icon name="arrow-right" size={18} color={colors.inkInv} />}
               >
-                {publishing ? 'Publishing…' : 'Publish Job'}
+                {publishing ? (editing ? 'Saving…' : 'Publishing…') : editing ? 'Save changes' : 'Publish Job'}
               </PrimaryButton>
               <Text style={styles.footNote}>
-                Publishing uses your active Subscription. Jobs auto-expire after 14 days if nobody is awarded.
+                {editing
+                  ? 'Saving updates this Job for Caregivers who haven’t applied yet.'
+                  : 'Publishing uses your active Subscription. Jobs auto-expire after 14 days if nobody is awarded.'}
               </Text>
             </>
           ) : (

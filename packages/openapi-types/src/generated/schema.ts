@@ -4602,7 +4602,48 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * The Parent's posted Jobs (My Jobs hub) — OH-210
+         * @description Returns the caller's own posted Jobs (newest first), each with its actionable Application count (submitted + countered). The client buckets by state into Open / Awarded / Past / Drafts. Direct-Message Jobs are excluded (plumbing).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The Parent's Jobs */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobList"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobError"];
+                    };
+                };
+            };
+        };
         put?: never;
         /**
          * Compose + publish a posted Job — OH-209
@@ -4664,6 +4705,636 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["JobError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/jobs/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One of the Parent's Jobs (Job detail) — OH-210
+         * @description Returns a single posted Job the caller owns, plus its actionable Application count. 404 when the Job is unknown, not the caller's, or a Direct-Message Job.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The Job */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobListItem"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobError"];
+                    };
+                };
+                /** @description Job not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Edit a still-open Job in place — OH-210
+         * @description Revises a Job the caller owns while it is still `open` (before any award), re-running the full compose pipeline (schedule / child detail / disclosure / address). Editing is Parent-Subscription-gated (402) and re-stamps the disclosure consent. A multi-day schedule is rejected (that is a compose-time fan-out, not an edit target). 409 when the Job is not `open`; 404 when it is not the caller's.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateJobRequest"];
+                };
+            };
+            responses: {
+                /** @description The updated Job */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobListItem"];
+                    };
+                };
+                /** @description Invalid Job */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobError"];
+                    };
+                };
+                /** @description No active Parent Subscription */
+                402: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobError"];
+                    };
+                };
+                /** @description Job not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobError"];
+                    };
+                };
+                /** @description Job is no longer editable (not open) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobError"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/v1/jobs/{jobId}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Close a Job — withdraws its open Applications — OH-210
+         * @description Closes (parent-cancels) a `draft`/`open` Job the caller owns. Closing an `open` Job withdraws every still-open Application on it (they transition to `expired`). Never re-gated. 409 when the Job is already awarded/closed/expired/cancelled; 404 when it is not the caller's.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The closed Job */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobListItem"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobError"];
+                    };
+                };
+                /** @description Job not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobError"];
+                    };
+                };
+                /** @description Job cannot be closed from its current state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/jobs/{jobId}/applications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A Job's Applications (Parent review list) — OH-210
+         * @description Returns the Applications on one of the caller's posted Jobs (newest first), each with a compact caregiver summary + the caregiver's live Offer + a status pill. The client sorts (recent / rating / price). Bio + Preferences reveal on engagement (an Application is filed). 404 when the Job is not the caller's.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The Job's Applications */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApplicationList"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApplicationError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApplicationError"];
+                    };
+                };
+                /** @description Job not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApplicationError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/applications/{applicationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One Application (caregiver + live Offer) — OH-210
+         * @description Returns a single Application on one of the caller's Jobs: the caregiver summary, their proposal, and the live Offer with its `negotiable` flag (the client shows Counter only when negotiable). 404 when the Application's Job is not the caller's.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    applicationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The Application */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Application"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApplicationError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApplicationError"];
+                    };
+                };
+                /** @description Application not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApplicationError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/applications/{applicationId}/award": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Award a Job to a Caregiver → Booking `requested` / Series — OH-210
+         * @description Awards the Job to this Application's Caregiver by accepting their live Offer: the Application → `awarded`, the Job → `awarded`, every other open Application auto-declines (story 91), and the Booking(s) materialise `requested` — one per one-off date, or a Booking Series + one occurrence per recurring date. Payment is a MOCK confirmation (Phase 0). Parent-Subscription-gated (402). 409 when the Job is not open, the Application is not awardable, or there is no acceptable caregiver Offer; 404 when the Application is not the caller's.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    applicationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["AwardRequest"];
+                };
+            };
+            responses: {
+                /** @description The award result */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AwardResult"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApplicationError"];
+                    };
+                };
+                /** @description No active Parent Subscription */
+                402: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApplicationError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApplicationError"];
+                    };
+                };
+                /** @description Application not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApplicationError"];
+                    };
+                };
+                /** @description Not awardable from the current state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApplicationError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/applications/{applicationId}/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decline an Application — OH-210
+         * @description Declines an Application on one of the caller's Jobs (state → declined); the caregiver's live pending Offer is declined with it. Never gated. 409 when the Application is already terminal; 404 when it is not the caller's.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    applicationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The declined Application */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DeclineApplicationResult"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApplicationError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApplicationError"];
+                    };
+                };
+                /** @description Application not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApplicationError"];
+                    };
+                };
+                /** @description Not declinable from the current state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApplicationError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/applications/{applicationId}/counter": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Counter a Caregiver's Application Offer — OH-210
+         * @description Opens a Parent counter-Offer on an Application (revised rate + optional note; the Parent-set Job schedule is unchanged), moving the Application → `countered` and the caregiver's Offer → `countered`, with a fresh pending successor Offer linked via `supersedes`. Refused (409) when the caregiver is non-negotiable (ADR-0017). Parent-Subscription-gated (402). 404 when the Application is not the caller's.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    applicationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CounterApplicationRequest"];
+                };
+            };
+            responses: {
+                /** @description The successor Offer */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CounterApplicationResult"];
+                    };
+                };
+                /** @description Invalid counter */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApplicationError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApplicationError"];
+                    };
+                };
+                /** @description No active Parent Subscription */
+                402: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApplicationError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApplicationError"];
+                    };
+                };
+                /** @description Application not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApplicationError"];
+                    };
+                };
+                /** @description Not counterable (non-negotiable, not pending, or awaiting the caregiver) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApplicationError"];
                     };
                 };
             };
@@ -6211,6 +6882,91 @@ export interface components {
             /** @enum {string} */
             kind: "recurring";
             rule: components["schemas"]["JobRecurrence"];
+        };
+        JobList: {
+            jobs: components["schemas"]["JobListItem"][];
+        };
+        JobListItem: components["schemas"]["Job"] & {
+            applicationCount: number;
+        };
+        ApplicationList: {
+            applications: components["schemas"]["Application"][];
+        };
+        Application: {
+            id: string;
+            jobId: string;
+            /** @enum {string} */
+            category: "babysitter" | "tutor" | "nanny";
+            /** @enum {string} */
+            state: "submitted" | "countered" | "awarded" | "declined" | "withdrawn" | "expired";
+            proposal: string | null;
+            createdAt: string;
+            caregiver: components["schemas"]["ApplicationCaregiver"];
+            offer: components["schemas"]["ApplicationOffer"];
+        };
+        ApplicationCaregiver: {
+            providerId: string;
+            name: string | null;
+            publishedRateCents: number | null;
+            negotiable: boolean;
+            backgroundChecked: boolean;
+            ratingAverage: number | null;
+            ratingCount: number;
+        };
+        ApplicationOffer: {
+            id: string;
+            /** @enum {string} */
+            status: "pending" | "accepted" | "countered" | "declined" | "expired" | "withdrawn";
+            /** @enum {string} */
+            sender: "parent" | "caregiver";
+            proposedRateCents: number;
+            scopeMinutes: number;
+            perChildSurchargeCents: number;
+            computedTotalCents: number;
+            scopeNote: string;
+            scopeNoteRedacted: boolean;
+            negotiable: boolean;
+            /** @enum {string} */
+            scheduleKind: "one-off" | "multi-day" | "recurring";
+            slots: components["schemas"]["ApplicationOfferSlot"][];
+            validUntil: string;
+            supersedesOfferId: string | null;
+            createdAt: string;
+        } | null;
+        ApplicationOfferSlot: {
+            date: string;
+            startMin: number;
+            endMin: number;
+        };
+        ApplicationError: {
+            error: string;
+            reason?: string;
+        };
+        AwardResult: {
+            applicationId: string;
+            jobId: string;
+            /** @enum {string} */
+            state: "awarded";
+            bookingIds: string[];
+            seriesId: string | null;
+        };
+        AwardRequest: {
+            paymentMethodId?: string;
+        };
+        DeclineApplicationResult: {
+            applicationId: string;
+            /** @enum {string} */
+            state: "declined";
+        };
+        CounterApplicationResult: {
+            applicationId: string;
+            /** @enum {string} */
+            state: "countered";
+            offer: components["schemas"]["ApplicationOffer"];
+        };
+        CounterApplicationRequest: {
+            proposedRateCents: number;
+            scopeNote?: string;
         };
         ContactUsResponse: {
             id: string;

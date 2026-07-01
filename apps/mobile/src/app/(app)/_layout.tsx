@@ -51,10 +51,11 @@ export default function AppLayout() {
       <Tabs.Screen name="messages" />
       <Tabs.Screen name="account" />
 
-      {/* ── account-reached editors (OH-184 / OH-188 / OH-189) ────── */}
+      {/* ── account-reached editors (OH-184 / OH-188 / OH-189 / OH-222) ─ */}
       <Tabs.Screen name="verification" options={{ href: null }} />
       <Tabs.Screen name="profile-builder" options={{ href: null }} />
       <Tabs.Screen name="provider-profile" options={{ href: null }} />
+      <Tabs.Screen name="subscription" options={{ href: null }} />
 
       {/* Supply onboarding hub — landed on after role-claim (web), reached from
           the dashboard "Finish your setup" banner; never a tab. */}
@@ -69,6 +70,7 @@ export default function AppLayout() {
       <Tabs.Screen name="booking-compose" options={{ href: null }} />
       <Tabs.Screen name="booking-detail" options={{ href: null }} />
       <Tabs.Screen name="post-job" options={{ href: null }} />
+      <Tabs.Screen name="my-jobs" options={{ href: null }} />
       <Tabs.Screen name="job-applicants" options={{ href: null }} />
       <Tabs.Screen name="children" options={{ href: null }} />
       <Tabs.Screen name="parent-profile" options={{ href: null }} />
