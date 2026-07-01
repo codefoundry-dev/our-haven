@@ -82,6 +82,15 @@ export type ParentCheckoutLink = paths['/v1/parents/me/subscription/checkout-lin
 export type ParentCheckoutLinkBody = NonNullable<paths['/v1/parents/me/subscription/checkout-link']['post']['requestBody']>['content']['application/json'];
 export type ParentPortalLink = paths['/v1/parents/me/subscription/portal-link']['post']['responses'][200]['content']['application/json'];
 
+// Provider Subscription (OH-191 server / OH-222 shell). Provider is a Stripe
+// Customer (NOT Connect) — the subscription is what makes the practice `listed`
+// (search-visible + bookable). The shell reads the status and opens the two
+// hosted linkouts (checkout to start, Billing Portal to manage / cancel).
+export type ProviderSubscription = paths['/v1/providers/me/subscription']['get']['responses'][200]['content']['application/json'];
+export type ProviderSubscriptionStatus = ProviderSubscription['status'];
+export type ProviderCheckoutLink = paths['/v1/providers/me/subscription/checkout-link']['post']['responses'][200]['content']['application/json'];
+export type ProviderPortalLink = paths['/v1/providers/me/subscription/portal-link']['post']['responses'][200]['content']['application/json'];
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -322,6 +331,28 @@ export function createParentCheckoutLink(body: ParentCheckoutLinkBody = {}): Pro
 
 export function createParentPortalLink(): Promise<ParentPortalLink> {
   return post<ParentPortalLink>('/v1/parents/me/subscription/portal-link', undefined);
+}
+
+/**
+ * Provider Subscription (OH-191 server / OH-222 shell). `getProviderSubscription`
+ * reads the listing state (`listed` is the gate — true iff status is
+ * active/trialing — which is what lets a Provider publish bookable slots and show
+ * in Search); `createProviderCheckoutLink` returns the Stripe-hosted Checkout URL
+ * to start the subscription (the listing flips when the billing webhook fires, so
+ * the shell polls the summary on return); `createProviderPortalLink` returns the
+ * Billing Portal URL to manage / cancel. Provider-role-gated server-side (403).
+ */
+
+export function getProviderSubscription(): Promise<ProviderSubscription> {
+  return get<ProviderSubscription>('/v1/providers/me/subscription');
+}
+
+export function createProviderCheckoutLink(): Promise<ProviderCheckoutLink> {
+  return post<ProviderCheckoutLink>('/v1/providers/me/subscription/checkout-link', undefined);
+}
+
+export function createProviderPortalLink(): Promise<ProviderPortalLink> {
+  return post<ProviderPortalLink>('/v1/providers/me/subscription/portal-link', undefined);
 }
 
 /**
