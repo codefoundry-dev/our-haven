@@ -32,6 +32,8 @@ import {
 import { scanScopeNote } from '../../../../packages/domain/src/disintermediation/index.ts';
 import {
   canCounter,
+  canDeleteOffer,
+  canEditOffer,
   defaultValidUntil,
   transitionOffer,
   type Offer,
@@ -52,12 +54,14 @@ import {
  * Offers / Book-requests (OH-206) — CONTEXT.md § Offer; PRD-0001 v1.7 stories 24,
  * 25, 103–107, 112, 125, 128, 133; ADR-0014/0016/0017.
  *
- *   POST /v1/threads/{threadId}/offers      compose + send a structured Offer
- *   GET  /v1/threads/{threadId}/offers      a thread's Offers (merged into the transcript)
- *   POST /v1/offers/{offerId}/accept        counterparty accepts (status → accepted)
- *   POST /v1/offers/{offerId}/counter       counterparty counters (opens a successor Offer)
- *   POST /v1/offers/{offerId}/decline       counterparty declines
- *   POST /v1/offers/{offerId}/withdraw      sender withdraws
+ *   POST   /v1/threads/{threadId}/offers    compose + send a structured Offer
+ *   GET    /v1/threads/{threadId}/offers    a thread's Offers (merged into the transcript)
+ *   PATCH  /v1/offers/{offerId}             sender edits a still-pending Offer in place (OH-208)
+ *   DELETE /v1/offers/{offerId}             sender hard-deletes a still-pending Offer (OH-208)
+ *   POST   /v1/offers/{offerId}/accept      counterparty accepts (status → accepted)
+ *   POST   /v1/offers/{offerId}/counter     counterparty counters (opens a successor Offer)
+ *   POST   /v1/offers/{offerId}/decline     counterparty declines
+ *   POST   /v1/offers/{offerId}/withdraw    sender withdraws
  *
  * An Offer rides inside a Direct-Message thread (Caregiver-only — ADR-0011) and
  * renders as an inline Offer bubble. The pure Offer state machine (OH-179) owns
@@ -83,6 +87,15 @@ import {
  * Offer cascade-cancels every Booking it materialised (resolved by `offer_id`).
  * The Booking(s) follow the Offer schedule: one-off → one, multi-day → one per
  * slot (no Series), recurring → a stateless Series + one Booking per occurrence.
+ *
+ * EDIT / DELETE (OH-208; PRD story 131): a sender may revise (PATCH) or hard-delete
+ * (DELETE) their OWN Offer while it is still `pending` — the pre-engagement window
+ * before the counterparty has acted (`canEditOffer` / `canDeleteOffer`). An edit
+ * re-runs the full compose pipeline (rate/surcharge re-snapshot, total recompute,
+ * scope_note redaction + T&S flag refresh, 72h validity re-armed) WITHOUT changing
+ * the Offer's state; a delete removes the row (its T&S flag cascades) as though it
+ * were never sent. Neither is valid once the Offer leaves `pending` — an accepted
+ * Offer must be withdrawn (which cascade-cancels its Bookings), never edited/deleted.
  */
 
 const json = <T extends z.ZodTypeAny>(schema: T) => ({ 'application/json': { schema } });
@@ -197,6 +210,9 @@ const OfferSchema = z
   .openapi('Offer');
 
 const OfferListResponse = z.object({ offers: z.array(OfferSchema) }).openapi('OfferList');
+
+/** DELETE ack — the deleted Offer leaves no row to return (OH-208). */
+const DeletedResponse = z.object({ deleted: z.literal(true) }).openapi('OfferDeleted');
 
 const ThreadIdParam = z.object({
   threadId: z.string().uuid().openapi({ param: { name: 'threadId', in: 'path' } }),
@@ -526,6 +542,38 @@ const transitionResponses = {
   409: { description: 'Transition not allowed from the Offer\'s current state', content: json(ErrorResponse) },
 } as const;
 
+const editOfferRoute = createRoute({
+  method: 'patch',
+  path: '/offers/{offerId}',
+  tags: ['offers'],
+  summary: 'Edit a still-pending Offer / Book-request — OH-208',
+  description:
+    "The sender revises their own still-pending Offer in place (schedule / rate / child-detail / disclosure / address / note). The rate + per-child surcharge are re-snapshotted from the Caregiver's current profile, the total is recomputed, the scope_note is re-redacted (its T&S flag refreshed), and the 72h validity is re-armed — the Offer stays pending. A Parent edit is Parent-Subscription-gated (402). 409 if the caller isn't the sender or the Offer is no longer pending. 400 on invalid child-detail / schedule / an unavailable category.",
+  security: [{ supabaseAccessToken: [] }],
+  middleware: [requireAuth({ roles: ['parent', 'caregiver'] })] as const,
+  request: { params: OfferIdParam, body: { content: json(ComposeOfferRequest), required: true } },
+  responses: transitionResponses,
+});
+
+const deleteOfferRoute = createRoute({
+  method: 'delete',
+  path: '/offers/{offerId}',
+  tags: ['offers'],
+  summary: 'Delete a still-pending Offer / Book-request — OH-208',
+  description:
+    'The sender hard-deletes their own still-pending Offer, removing it from the transcript as though never sent (its Trust & Safety flag, if any, cascades away). Never gated. 409 if the caller isn\'t the sender or the Offer is no longer pending (an accepted Offer must be withdrawn instead, which cascade-cancels its Bookings).',
+  security: [{ supabaseAccessToken: [] }],
+  middleware: [requireAuth({ roles: ['parent', 'caregiver'] })] as const,
+  request: { params: OfferIdParam },
+  responses: {
+    200: { description: 'The Offer was deleted', content: json(DeletedResponse) },
+    401: { description: 'Unauthenticated', content: json(ErrorResponse) },
+    403: { description: 'Wrong role', content: json(ErrorResponse) },
+    404: { description: "Offer not found (or not the caller's)", content: json(ErrorResponse) },
+    409: { description: 'Not the sender, or the Offer is no longer pending', content: json(ErrorResponse) },
+  },
+});
+
 const acceptOfferRoute = createRoute({
   method: 'post',
   path: '/offers/{offerId}/accept',
@@ -727,6 +775,181 @@ export function registerOfferRoutes(app: OpenAPIHono<AppEnv>): void {
       .execute()) as unknown as OfferRow[];
 
     return c.json({ offers: rows.map((r) => toOfferDTO(r, side)) }, 200);
+  });
+
+  app.openapi(editOfferRoute, async (c) => {
+    const { db } = c.var.deps;
+    const principal = c.get('principal')!;
+    const { offerId } = c.req.valid('param');
+    const input = c.req.valid('json');
+
+    const ctx = await loadActableOffer(db, offerId, principal.uid);
+    if ('error' in ctx) return c.json(ctx.error, ctx.status);
+    const { offer, thread, side } = ctx;
+
+    // Edit is sender-initiated, and only while pending (canEditOffer).
+    if (side !== offer.sender) {
+      return c.json({ error: 'not_sender', reason: 'only the sender can edit their Offer' }, 409);
+    }
+    if (!canEditOffer(rowToDomainOffer(offer))) {
+      return c.json(
+        { error: 'not_editable', reason: 'only a pending offer can be edited' },
+        409,
+      );
+    }
+    // A Parent edit re-commits a Book-request → Subscription-gated (402), like compose.
+    if (side === 'parent' && !(await parentEntitled(db, principal.uid))) {
+      return c.json(
+        { error: 'subscription_required', reason: 'an active Parent Subscription is required to edit a booking request' },
+        402,
+      );
+    }
+
+    // Same validation + snapshot pipeline as compose (the edit re-derives everything).
+    if (input.childAges.length !== input.childCount) {
+      return c.json({ error: 'invalid_child_detail', reason: 'childAges length must equal childCount' }, 400);
+    }
+    if (input.category === 'tutor' && input.childCount !== 1) {
+      return c.json({ error: 'invalid_child_detail', reason: 'a tutor booking is single-child (childCount must be 1)' }, 400);
+    }
+
+    const slots = scheduleSlots(input.schedule);
+    const scopeMinutes = totalMinutes(slots);
+    if (scopeMinutes <= 0) {
+      return c.json({ error: 'invalid_schedule', reason: 'the schedule has no billable time' }, 400);
+    }
+
+    const snap = await loadRateSnapshot(db, thread.provider_id, input.category);
+    if (!snap) {
+      return c.json({ error: 'category_unavailable', reason: 'the caregiver does not offer this category' }, 400);
+    }
+
+    // ADR-0017 rate-lock re-applied on edit (the Caregiver may have flipped negotiable).
+    const proposedRateCents =
+      side === 'parent' && !snap.negotiable ? snap.publishedRateCents : input.proposedRateCents;
+
+    const computedTotalCents = computeTotalCents({
+      proposedRateCents,
+      scopeMinutes,
+      childCount: input.childCount,
+      perChildSurchargeCents: snap.perChildSurchargeCents,
+      category: input.category,
+    });
+
+    const safetyBehaviors = normaliseSafetyBehaviors(input.safetyBehaviors);
+    const rawNote = (input.scopeNote ?? '').trim();
+    const scan = scanScopeNote(rawNote);
+    const now = new Date();
+    const addr = side === 'parent' ? (input.serviceAddress ?? null) : null;
+
+    const updated = await db.transaction().execute(async (trx) => {
+      // Refresh the T&S queue for this Offer: clear the prior flag (if any) so a
+      // now-clean note leaves no stale flag, then re-queue if the new note trips.
+      await trx.deleteFrom('message_flags').where('offer_id', '=', offer.id).execute();
+
+      const row = (await trx
+        .updateTable('offers')
+        .set({
+          category: input.category,
+          proposed_rate_cents: proposedRateCents,
+          scope_minutes: scopeMinutes,
+          per_child_surcharge_cents: snap.perChildSurchargeCents,
+          computed_total_cents: computedTotalCents,
+          scope_note: scan.redacted,
+          scope_note_redacted: scan.flagged,
+          negotiable: snap.negotiable,
+          valid_until: defaultValidUntil(now),
+          child_count: input.childCount,
+          child_ages: input.childAges,
+          safety_behaviors: safetyBehaviors,
+          service_address_line1: addr?.line1 ?? null,
+          service_address_line2: addr?.line2 ?? null,
+          service_city: addr?.city ?? null,
+          service_state: addr?.state ?? null,
+          service_postal_code: addr?.postalCode ?? null,
+          schedule_kind: input.schedule.kind,
+          slots,
+          recurrence: null,
+          updated_at: now,
+        })
+        .where('id', '=', offer.id)
+        .returning(OFFER_COLUMNS)
+        .executeTakeFirstOrThrow()) as unknown as OfferRow;
+
+      if (scan.flagged) {
+        await trx
+          .insertInto('message_flags')
+          .values({
+            offer_id: offer.id,
+            thread_id: offer.thread_id,
+            sender_uid: principal.uid,
+            categories: [...scan.categories],
+            original_body: rawNote,
+            matches: scan.matches.map((m) => ({
+              category: m.category,
+              value: m.value,
+              start: m.start,
+              end: m.end,
+            })),
+          })
+          .execute();
+      }
+
+      await trx
+        .updateTable('message_threads')
+        .set({
+          last_message_at: now,
+          last_message_preview: offerPreview('Booking request updated', slots, computedTotalCents),
+          last_message_redacted: false,
+        })
+        .where('id', '=', offer.thread_id)
+        .execute();
+
+      return row;
+    });
+
+    return c.json(toOfferDTO(updated, side), 200);
+  });
+
+  app.openapi(deleteOfferRoute, async (c) => {
+    const { db } = c.var.deps;
+    const principal = c.get('principal')!;
+    const { offerId } = c.req.valid('param');
+
+    const ctx = await loadActableOffer(db, offerId, principal.uid);
+    if ('error' in ctx) return c.json(ctx.error, ctx.status);
+    const { offer, side } = ctx;
+
+    // Delete is sender-initiated, and only while pending (canDeleteOffer). An
+    // accepted Offer has materialised Bookings — it must be withdrawn, not deleted.
+    if (side !== offer.sender) {
+      return c.json({ error: 'not_sender', reason: 'only the sender can delete their Offer' }, 409);
+    }
+    if (!canDeleteOffer(rowToDomainOffer(offer))) {
+      return c.json(
+        { error: 'not_deletable', reason: 'only a pending offer can be deleted; withdraw an accepted offer instead' },
+        409,
+      );
+    }
+
+    const now = new Date();
+    await db.transaction().execute(async (trx) => {
+      // message_flags.offer_id is ON DELETE CASCADE, so any queued T&S row for this
+      // Offer clears with it (offers migration OH-206).
+      await trx.deleteFrom('offers').where('id', '=', offer.id).execute();
+
+      await trx
+        .updateTable('message_threads')
+        .set({
+          last_message_at: now,
+          last_message_preview: 'Booking request removed',
+          last_message_redacted: false,
+        })
+        .where('id', '=', offer.thread_id)
+        .execute();
+    });
+
+    return c.json({ deleted: true } as const, 200);
   });
 
   app.openapi(acceptOfferRoute, async (c) => {

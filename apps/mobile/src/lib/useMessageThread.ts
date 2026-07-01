@@ -27,6 +27,8 @@ import {
   acceptOffer as apiAcceptOffer,
   counterOffer as apiCounterOffer,
   declineOffer as apiDeclineOffer,
+  deleteOffer as apiDeleteOffer,
+  editOffer as apiEditOffer,
   getThreadMessages,
   getThreadOffers,
   openThread,
@@ -36,6 +38,7 @@ import {
   type ChatMessage,
   type ComposeOfferBody,
   type CounterOfferBody,
+  type EditOfferBody,
   type MessageThreadSummary,
   type Offer,
 } from '@/api/client';
@@ -73,6 +76,10 @@ export interface UseMessageThreadResult {
   declineOffer: (offerId: string) => Promise<Offer | null>;
   withdrawOffer: (offerId: string) => Promise<Offer | null>;
   counterOffer: (offerId: string, body: CounterOfferBody) => Promise<Offer | null>;
+  /** Sender edits their still-pending Offer in place (OH-208). */
+  editOffer: (offerId: string, body: EditOfferBody) => Promise<Offer | null>;
+  /** Sender hard-deletes their still-pending Offer (OH-208); drops it from the timeline. */
+  deleteOffer: (offerId: string) => Promise<boolean>;
 }
 
 interface RealtimeMessageRow {
@@ -242,6 +249,22 @@ export function useMessageThread({ providerId, threadId: threadIdArg }: UseMessa
     (id: string, body: CounterOfferBody) => runOfferAction(() => apiCounterOffer(id, body)),
     [runOfferAction],
   );
+  const editOffer = useCallback(
+    (id: string, body: EditOfferBody) => runOfferAction(() => apiEditOffer(id, body)),
+    [runOfferAction],
+  );
+
+  // Delete removes the Offer server-side; drop it from the local list (no row to
+  // upsert), then reconcile with a refetch.
+  const deleteOffer = useCallback(
+    async (id: string): Promise<boolean> => {
+      await apiDeleteOffer(id);
+      setOffers((prev) => prev.filter((o) => o.id !== id));
+      void refetchOffers();
+      return true;
+    },
+    [refetchOffers],
+  );
 
   const timeline = useMemo<ThreadTimelineItem[]>(() => {
     const items: ThreadTimelineItem[] = [
@@ -267,5 +290,7 @@ export function useMessageThread({ providerId, threadId: threadIdArg }: UseMessa
     declineOffer,
     withdrawOffer,
     counterOffer,
+    editOffer,
+    deleteOffer,
   };
 }
