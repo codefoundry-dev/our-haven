@@ -215,6 +215,7 @@ interface ProviderRow {
   categories: string[] | null;
   specialty: string | null;
   state: string;
+  suspended_at: Date | string | null;
 }
 interface ProfileRow {
   display_name: string | null;
@@ -276,7 +277,7 @@ function toDateStr(value: Date | string): string {
 async function loadProviderById(db: Db, providerId: string): Promise<ProviderRow | null> {
   const row = await db
     .selectFrom('providers')
-    .select(['id', 'uid', 'role', 'categories', 'specialty', 'state'])
+    .select(['id', 'uid', 'role', 'categories', 'specialty', 'state', 'suspended_at'])
     .where('id', '=', providerId)
     .executeTakeFirst();
   return row ? (row as unknown as ProviderRow) : null;
@@ -409,7 +410,7 @@ export function registerSupplyProfileRoutes(app: OpenAPIHono<AppEnv>): void {
     // Not searchable yet, paused, or below the activation/listing bar → 404.
     if (!profile) return c.json({ error: 'profile_not_found' }, 404);
     if (profile.paused === true) return c.json({ error: 'profile_not_found' }, 404);
-    if (!isListable(provider.role, ver, sub)) return c.json({ error: 'profile_not_found' }, 404);
+    if (!isListable(provider.role, ver, sub, provider.suspended_at)) return c.json({ error: 'profile_not_found' }, 404);
 
     const categories = (provider.categories ?? []).filter((cat): cat is (typeof CAREGIVER_CATEGORIES)[number] =>
       (CAREGIVER_CATEGORIES as readonly string[]).includes(cat),

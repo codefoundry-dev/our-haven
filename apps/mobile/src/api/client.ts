@@ -355,6 +355,14 @@ export function disputeBooking(bookingId: string, body: BookingDisputeBody): Pro
   return post<BookingDisputeResult>(`/v1/bookings/${bookingId}/dispute`, body);
 }
 
+export type BookingReportNoShowResult =
+  paths['/v1/bookings/{bookingId}/report-no-show']['post']['responses'][200]['content']['application/json'];
+
+/** Report a Caregiver/Provider no-show → full refund (caregiver) + supply flag (OH-213). */
+export function reportNoShow(bookingId: string): Promise<BookingReportNoShowResult> {
+  return post<BookingReportNoShowResult>(`/v1/bookings/${bookingId}/report-no-show`, undefined);
+}
+
 /**
  * Adjust booked time (OH-212, ADR-0014 §A3) — Parent-side. `extendBooking` buys
  * more time on an `accepted` Booking: it applies immediately + re-authorizes the
@@ -661,6 +669,16 @@ export function editJob(jobId: string, body: CreateJobBody): Promise<MyJob> {
 /** Close a Job — withdraws its open Applications (surfaces a confirm modal client-side). */
 export function closeJob(jobId: string): Promise<MyJob> {
   return post<MyJob>(`/v1/jobs/${jobId}/close`, undefined);
+}
+
+export type JobDisputeBody =
+  paths['/v1/jobs/{jobId}/dispute']['post']['requestBody']['content']['application/json'];
+export type JobDisputeResult =
+  paths['/v1/jobs/{jobId}/dispute']['post']['responses'][200]['content']['application/json'];
+
+/** Dispute a past Job (charge/billing) — an admin escalation record (OH-213). */
+export function disputeJob(jobId: string, body: JobDisputeBody): Promise<JobDisputeResult> {
+  return post<JobDisputeResult>(`/v1/jobs/${jobId}/dispute`, body);
 }
 
 export function getJobApplications(jobId: string): Promise<JobApplication[]> {

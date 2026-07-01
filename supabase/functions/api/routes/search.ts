@@ -260,6 +260,7 @@ interface ProviderRow {
   categories: string[] | null;
   specialty: string | null;
   state: string;
+  suspended_at: Date | string | null;
 }
 interface ProfileRow {
   provider_id: string;
@@ -338,7 +339,14 @@ function isPresent(value: Date | string | null): boolean {
  * (supply-profile.ts reuses this so the two surfaces can never disagree about
  * who is publicly visible).
  */
-export function isListable(role: 'caregiver' | 'provider', ver: VerificationRow | undefined, sub: ProviderSubRow | undefined): boolean {
+export function isListable(
+  role: 'caregiver' | 'provider',
+  ver: VerificationRow | undefined,
+  sub: ProviderSubRow | undefined,
+  suspendedAt?: Date | string | null,
+): boolean {
+  // Suspended supply (OH-213 — 3 no-show flags) is unlistable + unbookable.
+  if (isPresent(suspendedAt ?? null)) return false;
   if (!ver) return false;
   if (isPresent(ver.rejected_at)) return false;
   if (!isPresent(ver.phone_confirmed_at)) return false; // hard activation gate (OH-181)
@@ -472,7 +480,7 @@ export function registerSearchRoutes(app: OpenAPIHono<AppEnv>): void {
     // ── candidate supply rows by role ─────────────────────────────────────────
     let providersQuery = db
       .selectFrom('providers')
-      .select(['id', 'uid', 'role', 'categories', 'specialty', 'state']);
+      .select(['id', 'uid', 'role', 'categories', 'specialty', 'state', 'suspended_at']);
     if (roleFilter !== 'all') providersQuery = providersQuery.where('role', '=', roleFilter);
     const providers = (await providersQuery.execute()) as unknown as ProviderRow[];
 
@@ -559,7 +567,7 @@ export function registerSearchRoutes(app: OpenAPIHono<AppEnv>): void {
       const prof = profileById.get(p.id);
       if (!prof) continue; // no profile row → not searchable yet
       if (prof.paused === true) continue; // paused → hidden
-      if (!isListable(p.role, verById.get(p.id), subById.get(p.id))) continue;
+      if (!isListable(p.role, verById.get(p.id), subById.get(p.id), p.suspended_at)) continue;
 
       // category / specialty membership
       const pCategories = p.categories ?? [];

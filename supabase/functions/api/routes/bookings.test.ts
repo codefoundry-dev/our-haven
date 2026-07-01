@@ -35,6 +35,9 @@ function makeDb(tables: Record<string, Record<string, unknown>[]> = {}) {
         },
         where: () => c,
         execute: async () => [],
+        // A guarded claim (`WHERE state='accepted'`) reads the affected-row count;
+        // the fake treats every claim as won (1 row) — race-loss is not modelled.
+        executeTakeFirst: async () => ({ numUpdatedRows: 1n }),
       };
       return c;
     },
@@ -288,6 +291,83 @@ describe('POST /v1/bookings/{bookingId}/dispute', () => {
     const { db } = makeDb(fixtures(caregiverBooking({ state: 'requested' })));
     const res = await buildApp(makeDeps(db)).request(path, post(await parentToken(), { reason: 'other' }));
     expect(res.status).toBe(409);
+  });
+});
+
+// ── POST /v1/bookings/{bookingId}/report-no-show ───────────────────────────────
+describe('POST /v1/bookings/{bookingId}/report-no-show', () => {
+  const path = `/v1/bookings/${BID}/report-no-show`;
+
+  // A no-show is reportable once the start has passed → use a slot 1h in the past.
+  const started = (over: Record<string, unknown> = {}) => ({
+    bookings: [caregiverBooking({ ...slotFromInstant(hoursFromNow(-1)), ...over })],
+    provider_profiles: [{ provider_id: PID, display_name: 'Casey' }],
+    providers: [{ id: PID, uid: 'uid-cg' }],
+    supply_flags: [{ c: '1' }], // 1 active no-show flag after this one → standing 'ok'
+  });
+
+  it('caregiver no-show → cancelled + full refund (release hold) + supply flag + dispute row', async () => {
+    const cancel = vi.fn(async () => ({ id: 'pi_1', status: 'canceled', amount: 0 }));
+    const { db, captures } = makeDb(started());
+    const app = buildApp(makeDeps(db, makeStripe({ cancelPaymentIntent: cancel })));
+    const res = await app.request(path, post(await parentToken()));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ state: 'cancelled', refunded: true, supplyStanding: 'ok' });
+    expect(cancel).toHaveBeenCalled();
+    // The claim flips state → cancelled + stamps no_show_at.
+    expect(captures.updates.find((u) => u.table === 'bookings')?.set).toMatchObject({ state: 'cancelled' });
+    expect(captures.inserts.find((i) => i.table === 'supply_flags')?.values).toMatchObject({
+      provider_id: PID,
+      kind: 'caregiver',
+      reason: 'no-show',
+    });
+    expect(captures.inserts.find((i) => i.table === 'disputes')?.values).toMatchObject({
+      subject_type: 'booking',
+      reason: 'no-show',
+    });
+    expect(captures.inserts.find((i) => i.table === 'notification_outbox')?.values).toMatchObject({
+      recipient_uid: 'uid-cg',
+      event_type: 'booking_no_show',
+    });
+  });
+
+  it('third active no-show flag → provider suspended (suspended_at set)', async () => {
+    const { db, captures } = makeDb({ ...started(), supply_flags: [{ c: '3' }] });
+    const app = buildApp(makeDeps(db));
+    const res = await app.request(path, post(await parentToken()));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ supplyStanding: 'suspended' });
+    expect(captures.updates.find((u) => u.table === 'providers')?.set).toHaveProperty('suspended_at');
+  });
+
+  it('provider consultation no-show → flag only, no money', async () => {
+    const cancel = vi.fn(async () => ({ id: 'pi_1', status: 'canceled', amount: 0 }));
+    const { db, captures } = makeDb({ ...started({ kind: 'provider' }), supply_flags: [{ c: '1' }] });
+    const app = buildApp(makeDeps(db, makeStripe({ cancelPaymentIntent: cancel })));
+    const res = await app.request(path, post(await parentToken()));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ state: 'cancelled', refunded: false });
+    expect(cancel).not.toHaveBeenCalled();
+    expect(captures.inserts.find((i) => i.table === 'supply_flags')?.values).toMatchObject({ kind: 'provider' });
+  });
+
+  it('409 before the scheduled start', async () => {
+    const { db } = makeDb(fixtures(caregiverBooking(slotFromInstant(hoursFromNow(4)))));
+    const res = await buildApp(makeDeps(db)).request(path, post(await parentToken()));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: 'not_reportable' });
+  });
+
+  it('409 from a non-accepted state', async () => {
+    const { db } = makeDb(started({ state: 'in-progress' }));
+    const res = await buildApp(makeDeps(db)).request(path, post(await parentToken()));
+    expect(res.status).toBe(409);
+  });
+
+  it("404 when the Booking is not the caller's", async () => {
+    const { db } = makeDb(started());
+    const res = await buildApp(makeDeps(db)).request(path, post(await parentToken('uid-other')));
+    expect(res.status).toBe(404);
   });
 });
 

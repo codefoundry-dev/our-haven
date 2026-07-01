@@ -140,6 +140,7 @@ interface ProviderRow {
   uid: string;
   role: 'caregiver' | 'provider';
   specialty: string | null;
+  suspended_at: Date | string | null;
 }
 interface SlotRow {
   id: string;
@@ -224,7 +225,7 @@ function fullName(first: string | null, last: string | null): string | null {
 async function loadProviderById(db: Db, providerId: string): Promise<ProviderRow | null> {
   const row = await db
     .selectFrom('providers')
-    .select(['id', 'uid', 'role', 'specialty'])
+    .select(['id', 'uid', 'role', 'specialty', 'suspended_at'])
     .where('id', '=', providerId)
     .executeTakeFirst();
   return row ? (row as unknown as ProviderRow) : null;
@@ -233,7 +234,7 @@ async function loadProviderById(db: Db, providerId: string): Promise<ProviderRow
 async function loadProviderByUid(db: Db, uid: string): Promise<ProviderRow | null> {
   const row = await db
     .selectFrom('providers')
-    .select(['id', 'uid', 'role', 'specialty'])
+    .select(['id', 'uid', 'role', 'specialty', 'suspended_at'])
     .where('uid', '=', uid)
     .executeTakeFirst();
   return row ? (row as unknown as ProviderRow) : null;
@@ -360,7 +361,7 @@ export function registerConsultationBookingRoutes(app: OpenAPIHono<AppEnv>): voi
       >,
     ]);
 
-    if (!isListable(provider.role, ver, sub)) {
+    if (!isListable(provider.role, ver, sub, provider.suspended_at)) {
       return c.json({ error: 'provider_not_found' }, 404);
     }
 

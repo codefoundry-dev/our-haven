@@ -38,6 +38,7 @@ function makeDb(tables: Record<string, Record<string, unknown>[]> = {}) {
         captures.inserts.push({ table: t, values: captured });
         return c;
       },
+      onConflict: () => c,
       returning: () => c,
       execute: async () =>
         captured.map((v, i) => ({ id: `job-${i}`, created_at: NOW, ...v })),
@@ -384,5 +385,28 @@ describe('POST /v1/jobs/{jobId}/close', () => {
   it('404 for a non-owner', async () => {
     const app = buildApp(makeDeps(makeDb({ jobs: [jobRow()] }).db));
     expect((await app.request(closePath, post(await parentToken('uid-other')))).status).toBe(404);
+  });
+});
+
+// ── POST /v1/jobs/{jobId}/dispute (OH-213) ─────────────────────────────────────
+describe('POST /v1/jobs/{jobId}/dispute', () => {
+  const disputePath = `${JOBS_PATH}/${JID}/dispute`;
+
+  it('files an escalation dispute record on a past Job (no money)', async () => {
+    const { db, captures } = makeDb({ jobs: [jobRow({ state: 'closed' })] });
+    const res = await buildApp(makeDeps(db)).request(disputePath, post(await parentToken(), { reason: 'overcharged', details: 'double charged' }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ jobId: JID, escalation: true });
+    expect(captures.inserts.find((i) => i.table === 'disputes')?.values[0]).toMatchObject({
+      subject_type: 'job',
+      subject_id: JID,
+      reason: 'overcharged',
+    });
+  });
+
+  it("404 when the Job is not the caller's", async () => {
+    const { db } = makeDb({ jobs: [jobRow()] });
+    const res = await buildApp(makeDeps(db)).request(disputePath, post(await parentToken('uid-other'), { reason: 'other' }));
+    expect(res.status).toBe(404);
   });
 });

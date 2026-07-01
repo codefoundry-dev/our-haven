@@ -25,6 +25,7 @@ import {
   type StripeSubscriptionStatus,
 } from '../../../../packages/domain/src/parent-subscription/index.ts';
 import { SAFETY_BEHAVIORS } from '../../../../packages/shared/src/safety-behaviors.ts';
+import { insertDisputeRecord } from '../services/disputes.ts';
 
 /**
  * Posted Jobs (OH-209 + OH-210) — CONTEXT.md § Job; PRD-0001 v1.7 stories 84–92,
@@ -407,6 +408,40 @@ const closeJobRoute = createRoute({
   },
 });
 
+const JobDisputeRequest = z
+  .object({
+    reason: z.enum(['overcharged', 'no-show', 'safety', 'quality', 'other']),
+    details: z.string().max(1000).optional(),
+  })
+  .openapi('JobDisputeRequest');
+
+const JobDisputeResponse = z
+  .object({
+    jobId: z.string(),
+    /** Always true — a past-Job dispute is an admin escalation (no money on a Job). */
+    escalation: z.literal(true),
+  })
+  .openapi('JobDispute');
+
+const disputeJobRoute = createRoute({
+  method: 'post',
+  path: '/jobs/{jobId}/dispute',
+  tags: ['jobs'],
+  summary: 'Dispute a past Job (charge/billing) — admin escalation — OH-213',
+  description:
+    "Files a charge/billing complaint against one of the caller's posted Jobs (`Job.dispute`, ADR-0013 amended / PRD story 132). A Job carries no on-platform money, so this is purely an admin-escalation record — it never moves money. Same reason chip + free text as the Booking dispute. 404 when the Job is not the caller's.",
+  security: [{ supabaseAccessToken: [] }],
+  middleware: [requireAuth({ roles: ['parent'] })] as const,
+  request: { params: JobIdParam, body: { content: json(JobDisputeRequest), required: true } },
+  responses: {
+    200: { description: 'Dispute filed', content: json(JobDisputeResponse) },
+    400: { description: 'Invalid dispute', content: json(ErrorResponse) },
+    401: { description: 'Unauthenticated', content: json(ErrorResponse) },
+    403: { description: 'Wrong role', content: json(ErrorResponse) },
+    404: { description: "Job not found (or not the caller's)", content: json(ErrorResponse) },
+  },
+});
+
 /* ── handler ──────────────────────────────────────────────────────────────────── */
 
 export function registerJobRoutes(app: OpenAPIHono<AppEnv>): void {
@@ -681,5 +716,32 @@ export function registerJobRoutes(app: OpenAPIHono<AppEnv>): void {
 
     // All open Applications were just withdrawn, so the actionable count is 0.
     return c.json({ ...toJobDTO(updated), applicationCount: 0 }, 200);
+  });
+
+  // ── POST /v1/jobs/{jobId}/dispute ───────────────────────────────────────────
+  app.openapi(disputeJobRoute, async (c) => {
+    const { db } = c.var.deps;
+    const principal = c.get('principal')!;
+    const { jobId } = c.req.valid('param');
+    const { reason, details } = c.req.valid('json');
+
+    const row = await loadOwnedJob(db, jobId, principal.uid);
+    if (!row) return c.json({ error: 'job_not_found' }, 404);
+
+    // A Job carries no on-platform money — the dispute is an admin-escalation
+    // record only (never a money movement). Idempotent per open dispute.
+    await db.transaction().execute(async (trx) => {
+      await insertDisputeRecord(trx, {
+        subjectType: 'job',
+        subjectId: row.id,
+        filedByUid: principal.uid,
+        reason,
+        details,
+        inWindow: false,
+        holdApplied: false,
+      });
+    });
+
+    return c.json({ jobId: row.id, escalation: true as const }, 200);
   });
 }

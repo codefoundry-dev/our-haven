@@ -7,6 +7,7 @@ import type { Db } from '../db/kysely.ts';
 import {
   cancelBookingTimeReductionRequest,
   canFileBillingComplaint,
+  canReportNoShow,
   extendBookingTime,
   isDisputable,
   requestReduceBookingTime,
@@ -21,12 +22,17 @@ import {
   commissionOn,
   priceBooking,
   reauthorizeBooking,
+  releaseBookingHold,
   type AuthorizeBookingResult,
+  type BookingPaymentPatch,
+  type BookingPaymentStatus,
 } from '../services/booking-payments.ts';
 import {
   resolveCaregiverConnectAccount,
   resolveParentPaymentSource,
 } from '../services/payment-source.ts';
+import { insertDisputeRecord } from '../services/disputes.ts';
+import { reconcileSupplyStanding } from '../services/supply-flags.ts';
 
 /**
  * Parent-facing Caregiver Booking management (OH-211 + OH-212) — the
@@ -80,6 +86,7 @@ const PaymentStatusEnum = z.enum([
 ]);
 const CancellationTierEnum = z.enum(['free', 'half', 'full']);
 const DisputeReasonEnum = z.enum(['overcharged', 'no-show', 'safety', 'quality', 'other']);
+const SupplyStandingEnum = z.enum(['ok', 'manual-review', 'suspended']);
 
 const AddressSchema = z
   .object({
@@ -169,6 +176,19 @@ const DisputeResponse = z
     escalation: z.boolean(),
   })
   .openapi('BookingDispute');
+
+const ReportNoShowResponse = z
+  .object({
+    id: z.string(),
+    state: z.literal('cancelled'),
+    /** true for a Caregiver Booking (the hold was released in full); false for a
+     *  Provider consultation (no on-platform money — flag only). */
+    refunded: z.boolean(),
+    /** The flagged supply's standing after this no-show (2 flags → manual-review,
+     *  3 → suspended — CONTEXT § No-show). */
+    supplyStanding: SupplyStandingEnum,
+  })
+  .openapi('BookingReportNoShow');
 
 /** A target duration in hours — half-hour granularity, matching the adjust-time
  *  sheet's presets + custom picker (ADR-0014 §A3). */
@@ -396,6 +416,7 @@ function pendingToWire(p: PendingTimeChange, startMin: number) {
   };
 }
 
+
 /* ── route definitions ──────────────────────────────────────────────────────── */
 
 const detailRoute = createRoute({
@@ -470,6 +491,25 @@ const disputeRoute = createRoute({
     403: { description: 'Wrong role', content: json(ErrorResponse) },
     404: { description: "Booking not found (or not the caller's)", content: json(ErrorResponse) },
     409: { description: 'Not disputable from the current state', content: json(ErrorResponse) },
+  },
+});
+
+const reportNoShowRoute = createRoute({
+  method: 'post',
+  path: '/bookings/{bookingId}/report-no-show',
+  tags: ['bookings'],
+  summary: 'Report a supply no-show → full refund + supply flag — OH-213',
+  description:
+    "Reports that the Caregiver/Provider did not show for an `accepted` Booking (CONTEXT § No-show). A Caregiver no-show → the Booking is cancelled, the authorization hold is released in full, and the Caregiver is auto-flagged (2 flags → manual review, 3 → suspension). A Provider consultation no-show is a supply-quality flag only (no money). Reportable only at/after the scheduled start; 409 otherwise.",
+  security: [{ supabaseAccessToken: [] }],
+  middleware: [requireAuth({ roles: ['parent'] })] as const,
+  request: { params: BookingIdParam },
+  responses: {
+    200: { description: 'No-show recorded', content: json(ReportNoShowResponse) },
+    401: { description: 'Unauthenticated', content: json(ErrorResponse) },
+    403: { description: 'Wrong role', content: json(ErrorResponse) },
+    404: { description: "Booking not found (or not the caller's)", content: json(ErrorResponse) },
+    409: { description: 'Not reportable (wrong state or before the scheduled start)', content: json(ErrorResponse) },
   },
 });
 
@@ -685,6 +725,16 @@ export function registerBookingRoutes(app: OpenAPIHono<AppEnv>): void {
           .set({ state: 'disputed', disputed_at: now, dispute_reason: reason, dispute_details: details ?? null, updated_at: now })
           .where('id', '=', row.id)
           .execute();
+        // The admin queue record (OH-213) — this in-window dispute HOLDS the payout.
+        await insertDisputeRecord(trx, {
+          subjectType: 'booking',
+          subjectId: row.id,
+          filedByUid: row.parent_uid,
+          reason,
+          details,
+          inWindow: true,
+          holdApplied: true,
+        });
         await trx
           .insertInto('notification_outbox')
           .values({
@@ -708,6 +758,15 @@ export function registerBookingRoutes(app: OpenAPIHono<AppEnv>): void {
           .set({ dispute_reason: reason, dispute_details: details ?? null, disputed_at: now, updated_at: now })
           .where('id', '=', row.id)
           .execute();
+        await insertDisputeRecord(trx, {
+          subjectType: 'booking',
+          subjectId: row.id,
+          filedByUid: row.parent_uid,
+          reason,
+          details,
+          inWindow: false,
+          holdApplied: false,
+        });
         await trx
           .insertInto('notification_outbox')
           .values({
@@ -723,6 +782,108 @@ export function registerBookingRoutes(app: OpenAPIHono<AppEnv>): void {
     }
 
     return c.json({ error: 'not_disputable', reason: `cannot dispute from ${row.state}` }, 409);
+  });
+
+  // ── POST /v1/bookings/{bookingId}/report-no-show ────────────────────────────
+  app.openapi(reportNoShowRoute, async (c) => {
+    const { db, stripe } = c.var.deps;
+    const principal = c.get('principal')!;
+    const { bookingId } = c.req.valid('param');
+
+    const row = await loadOwnedBooking(db, bookingId, principal.uid);
+    if (!row) return c.json({ error: 'booking_not_found' }, 404);
+
+    // Domain gate: a no-show is reportable only from `accepted`.
+    const shape =
+      row.kind === 'provider'
+        ? ({ kind: 'provider' } as const)
+        : ({ kind: 'caregiver', origin: row.origin ?? 'posted-job' } as const);
+    const res = transitionBooking({ ...shape, state: row.state }, { type: 'parent-report-no-show' });
+    if (!res.ok) return c.json({ error: 'not_reportable', reason: res.reason }, 409);
+    if (!canReportNoShow(row.state)) {
+      return c.json({ error: 'not_reportable', reason: `cannot report a no-show from ${row.state}` }, 409);
+    }
+
+    // Server-side clock gate (the domain is clockless): only at/after the start.
+    const now = new Date();
+    const startAt = slotStartAtUtc(toDateStr(row.scheduled_date), row.start_min);
+    if (now < startAt) {
+      return c.json(
+        { error: 'not_reportable', reason: 'a no-show can only be reported at or after the scheduled start' },
+        409,
+      );
+    }
+
+    // Single-winner claim: only the request that flips accepted→cancelled proceeds
+    // to move money + flag the supply, so a double-tap can't double-refund or
+    // double-flag (Stripe release is idempotent too, but the flag insert is not).
+    const claim = await db
+      .updateTable('bookings')
+      .set({ state: 'cancelled', no_show_at: now, cancelled_at: now, updated_at: now })
+      .where('id', '=', row.id)
+      .where('state', '=', 'accepted')
+      .executeTakeFirst();
+    if (Number(claim.numUpdatedRows ?? 0n) === 0) {
+      return c.json({ error: 'not_reportable', reason: 'booking already resolved' }, 409);
+    }
+
+    // Caregiver → full refund (release the hold). Provider → no on-platform money.
+    let refunded = false;
+    let paymentPatch: BookingPaymentPatch = {};
+    if (row.kind === 'caregiver') {
+      const { patch } = await releaseBookingHold(stripe, {
+        bookingId: row.id,
+        paymentIntentId: row.payment_intent_id,
+        paymentStatus: (row.payment_status as BookingPaymentStatus | null) ?? null,
+        authorizedAmountCents: row.authorized_amount_cents,
+      });
+      paymentPatch = patch;
+      refunded = true;
+    }
+
+    const supplyUid = await caregiverUid(db, row.provider_id);
+    let standing: z.infer<typeof SupplyStandingEnum> = 'ok';
+    await db.transaction().execute(async (trx) => {
+      if (Object.keys(paymentPatch).length > 0) {
+        await trx.updateTable('bookings').set({ ...paymentPatch, updated_at: now }).where('id', '=', row.id).execute();
+      }
+      // The supply-quality auto-flag.
+      await trx
+        .insertInto('supply_flags')
+        .values({
+          provider_id: row.provider_id,
+          kind: row.kind,
+          reason: 'no-show',
+          booking_id: row.id,
+          filed_by_uid: row.parent_uid,
+        })
+        .execute();
+      // Recompute standing over the supply's ACTIVE no-show flags → suspend at 3.
+      standing = await reconcileSupplyStanding(trx, row.provider_id, now);
+      // Route to the admin queue (unifies with disputes; gives the flag a recovery
+      // path — an admin dismiss clears the flag + re-evaluates suspension).
+      await insertDisputeRecord(trx, {
+        subjectType: 'booking',
+        subjectId: row.id,
+        filedByUid: row.parent_uid,
+        reason: 'no-show',
+        inWindow: false,
+        holdApplied: false,
+      });
+      // Notify the flagged supply.
+      await trx
+        .insertInto('notification_outbox')
+        .values({
+          recipient_uid: supplyUid ?? row.provider_id,
+          event_type: 'booking_no_show',
+          payload: { bookingId: row.id, kind: row.kind },
+          dedupe_key: `booking_no_show:${row.id}`,
+        })
+        .onConflict((oc) => oc.column('dedupe_key').doNothing())
+        .execute();
+    });
+
+    return c.json({ id: row.id, state: 'cancelled' as const, refunded, supplyStanding: standing }, 200);
   });
 
   // ── POST /v1/bookings/{bookingId}/extend ────────────────────────────────────

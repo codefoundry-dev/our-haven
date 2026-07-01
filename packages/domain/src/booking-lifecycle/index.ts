@@ -74,13 +74,18 @@ export type BookingState = (typeof BOOKING_STATES)[number];
  * dispute edge retired, no event moves a Booking out of `completed`. A
  * post-payout billing complaint is an admin escalation (`canFileBillingComplaint`)
  * that sets a flag without changing state — it is not a transition.
+ *
+ * `disputed` is NOT terminal (OH-213): an in-window dispute holds the Payout and
+ * routes to admin, who resolves it (`admin-resolve-dispute`) either back to
+ * `completed` (rejected → caregiver paid) or `cancelled` (upheld → parent
+ * refunded). It stays out of `BOOKING_ACTIVE_STATES` so a Parent/Caregiver
+ * cancel can never move a held dispute — only admin resolution can.
  */
 export const BOOKING_TERMINAL_STATES = [
   'declined',
   'expired',
   'completed',
   'cancelled',
-  'disputed',
 ] as const;
 export type BookingTerminalState = (typeof BOOKING_TERMINAL_STATES)[number];
 
@@ -133,6 +138,10 @@ export const BOOKING_EVENT_TYPES = [
   'parent-confirm-hours',
   'session-auto-confirm',
   'parent-dispute',
+  // Dispute resolution (admin, OH-213) — the only exit from `disputed`.
+  'admin-resolve-dispute',
+  // No-show (OH-213) — Parent reports the supply did not show, from `accepted`.
+  'parent-report-no-show',
   // Cancellation (both tracks, validity differs by kind)
   'parent-cancel',
   'caregiver-cancel',
@@ -142,8 +151,20 @@ export const BOOKING_EVENT_TYPES = [
 ] as const;
 export type BookingEventType = (typeof BOOKING_EVENT_TYPES)[number];
 
+/** The admin's decision on a disputed Booking (`admin-resolve-dispute`). */
+export type DisputeResolutionOutcome = 'rejected' | 'upheld';
+
+/**
+ * Most events are payload-free. `admin-resolve-dispute` additionally carries the
+ * admin's `outcome`, which picks the resolved state + money side-effect:
+ *   - `rejected` (dispute not upheld) → `completed`, caregiver paid (capture).
+ *   - `upheld`   (dispute upheld)     → `cancelled`, parent refunded.
+ * The field is optional on the shared type; `transitionBooking` refuses an
+ * `admin-resolve-dispute` that omits it, so callers can't silently pick a branch.
+ */
 export interface BookingEvent {
   type: BookingEventType;
+  outcome?: DisputeResolutionOutcome;
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -165,6 +186,11 @@ export const BOOKING_SIDE_EFFECT_TYPES = [
   'enqueue-payout',
   'release-consultation-slot',
   'flag-for-admin-review',
+  // Supply-quality auto-flag for a no-show (OH-213) — distinct from
+  // `flag-for-admin-review` (a dispute/cancel admin-queue signal): this one
+  // increments the supply's no-show flag count that drives the 2→review / 3→
+  // suspend standing (CONTEXT § No-show).
+  'flag-supply-no-show',
 ] as const;
 export type BookingSideEffectType = (typeof BOOKING_SIDE_EFFECT_TYPES)[number];
 
@@ -217,6 +243,41 @@ export function canFileBillingComplaint(state: BookingState): boolean {
 /** A provider consultation Booking carries no on-platform payment (ADR-0011). */
 export function isConsultation(shape: BookingShape): boolean {
   return shape.kind === 'provider';
+}
+
+/**
+ * States from which a Parent may report a supply no-show (OH-213, CONTEXT §
+ * No-show). Only `accepted`: the engagement was committed but the session never
+ * started (a caregiver who reached `in-progress` "showed"; nothing auto-advances
+ * an un-started `accepted` caregiver Booking). Provider consultations can
+ * auto-complete off `accepted` at slot end — a no-show reported after that is
+ * out of scope for v1 (provider no-show is a flag only, no money).
+ */
+export function canReportNoShow(state: BookingState): boolean {
+  return state === 'accepted';
+}
+
+/**
+ * The supply no-show flag thresholds (CONTEXT § No-show): two active no-show
+ * flags route the caregiver/provider to manual admin review; three suspends
+ * their listing. Exposed as constants so the handler + tests share one source.
+ */
+export const SUPPLY_NO_SHOW_REVIEW_THRESHOLD = 2;
+export const SUPPLY_NO_SHOW_SUSPEND_THRESHOLD = 3;
+
+export type SupplyStanding = 'ok' | 'manual-review' | 'suspended';
+
+/**
+ * Map a supply's active no-show flag count to their standing. Pure + monotone:
+ *   0–1 → `ok`, 2 → `manual-review`, ≥3 → `suspended`.
+ * The count MUST be scoped to active no-show flags only — an unrelated
+ * `flag-for-admin-review` (e.g. a caregiver-cancel) must never push a supply
+ * toward auto-suspension.
+ */
+export function evaluateSupplyStanding(activeNoShowFlagCount: number): SupplyStanding {
+  if (activeNoShowFlagCount >= SUPPLY_NO_SHOW_SUSPEND_THRESHOLD) return 'suspended';
+  if (activeNoShowFlagCount >= SUPPLY_NO_SHOW_REVIEW_THRESHOLD) return 'manual-review';
+  return 'ok';
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -417,6 +478,74 @@ export function transitionBooking(
         ok: true,
         next: 'disputed',
         sideEffects: [{ type: 'notify-caregiver' }, { type: 'flag-for-admin-review' }],
+      };
+    }
+
+    // ── Dispute resolution (admin, OH-213) ────────────────────────────────
+    case 'admin-resolve-dispute': {
+      // Providers never reach `disputed` (null payment, no dispute), so this is
+      // caregiver-only — guard defensively.
+      if (booking.kind !== 'caregiver') {
+        return {
+          ok: false,
+          reason: 'admin-resolve-dispute only valid for caregiver bookings (provider consultations never enter disputed)',
+        };
+      }
+      if (state !== 'disputed') {
+        return { ok: false, reason: `admin-resolve-dispute invalid from ${state} (only a disputed booking is resolvable)` };
+      }
+      if (event.outcome !== 'rejected' && event.outcome !== 'upheld') {
+        return { ok: false, reason: 'admin-resolve-dispute requires an outcome of rejected|upheld' };
+      }
+      if (event.outcome === 'rejected') {
+        // Dispute not upheld → release the held Payout to the Caregiver (capture
+        // = payout) and complete the Booking.
+        return {
+          ok: true,
+          next: 'completed',
+          sideEffects: [
+            { type: 'notify-both' },
+            { type: 'enqueue-payment-capture' },
+            { type: 'enqueue-payout' },
+          ],
+        };
+      }
+      // Dispute upheld → refund the Parent in full and cancel the Booking.
+      return {
+        ok: true,
+        next: 'cancelled',
+        sideEffects: [{ type: 'notify-both' }, { type: 'enqueue-payment-full-refund' }],
+      };
+    }
+
+    // ── No-show (OH-213) ──────────────────────────────────────────────────
+    case 'parent-report-no-show': {
+      if (!canReportNoShow(state)) {
+        return { ok: false, reason: `parent-report-no-show invalid from ${state} (only reportable while accepted)` };
+      }
+      if (booking.kind === 'provider') {
+        // Provider consultation no-show: supply-quality flag only, no money
+        // (ADR-0011) — release the held slot (CONTEXT § No-show).
+        return {
+          ok: true,
+          next: 'cancelled',
+          sideEffects: [
+            { type: 'notify-provider' },
+            { type: 'release-consultation-slot' },
+            { type: 'flag-supply-no-show' },
+          ],
+        };
+      }
+      // Caregiver no-show: Parent gets a full refund + the Caregiver is
+      // auto-flagged (2→review, 3→suspend — CONTEXT § No-show).
+      return {
+        ok: true,
+        next: 'cancelled',
+        sideEffects: [
+          { type: 'notify-caregiver' },
+          { type: 'enqueue-payment-full-refund' },
+          { type: 'flag-supply-no-show' },
+        ],
       };
     }
 
