@@ -413,3 +413,16 @@ export function editOffer(offerId: string, body: EditOfferBody): Promise<Offer> 
 export function deleteOffer(offerId: string): Promise<{ deleted: true }> {
   return del<{ deleted: true }>(`/v1/offers/${offerId}`);
 }
+
+// ── Posted Jobs (OH-209) ─────────────────────────────────────────────────────
+export type CreateJobBody = paths['/v1/jobs']['post']['requestBody']['content']['application/json'];
+export type CreateJobResult = paths['/v1/jobs']['post']['responses'][201]['content']['application/json'];
+export type PostedJob = CreateJobResult['jobs'][number];
+export type JobSchedule = CreateJobBody['schedule'];
+export type JobServiceAddress = CreateJobBody['serviceAddress'];
+
+/** Compose + PUBLISH a posted Job. Publishing is Parent-Subscription-gated (402);
+ *  a multi-day one-off returns one Job per date (ADR-0014). */
+export function postJob(body: CreateJobBody): Promise<CreateJobResult> {
+  return post<CreateJobResult>('/v1/jobs', body);
+}
