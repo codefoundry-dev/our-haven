@@ -18,7 +18,8 @@ import { Redirect, Tabs, useSegments, type Href } from 'expo-router';
 import { useAuth } from '@/auth/AuthProvider';
 import { BottomNav } from '@/components/BottomNav';
 import { ParentSubscriptionProvider } from '@/lib/ParentSubscriptionProvider';
-import { ROLE_TABS, landingTab } from '@/lib/roles';
+import { SupplyActivationProvider } from '@/lib/SupplyActivationProvider';
+import { ROLE_TABS, landingTab, roleOwnsTab } from '@/lib/roles';
 
 /** Every tab id any role owns — used to tell tab routes apart from flow routes. */
 const ALL_TAB_IDS = new Set<string>(
@@ -35,13 +36,16 @@ export default function AppLayout() {
 
   // Redirect a role away from a tab destination it doesn't own (manual URL /
   // deep link). Flow routes (href: null) aren't tab ids, so they pass through.
+  // roleOwnsTab also allows non-nav routes a role legitimately reaches (e.g. a
+  // Caregiver's desktop-web /home Dashboard, which isn't a mobile tab).
   const current = segments[1];
-  if (current && ALL_TAB_IDS.has(current) && !ROLE_TABS[role].some((t) => t.id === current)) {
+  if (current && ALL_TAB_IDS.has(current) && !roleOwnsTab(role, current)) {
     return <Redirect href={`/(app)/${landingTab(role)}` as Href} />;
   }
 
   return (
     <ParentSubscriptionProvider>
+    <SupplyActivationProvider>
     <Tabs tabBar={(props) => <BottomNav {...props} role={role} />} screenOptions={{ headerShown: false }}>
       {/* ── tab destinations (role-aware dispatchers) ─────────────── */}
       <Tabs.Screen name="home" />
@@ -86,6 +90,7 @@ export default function AppLayout() {
       <Tabs.Screen name="consult" options={{ href: null }} />
       <Tabs.Screen name="availability" options={{ href: null }} />
     </Tabs>
+    </SupplyActivationProvider>
     </ParentSubscriptionProvider>
   );
 }
