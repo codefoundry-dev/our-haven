@@ -109,6 +109,7 @@ function makeDeps(opts: { db?: AppDeps['db']; stripe?: AppDeps['stripe'] } = {})
     supabase: stub,
     stripe: (opts.stripe ?? stub) as AppDeps['stripe'],
     backgroundCheck: stub as AppDeps['backgroundCheck'],
+    daily: stub,
   };
 }
 

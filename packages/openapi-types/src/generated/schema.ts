@@ -4414,6 +4414,187 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/threads/{threadId}/calls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start an ad-hoc video call in a thread — OH-216
+         * @description Either participant starts a short-lived (~30 min) Daily.co video call from the thread. Logs the link generation for Trust & Safety (no content recorded) and posts a "Join video call" poke that Realtime delivers to the counterparty. Returns the initiator's join session. A Parent start is Parent-Subscription-gated (402); the supply side is not. 404 if the thread is not the caller's. 503 if video is not configured.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    threadId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Call started — the initiator's join session + the posted poke */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StartVideoCallResponse"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VideoCallError"];
+                    };
+                };
+                /** @description No active Parent Subscription — video gated */
+                402: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VideoCallError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VideoCallError"];
+                    };
+                };
+                /** @description Thread not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VideoCallError"];
+                    };
+                };
+                /** @description Video not configured (DAILY_API_KEY unset) */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VideoCallError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/calls/{callId}/join": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Join (or re-join) an ad-hoc video call — OH-216
+         * @description A participant mints a fresh per-user Daily meeting token for a still-live call and receives the room URL. A Parent join is Parent-Subscription-gated (402); the supply side is not. 404 if the call is unknown or not the caller's thread; 410 once the call has expired. 503 if video is not configured.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    callId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description A fresh join session for the call */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VideoCallSession"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VideoCallError"];
+                    };
+                };
+                /** @description No active Parent Subscription — video gated */
+                402: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VideoCallError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VideoCallError"];
+                    };
+                };
+                /** @description Call not found (or not the caller's thread) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VideoCallError"];
+                    };
+                };
+                /** @description The call has expired */
+                410: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VideoCallError"];
+                    };
+                };
+                /** @description Video not configured (DAILY_API_KEY unset) */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VideoCallError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/jobs": {
         parameters: {
             query?: never;
@@ -5848,6 +6029,9 @@ export interface components {
             senderUid: string;
             body: string;
             redacted: boolean;
+            /** @enum {string} */
+            kind: "text" | "video_call";
+            videoCallLinkId: string | null;
             createdAt: string;
         };
         SendMessageRequest: {
@@ -5935,6 +6119,20 @@ export interface components {
             proposedRateCents: number;
             scopeNote?: string;
             schedule: components["schemas"]["OfferSchedule"];
+        };
+        StartVideoCallResponse: {
+            call: components["schemas"]["VideoCallSession"];
+            message: components["schemas"]["Message"];
+        };
+        VideoCallSession: {
+            callId: string;
+            roomUrl: string;
+            token: string;
+            expiresAt: string;
+        };
+        VideoCallError: {
+            error: string;
+            reason?: string;
         };
         CreateJobResult: {
             jobs: components["schemas"]["Job"][];

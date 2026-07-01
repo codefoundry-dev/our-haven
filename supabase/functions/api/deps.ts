@@ -1,4 +1,5 @@
 import type { BackgroundCheckAdapter } from '../../../packages/domain/src/background-check/index.ts';
+import type { DailyAdapter } from '../_shared/daily.ts';
 import type { Env } from './config/env.ts';
 import type { Db } from './db/kysely.ts';
 import type { SupabaseHandles } from './supabase/admin.ts';
@@ -19,4 +20,7 @@ export interface AppDeps {
   /** Background-check vendor (Checkr) — webhook verify + normalize on the api
    *  host; the slow invitation call lives on the worker-tick (OH-185). */
   backgroundCheck: BackgroundCheckAdapter;
+  /** Embedded video vendor (Daily.co) — ad-hoc in-chat call rooms + per-join
+   *  meeting tokens (OH-216). */
+  daily: DailyAdapter;
 }

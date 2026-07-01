@@ -76,7 +76,7 @@ const ThreadSummarySchema = z
   .openapi('MessageThreadSummary');
 
 /** One delivered (redacted) message. The client derives "mine" from `senderUid`. */
-const MessageSchema = z
+export const MessageSchema = z
   .object({
     id: z.string(),
     threadId: z.string(),
@@ -85,6 +85,13 @@ const MessageSchema = z
     body: z.string(),
     /** True when this message had contact info redacted before delivery. */
     redacted: z.boolean(),
+    /** 'text' for a chat message; 'video_call' for an ad-hoc Daily.co call poke
+     *  (OH-216) — the client renders it as a "Join video call" bubble. */
+    kind: z.enum(['text', 'video_call']),
+    /** The generated call link a 'video_call' poke announces (join via
+     *  POST /v1/calls/{callId}/join); null for an ordinary message. The room URL +
+     *  join token are NOT here — they are minted through the join route. */
+    videoCallLinkId: z.string().nullable(),
     createdAt: z.string(),
   })
   .openapi('Message');
@@ -132,12 +139,14 @@ interface ThreadRow {
   last_message_redacted: boolean;
   created_at: Date | string;
 }
-interface MessageRow {
+export interface MessageRow {
   id: string;
   thread_id: string;
   sender_uid: string;
   body: string;
   redacted: boolean;
+  kind: 'text' | 'video_call';
+  video_call_link_id: string | null;
   created_at: Date | string;
 }
 
@@ -154,7 +163,16 @@ const THREAD_COLUMNS = [
   'created_at',
 ] as const;
 
-const MESSAGE_COLUMNS = ['id', 'thread_id', 'sender_uid', 'body', 'redacted', 'created_at'] as const;
+export const MESSAGE_COLUMNS = [
+  'id',
+  'thread_id',
+  'sender_uid',
+  'body',
+  'redacted',
+  'kind',
+  'video_call_link_id',
+  'created_at',
+] as const;
 
 /** Thrown inside the get-or-create when a concurrent request won the unique race. */
 class ThreadRaceError extends Error {}
@@ -174,13 +192,15 @@ function fullName(first: string | null, last: string | null): string | null {
   return name.length > 0 ? name : null;
 }
 
-function toMessage(row: MessageRow): z.infer<typeof MessageSchema> {
+export function toMessage(row: MessageRow): z.infer<typeof MessageSchema> {
   return {
     id: row.id,
     threadId: row.thread_id,
     senderUid: row.sender_uid,
     body: row.body,
     redacted: row.redacted,
+    kind: row.kind,
+    videoCallLinkId: row.video_call_link_id,
     createdAt: toIso(row.created_at),
   };
 }
@@ -558,6 +578,8 @@ export function registerMessagingRoutes(app: OpenAPIHono<AppEnv>): void {
         sender_uid: principal.uid,
         body: scan.redacted,
         redacted: scan.flagged,
+        kind: 'text',
+        video_call_link_id: null,
         created_at: inserted.created_at,
       }),
       201,

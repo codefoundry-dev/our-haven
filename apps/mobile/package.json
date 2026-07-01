@@ -3,6 +3,9 @@
   "main": "expo-router/entry",
   "version": "1.0.0",
   "dependencies": {
+    "@daily-co/daily-js": "^0.91.0",
+    "@daily-co/react-native-daily-js": "^0.86.0",
+    "@daily-co/react-native-webrtc": "^124.0.6-daily.2",
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo/ui": "~56.0.14",
     "@our-haven/openapi-types": "*",
@@ -26,6 +29,8 @@
     "react-dom": "19.2.3",
     "react-native": "0.85.3",
     "react-native-gesture-handler": "~2.31.1",
+    "react-native-background-timer": "^2.4.1",
+    "react-native-get-random-values": "^1.11.0",
     "react-native-reanimated": "4.3.1",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "4.25.2",
@@ -35,6 +40,7 @@
     "react-native-worklets": "0.8.3"
   },
   "devDependencies": {
+    "@config-plugins/react-native-webrtc": "^15.0.1",
     "@types/react": "~19.2.2",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~56.0.4",

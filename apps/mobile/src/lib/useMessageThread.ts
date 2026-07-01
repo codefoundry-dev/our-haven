@@ -34,6 +34,7 @@ import {
   openThread,
   sendMessage as apiSendMessage,
   sendOffer as apiSendOffer,
+  startThreadCall as apiStartThreadCall,
   withdrawOffer as apiWithdrawOffer,
   type ChatMessage,
   type ComposeOfferBody,
@@ -41,6 +42,7 @@ import {
   type EditOfferBody,
   type MessageThreadSummary,
   type Offer,
+  type StartVideoCallResult,
 } from '@/api/client';
 import { supabase } from '@/auth/supabase';
 
@@ -68,6 +70,9 @@ export interface UseMessageThreadResult {
   sending: boolean;
   /** Send a message; resolves once delivered (returns false if it was a no-op). */
   send: (body: string) => Promise<boolean>;
+  /** Start an ad-hoc video call; posts the Join poke to the transcript and returns
+   *  the initiator's join session (room URL + owner token). OH-216. */
+  startCall: () => Promise<StartVideoCallResult | null>;
   /** Re-pull the thread's Offers (the screen calls this on focus). */
   refetchOffers: () => Promise<void>;
   /** Compose + send a structured Offer. */
@@ -88,6 +93,10 @@ interface RealtimeMessageRow {
   sender_uid: string;
   body: string;
   redacted: boolean;
+  // OH-216: a 'video_call' poke row carries the generated call link the client
+  // renders as a "Join video call" bubble (REPLICA IDENTITY FULL publishes both).
+  kind: 'text' | 'video_call';
+  video_call_link_id: string | null;
   created_at: string;
 }
 
@@ -181,6 +190,8 @@ export function useMessageThread({ providerId, threadId: threadIdArg }: UseMessa
                 senderUid: row.sender_uid,
                 body: row.body,
                 redacted: row.redacted,
+                kind: row.kind ?? 'text',
+                videoCallLinkId: row.video_call_link_id ?? null,
                 createdAt: row.created_at,
               },
             ]);
@@ -218,6 +229,20 @@ export function useMessageThread({ providerId, threadId: threadIdArg }: UseMessa
     },
     [threadId],
   );
+
+  // Start a call: the Edge posts the "Join video call" poke + returns the
+  // initiator's session. Add the poke locally (Realtime will echo it — dedupe by
+  // id) so the bubble appears immediately; the screen opens the room with the
+  // returned room URL + token.
+  const startCall = useCallback(async (): Promise<StartVideoCallResult | null> => {
+    if (!threadId) return null;
+    const result = await apiStartThreadCall(threadId);
+    if (!seenIds.current.has(result.message.id)) {
+      seenIds.current.add(result.message.id);
+      setMessages((prev) => [...prev, result.message]);
+    }
+    return result;
+  }, [threadId]);
 
   const composeOffer = useCallback(
     async (body: ComposeOfferBody): Promise<Offer | null> => {
@@ -284,6 +309,7 @@ export function useMessageThread({ providerId, threadId: threadIdArg }: UseMessa
     error,
     sending,
     send,
+    startCall,
     refetchOffers,
     composeOffer,
     acceptOffer,

@@ -15,6 +15,7 @@ import { registerHealthRoutes } from './routes/health.ts';
 import { registerJobRoutes } from './routes/jobs.ts';
 import { registerMessagingRoutes } from './routes/messaging.ts';
 import { registerOfferRoutes } from './routes/offers.ts';
+import { registerVideoCallRoutes } from './routes/video-calls.ts';
 import { registerParentProfileRoutes } from './routes/parent-profile.ts';
 import { registerParentSubscriptionRoutes } from './routes/parent-subscription.ts';
 import { registerProviderCredentialsRoutes } from './routes/provider-credentials.ts';
@@ -88,6 +89,11 @@ export const openApiInfo = {
       name: 'messaging',
       description:
         'In-app Messaging (OH-205) — pre-acceptance Parent↔Caregiver Direct-Message threads (Caregiver-only, ADR-0011), Supabase Realtime delivery, and disintermediation redaction at write time (the unredacted original is queued to the service-role-only Trust & Safety flag table). Opening a thread + a Parent send are Parent-Subscription-gated.',
+    },
+    {
+      name: 'video',
+      description:
+        'Ad-hoc embedded video calls (OH-216; ADR-0008) — either party starts a short-lived (~30 min) Daily.co private-room call from a thread; the link generation is audit-logged for Trust & Safety (no content recorded) and a "Join video call" poke is delivered over the messaging Realtime pipe. Inherits the messaging Subscription gate; 503 when unconfigured.',
     },
     {
       name: 'jobs',
@@ -177,6 +183,7 @@ export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerConsultationBookingRoutes(v1);
   registerMessagingRoutes(v1);
   registerOfferRoutes(v1);
+  registerVideoCallRoutes(v1);
   registerJobRoutes(v1);
   registerContactUsRoutes(v1);
   registerScreeningRoutes(v1);

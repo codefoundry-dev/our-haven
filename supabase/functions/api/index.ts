@@ -7,6 +7,7 @@
 // and is intentionally excluded from the Node typecheck (it references the
 // `Deno` global). Validated by `supabase functions serve` / deploy.
 import { createCheckrAdapter } from '../_shared/checkr.ts';
+import { createDailyAdapter } from '../_shared/daily.ts';
 import { buildApp } from './app.ts';
 import { loadEnv } from './config/env.ts';
 import { createDb } from './db/kysely.ts';
@@ -39,7 +40,12 @@ function boot(): (req: Request) => Response | Promise<Response> {
     webhookSecret: env.CHECKR_WEBHOOK_SECRET,
     packageSlug: env.CHECKR_PACKAGE,
   });
-  return mountUnderSlug(buildApp({ env, db, supabase, stripe, backgroundCheck }), 'api').fetch;
+  // Embedded video (OH-216). Optional key — the video route 503s when unset.
+  const daily = createDailyAdapter({
+    apiKey: env.DAILY_API_KEY,
+    apiBase: env.DAILY_API_BASE,
+  });
+  return mountUnderSlug(buildApp({ env, db, supabase, stripe, backgroundCheck, daily }), 'api').fetch;
 }
 
 // A boot failure is almost always a missing/invalid secret (DATABASE_URL,

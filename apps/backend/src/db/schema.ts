@@ -473,6 +473,13 @@ export interface MessagesTable {
   sender_uid: string;
   body: string;
   redacted: ColumnType<boolean, boolean | undefined, boolean>;
+  // 'text' for an ordinary chat message; 'video_call' for the ad-hoc Daily.co
+  // call poke that carries `video_call_link_id` (OH-216). The client renders a
+  // 'video_call' row as a "Join video call" bubble. Defaults to 'text'.
+  kind: ColumnType<'text' | 'video_call', 'text' | 'video_call' | undefined, 'text' | 'video_call'>;
+  // The generated call link a 'video_call' poke announces (NULL otherwise). The
+  // room URL + join tokens are NOT here — they are minted through the Edge route.
+  video_call_link_id: ColumnType<string | null, string | null | undefined, string | null>;
   created_at: Generated<Date>;
 }
 
@@ -496,6 +503,26 @@ export interface MessageFlagsTable {
   created_at: Generated<Date>;
   reviewed_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
   reviewed_by: string | null;
+}
+
+/**
+ * Ad-hoc video-call link-generation audit log (OH-216; ADR-0008 § Audit posture;
+ * CONTEXT § Video call). One row per call started from a thread — the timestamp,
+ * thread, initiator, and participants of the invitation, for Trust & Safety. Call
+ * CONTENT is never recorded. Service-role-only (RLS enabled, no policy); the room
+ * URL + per-join meeting tokens are minted on Daily through the Edge route, not
+ * published to Realtime.
+ */
+export interface VideoCallLinksTable {
+  id: Generated<string>;
+  thread_id: string;
+  initiator_uid: string;
+  participant_uids: ColumnType<string[], string[], string[]>;
+  provider: ColumnType<string, string | undefined, string>;
+  daily_room_name: string;
+  daily_room_url: string;
+  created_at: Generated<Date>;
+  expires_at: ColumnType<Date, Date | string, Date | string>;
 }
 
 /** One concrete session slot on an Offer's schedule (jsonb; mirrors the domain
@@ -727,6 +754,7 @@ export interface Database {
   message_threads: MessageThreadsTable;
   messages: MessagesTable;
   message_flags: MessageFlagsTable;
+  video_call_links: VideoCallLinksTable;
   offers: OffersTable;
   jobs: JobsTable;
   applications: ApplicationsTable;

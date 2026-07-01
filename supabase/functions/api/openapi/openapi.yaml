@@ -56,6 +56,13 @@ tags:
       delivery, and disintermediation redaction at write time (the unredacted
       original is queued to the service-role-only Trust & Safety flag table).
       Opening a thread + a Parent send are Parent-Subscription-gated.
+  - name: video
+    description: Ad-hoc embedded video calls (OH-216; ADR-0008) — either party
+      starts a short-lived (~30 min) Daily.co private-room call from a thread;
+      the link generation is audit-logged for Trust & Safety (no content
+      recorded) and a "Join video call" poke is delivered over the messaging
+      Realtime pipe. Inherits the messaging Subscription gate; 503 when
+      unconfigured.
   - name: jobs
     description: Posted Jobs (OH-209) — a Parent composes + publishes a Job open to
       verified in-category Caregivers (Category + ZIP + scope + concrete
@@ -2812,6 +2819,14 @@ components:
           type: string
         redacted:
           type: boolean
+        kind:
+          type: string
+          enum:
+            - text
+            - video_call
+        videoCallLinkId:
+          type: string
+          nullable: true
         createdAt:
           type: string
       required:
@@ -2820,6 +2835,8 @@ components:
         - senderUid
         - body
         - redacted
+        - kind
+        - videoCallLinkId
         - createdAt
     SendMessageRequest:
       type: object
@@ -3116,6 +3133,41 @@ components:
       required:
         - proposedRateCents
         - schedule
+    StartVideoCallResponse:
+      type: object
+      properties:
+        call:
+          $ref: "#/components/schemas/VideoCallSession"
+        message:
+          $ref: "#/components/schemas/Message"
+      required:
+        - call
+        - message
+    VideoCallSession:
+      type: object
+      properties:
+        callId:
+          type: string
+        roomUrl:
+          type: string
+        token:
+          type: string
+        expiresAt:
+          type: string
+      required:
+        - callId
+        - roomUrl
+        - token
+        - expiresAt
+    VideoCallError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
     CreateJobResult:
       type: object
       properties:
@@ -6902,6 +6954,125 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OfferError"
+  /v1/threads/{threadId}/calls:
+    post:
+      tags:
+        - video
+      summary: Start an ad-hoc video call in a thread — OH-216
+      description: Either participant starts a short-lived (~30 min) Daily.co video
+        call from the thread. Logs the link generation for Trust & Safety (no
+        content recorded) and posts a "Join video call" poke that Realtime
+        delivers to the counterparty. Returns the initiator's join session. A
+        Parent start is Parent-Subscription-gated (402); the supply side is not.
+        404 if the thread is not the caller's. 503 if video is not configured.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: threadId
+          in: path
+      responses:
+        "201":
+          description: Call started — the initiator's join session + the posted poke
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StartVideoCallResponse"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoCallError"
+        "402":
+          description: No active Parent Subscription — video gated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoCallError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoCallError"
+        "404":
+          description: Thread not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoCallError"
+        "503":
+          description: Video not configured (DAILY_API_KEY unset)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoCallError"
+  /v1/calls/{callId}/join:
+    post:
+      tags:
+        - video
+      summary: Join (or re-join) an ad-hoc video call — OH-216
+      description: A participant mints a fresh per-user Daily meeting token for a
+        still-live call and receives the room URL. A Parent join is
+        Parent-Subscription-gated (402); the supply side is not. 404 if the call
+        is unknown or not the caller's thread; 410 once the call has expired.
+        503 if video is not configured.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: callId
+          in: path
+      responses:
+        "200":
+          description: A fresh join session for the call
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoCallSession"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoCallError"
+        "402":
+          description: No active Parent Subscription — video gated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoCallError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoCallError"
+        "404":
+          description: Call not found (or not the caller's thread)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoCallError"
+        "410":
+          description: The call has expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoCallError"
+        "503":
+          description: Video not configured (DAILY_API_KEY unset)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoCallError"
   /v1/jobs:
     post:
       tags:

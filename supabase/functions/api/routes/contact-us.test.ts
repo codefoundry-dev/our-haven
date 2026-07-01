@@ -53,6 +53,7 @@ function makeDeps(opts: { db?: AppDeps['db']; notifyUid?: string } = {}): AppDep
     supabase: stub,
     stripe: stub,
     backgroundCheck: stub,
+    daily: stub,
   };
 }
 
