@@ -21,6 +21,7 @@ import { PricingSummary } from '@/components/ui/PricingSummary';
 import { StatusPill } from '@/components/ui/StatusPill';
 import { CancelSheet } from '@/components/parent/CancelSheet';
 import { DisputeSheet } from '@/components/parent/DisputeSheet';
+import { NoShowSheet } from '@/components/parent/NoShowSheet';
 import { AdjustTimeSheet } from '@/components/parent/AdjustTimeSheet';
 import { ApiError, confirmBookingHours, rescindReduceRequest } from '@/api/client';
 import { formatMoney } from '@/lib/offerCopy';
@@ -44,6 +45,7 @@ export function ParentBookingDetailWeb() {
 
   const [cancelOpen, setCancelOpen] = useState(false);
   const [disputeOpen, setDisputeOpen] = useState(false);
+  const [noShowOpen, setNoShowOpen] = useState(false);
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -257,6 +259,27 @@ export function ParentBookingDetailWeb() {
               </Card>
             ) : null}
 
+            {actions.canReportNoShow ? (
+              <Card radius={radii.xl} padding={6} style={styles.sideCard}>
+                <Pressable
+                  onPress={() => setNoShowOpen(true)}
+                  accessibilityRole="button"
+                  style={({ pressed }) => [styles.manageRow, { opacity: pressed ? 0.85 : 1 }]}
+                >
+                  <View style={styles.manageIcon}>
+                    <Icon name="flag" size={17} color={colors.ink} />
+                  </View>
+                  <View style={styles.manageText}>
+                    <Text style={styles.manageLabel}>Report a no-show</Text>
+                    <Text style={styles.manageSub}>
+                      {booking.kind === 'caregiver' ? 'Get a full refund if they didn’t turn up' : 'Flag that they didn’t turn up'}
+                    </Text>
+                  </View>
+                  <Icon name="chevron-right" size={16} color={colors.ink3} />
+                </Pressable>
+              </Card>
+            ) : null}
+
             {actions.canDispute ? (
               <Card radius={radii.xl} padding={6} style={styles.sideCard}>
                 <Pressable
@@ -300,9 +323,21 @@ export function ParentBookingDetailWeb() {
       <DisputeSheet
         visible={disputeOpen}
         bookingId={bookingId}
+        hideNoShowReason={actions.canReportNoShow}
         onClose={() => setDisputeOpen(false)}
         onDisputed={() => {
           setDisputeOpen(false);
+          void reload();
+        }}
+      />
+      <NoShowSheet
+        visible={noShowOpen}
+        bookingId={bookingId}
+        caregiver={booking.kind === 'caregiver'}
+        counterpartyName={booking.counterpartyName}
+        onClose={() => setNoShowOpen(false)}
+        onReported={() => {
+          setNoShowOpen(false);
           void reload();
         }}
       />

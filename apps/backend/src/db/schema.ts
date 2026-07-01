@@ -62,6 +62,9 @@ export interface ProvidersTable {
   categories: string[] | null; // role=caregiver — one or more (babysitter|tutor|nanny)
   specialty: string | null; // role=provider
   state: string;
+  // Listing-suspension marker (OH-213): set when active no-show flags reach the
+  // suspend threshold; `isListable` treats a non-null value as unlistable.
+  suspended_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }
@@ -270,6 +273,8 @@ export interface BookingsTable {
   // The Offer's per-child, per-hour surcharge, snapshotted at Award (NULL ⇒ 0) —
   // lets adjust-time re-price the Booking for the new duration self-contained.
   per_child_surcharge_cents: number | null;
+  // Stamp set when a no-show cancels this Booking (OH-213). NULL otherwise.
+  no_show_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
   created_at: Generated<Date>;
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
 }
@@ -770,6 +775,49 @@ export interface BookingSeriesTable {
   created_at: Generated<Date>;
 }
 
+/**
+ * The admin dispute queue (OH-213). One row per filed dispute — an in-window
+ * payout-holding dispute, an out-of-window escalation, or a no-show — polymorphic
+ * over its subject (`booking` | `job`). Service-role-only (read through the Edge).
+ */
+export interface DisputesTable {
+  id: Generated<string>;
+  subject_type: 'booking' | 'job';
+  subject_id: string;
+  filed_by_uid: string;
+  reason: 'overcharged' | 'no-show' | 'safety' | 'quality' | 'other';
+  details: string | null;
+  in_window: ColumnType<boolean, boolean | undefined, boolean>;
+  hold_applied: ColumnType<boolean, boolean | undefined, boolean>;
+  status: ColumnType<
+    'open' | 'resolved' | 'dismissed',
+    'open' | 'resolved' | 'dismissed' | undefined,
+    'open' | 'resolved' | 'dismissed'
+  >;
+  resolution: 'released' | 'refunded' | 'clawback' | 'dismissed' | null;
+  resolution_note: string | null;
+  resolved_by_uid: string | null;
+  resolved_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  created_at: Generated<Date>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
+/**
+ * The supply-quality auto-flag ledger (OH-213). A no-show inserts one `active`
+ * row against the supply's `providers.id`; the count of active no-show flags
+ * drives standing (2 → manual review, 3 → suspend). Service-role-only.
+ */
+export interface SupplyFlagsTable {
+  id: Generated<string>;
+  provider_id: string;
+  kind: 'caregiver' | 'provider';
+  reason: string;
+  booking_id: string | null;
+  filed_by_uid: string;
+  status: ColumnType<'active' | 'cleared', 'active' | 'cleared' | undefined, 'active' | 'cleared'>;
+  created_at: Generated<Date>;
+}
+
 export interface Database {
   auth_email_otps: AuthEmailOtpsTable;
   auth_step_up_grants: AuthStepUpGrantsTable;
@@ -801,4 +849,6 @@ export interface Database {
   notification_outbox: NotificationOutboxTable;
   notification_push_tokens: NotificationPushTokensTable;
   notification_web_push_subscriptions: NotificationWebPushSubscriptionsTable;
+  disputes: DisputesTable;
+  supply_flags: SupplyFlagsTable;
 }

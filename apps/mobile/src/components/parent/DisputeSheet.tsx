@@ -10,19 +10,20 @@ import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, TextInput, View 
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Icon } from '@/components/Icon';
-import {
-  ApiError,
-  disputeBooking,
-  type BookingDisputeReason,
-  type BookingDisputeResult,
-} from '@/api/client';
+import { ApiError, disputeBooking, disputeJob, type BookingDisputeReason } from '@/api/client';
 import { colors, fonts, radii, shadow } from '@/theme/tokens';
 
 export interface DisputeSheetProps {
   visible: boolean;
-  bookingId: string | null;
+  /** File a Booking dispute (in-window hold / escalation). */
+  bookingId?: string | null;
+  /** File a past-Job dispute instead (`Job.dispute` — admin escalation, no money). */
+  jobId?: string | null;
+  /** Hide the "No-show" chip — used when a dedicated Report-no-show action (full
+   *  refund) is available, so the two intents don't collide (OH-213). */
+  hideNoShowReason?: boolean;
   onClose: () => void;
-  onDisputed: (result: BookingDisputeResult) => void;
+  onDisputed: () => void;
 }
 
 const REASONS: { value: BookingDisputeReason; label: string }[] = [
@@ -33,25 +34,28 @@ const REASONS: { value: BookingDisputeReason; label: string }[] = [
   { value: 'other', label: 'Other' },
 ];
 
-export function DisputeSheet({ visible, bookingId, onClose, onDisputed }: DisputeSheetProps) {
+export function DisputeSheet({ visible, bookingId, jobId, hideNoShowReason, onClose, onDisputed }: DisputeSheetProps) {
+  const reasons = hideNoShowReason ? REASONS.filter((r) => r.value !== 'no-show') : REASONS;
   const [reason, setReason] = useState<BookingDisputeReason | null>(null);
   const [details, setDetails] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const submit = async () => {
-    if (!bookingId || !reason || submitting) return;
+    if ((!bookingId && !jobId) || !reason || submitting) return;
+    const detailArg = details.trim() ? details.trim() : undefined;
     setSubmitting(true);
     setError(null);
     try {
-      const result = await disputeBooking(bookingId, {
-        reason,
-        details: details.trim() ? details.trim() : undefined,
-      });
-      onDisputed(result);
+      if (jobId) {
+        await disputeJob(jobId, { reason, details: detailArg });
+      } else {
+        await disputeBooking(bookingId!, { reason, details: detailArg });
+      }
+      onDisputed();
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
-        setError('This booking can’t be disputed right now.');
+        setError('This can’t be disputed right now.');
       } else {
         setError(e instanceof ApiError ? e.message : 'Could not file the dispute.');
       }
@@ -72,7 +76,7 @@ export function DisputeSheet({ visible, bookingId, onClose, onDisputed }: Disput
         <View style={styles.body}>
           <Text style={styles.label}>What’s the problem?</Text>
           <View style={styles.chips}>
-            {REASONS.map((r) => {
+            {reasons.map((r) => {
               const on = reason === r.value;
               return (
                 <Pressable

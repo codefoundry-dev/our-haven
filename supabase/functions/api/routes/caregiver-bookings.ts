@@ -138,6 +138,7 @@ interface CaregiverRow {
   id: string;
   uid: string;
   role: 'caregiver' | 'provider';
+  suspended_at: Date | string | null;
 }
 
 interface BookingRow {
@@ -251,7 +252,7 @@ function fullName(first: string | null, last: string | null): string | null {
 async function loadCaregiverByUid(db: Db, uid: string): Promise<CaregiverRow | null> {
   const row = (await db
     .selectFrom('providers')
-    .select(['id', 'uid', 'role'])
+    .select(['id', 'uid', 'role', 'suspended_at'])
     .where('uid', '=', uid)
     .executeTakeFirst()) as CaregiverRow | undefined;
   if (!row || row.role !== 'caregiver') return null;
@@ -389,7 +390,7 @@ const acceptRoute = createRoute({
   responses: {
     200: { description: 'Accepted', content: json(TransitionResponse) },
     401: { description: 'Unauthenticated', content: json(ErrorResponse) },
-    403: { description: 'Wrong role', content: json(ErrorResponse) },
+    403: { description: 'Wrong role, or the Caregiver is suspended', content: json(ErrorResponse) },
     404: { description: "Not found (or not the caller's)", content: json(ErrorResponse) },
     409: { description: 'Not acceptable from the current state', content: json(ErrorResponse) },
   },
@@ -531,6 +532,11 @@ export function registerCaregiverBookingRoutes(app: OpenAPIHono<AppEnv>): void {
 
     const caregiver = await loadCaregiverByUid(db, principal.uid);
     if (!caregiver) return c.json({ error: 'booking_not_found' }, 404);
+    // A suspended Caregiver (OH-213 — 3 no-show flags) cannot take on new work;
+    // in-flight already-accepted Bookings are unaffected so Parents aren't stranded.
+    if (caregiver.suspended_at != null) {
+      return c.json({ error: 'suspended', reason: 'your listing is suspended pending review' }, 403);
+    }
     const row = await loadOwnedBooking(db, bookingId, caregiver.id);
     if (!row) return c.json({ error: 'booking_not_found' }, 404);
 

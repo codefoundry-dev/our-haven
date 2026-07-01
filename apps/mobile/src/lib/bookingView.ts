@@ -47,18 +47,28 @@ export type BookingActions = {
   canAdjustTime: boolean;
   /** A pending shorten the Parent can rescind before the Caregiver acts. */
   hasPendingTimeChange: boolean;
+  /** Report a no-show — an `accepted` Booking once its start time has passed (OH-213). */
+  canReportNoShow: boolean;
 };
 
 const ACTIVE = new Set(['requested', 'accepted', 'in-progress', 'awaiting-confirmation']);
 const DISPUTABLE_WINDOW = new Set(['accepted', 'awaiting-confirmation', 'completed']);
 
-export function bookingActionsFor(b: BookingDetail): BookingActions {
+/** A Booking's start as a UTC instant (ms) — mirrors the Edge's tz-agnostic v1 clock. */
+export function bookingStartMs(b: Pick<BookingDetail, 'scheduledDate' | 'startMin'>): number {
+  const [y, m, d] = b.scheduledDate.split('-').map(Number);
+  return Date.UTC(y ?? 1970, (m ?? 1) - 1, d ?? 1, 0, b.startMin, 0, 0);
+}
+
+export function bookingActionsFor(b: BookingDetail, now: number = Date.now()): BookingActions {
   return {
     canCancel: b.kind === 'caregiver' ? ACTIVE.has(b.state) : b.state === 'accepted',
     canConfirm: b.kind === 'caregiver' && b.state === 'awaiting-confirmation',
     canDispute: b.kind === 'caregiver' && DISPUTABLE_WINDOW.has(b.state),
     canAdjustTime: b.kind === 'caregiver' && b.state === 'accepted' && b.pendingTimeChange == null,
     hasPendingTimeChange: b.pendingTimeChange != null,
+    // Reportable once the session should have started (at/after start), while accepted.
+    canReportNoShow: b.state === 'accepted' && bookingStartMs(b) <= now,
   };
 }
 

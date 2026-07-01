@@ -3767,6 +3767,83 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/bookings/{bookingId}/report-no-show": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report a supply no-show → full refund + supply flag — OH-213
+         * @description Reports that the Caregiver/Provider did not show for an `accepted` Booking (CONTEXT § No-show). A Caregiver no-show → the Booking is cancelled, the authorization hold is released in full, and the Caregiver is auto-flagged (2 flags → manual review, 3 → suspension). A Provider consultation no-show is a supply-quality flag only (no money). Reportable only at/after the scheduled start; 409 otherwise.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    bookingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No-show recorded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingReportNoShow"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+                /** @description Booking not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+                /** @description Not reportable (wrong state or before the scheduled start) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/bookings/{bookingId}/extend": {
         parameters: {
             query?: never;
@@ -4098,7 +4175,7 @@ export interface paths {
                         "application/json": components["schemas"]["CaregiverBookingError"];
                     };
                 };
-                /** @description Wrong role */
+                /** @description Wrong role, or the Caregiver is suspended */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -6001,6 +6078,87 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/jobs/{jobId}/dispute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dispute a past Job (charge/billing) — admin escalation — OH-213
+         * @description Files a charge/billing complaint against one of the caller's posted Jobs (`Job.dispute`, ADR-0013 amended / PRD story 132). A Job carries no on-platform money, so this is purely an admin-escalation record — it never moves money. Same reason chip + free text as the Booking dispute. 404 when the Job is not the caller's.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["JobDisputeRequest"];
+                };
+            };
+            responses: {
+                /** @description Dispute filed */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobDispute"];
+                    };
+                };
+                /** @description Invalid dispute */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobError"];
+                    };
+                };
+                /** @description Job not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/jobs/{jobId}/applications": {
         parameters: {
             query?: never;
@@ -7283,6 +7441,155 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/disputes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List disputes (admin queue) — OH-213
+         * @description The dispute queue — in-window holds, out-of-window escalations, past-Job complaints, and no-shows. Defaults to `open`; pass `?status=` to view resolved/dismissed.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    status?: "open" | "resolved" | "dismissed";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The dispute queue */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminDisputeList"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminDisputeError"];
+                    };
+                };
+                /** @description Not an admin (or no aal2/TOTP) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminDisputeError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/disputes/{disputeId}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve a dispute — release / refund / clawback / dismiss — OH-213
+         * @description Resolves an open dispute. For a `disputed` Booking (held payout) `released` captures the payout to the Caregiver and `refunded`/`clawback` refunds the Parent; an out-of-window escalation refunds (or dismisses); a no-show `dismissed` clears the supply flag + lifts any suspension. Step-up-MFA gated (money movement).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    disputeId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AdminDisputeResolveRequest"];
+                };
+            };
+            responses: {
+                /** @description Resolved */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminDisputeResolved"];
+                    };
+                };
+                /** @description Invalid resolution for this subject */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminDisputeError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminDisputeError"];
+                    };
+                };
+                /** @description Not an admin / step-up required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminDisputeError"];
+                    };
+                };
+                /** @description Dispute not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminDisputeError"];
+                    };
+                };
+                /** @description Already resolved, or not resolvable that way */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminDisputeError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -8012,6 +8319,14 @@ export interface components {
             reason: "overcharged" | "no-show" | "safety" | "quality" | "other";
             details?: string;
         };
+        BookingReportNoShow: {
+            id: string;
+            /** @enum {string} */
+            state: "cancelled";
+            refunded: boolean;
+            /** @enum {string} */
+            supplyStanding: "ok" | "manual-review" | "suspended";
+        };
         BookingExtend: {
             id: string;
             /** @enum {string} */
@@ -8323,6 +8638,16 @@ export interface components {
         JobListItem: components["schemas"]["Job"] & {
             applicationCount: number;
         };
+        JobDispute: {
+            jobId: string;
+            /** @enum {boolean} */
+            escalation: true;
+        };
+        JobDisputeRequest: {
+            /** @enum {string} */
+            reason: "overcharged" | "no-show" | "safety" | "quality" | "other";
+            details?: string;
+        };
         ApplicationList: {
             applications: components["schemas"]["Application"][];
         };
@@ -8630,6 +8955,40 @@ export interface components {
             /** @default state_sales_tax */
             registrationType: string;
             activeFromUnixSec?: number;
+        };
+        AdminDisputeList: {
+            disputes: components["schemas"]["AdminDispute"][];
+        };
+        AdminDispute: {
+            id: string;
+            /** @enum {string} */
+            subjectType: "booking" | "job";
+            subjectId: string;
+            filedByUid: string;
+            /** @enum {string} */
+            reason: "overcharged" | "no-show" | "safety" | "quality" | "other";
+            details: string | null;
+            inWindow: boolean;
+            holdApplied: boolean;
+            /** @enum {string} */
+            status: "open" | "resolved" | "dismissed";
+            createdAt: string;
+        };
+        AdminDisputeError: {
+            error: string;
+            reason?: string;
+        };
+        AdminDisputeResolved: {
+            id: string;
+            /** @enum {string} */
+            status: "open" | "resolved" | "dismissed";
+            /** @enum {string} */
+            resolution: "released" | "refunded" | "clawback" | "dismissed";
+        };
+        AdminDisputeResolveRequest: {
+            /** @enum {string} */
+            resolution: "released" | "refunded" | "clawback" | "dismissed";
+            note?: string;
         };
     };
     responses: never;

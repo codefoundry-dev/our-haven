@@ -4,6 +4,7 @@ import { cors } from 'hono/cors';
 import type { AppEnv } from './context.ts';
 import type { AppDeps } from './deps.ts';
 import { NotConfiguredError } from './errors.ts';
+import { registerAdminDisputeRoutes } from './routes/admin/disputes.ts';
 import { registerAdminStripeTaxRoutes } from './routes/admin/stripe-tax.ts';
 import { registerAuthRoutes } from './routes/auth.ts';
 import { registerBookingRoutes } from './routes/bookings.ts';
@@ -206,6 +207,7 @@ export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerStripeBillingWebhookRoutes(v1);
   registerCheckrWebhookRoutes(v1);
   registerAdminStripeTaxRoutes(v1);
+  registerAdminDisputeRoutes(v1);
   app.route('/v1', v1);
 
   // Bearer security scheme for the Supabase access token (ADR-0010 § 62).

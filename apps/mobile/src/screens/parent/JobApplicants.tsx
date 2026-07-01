@@ -23,6 +23,7 @@ import { CategoryChip, CATEGORY_TONE } from '@/components/ui/CategoryChip';
 import { RatingValue } from '@/components/ui/StarRating';
 import { AwardSheet } from '@/components/parent/AwardSheet';
 import { CounterSheet } from '@/components/parent/CounterSheet';
+import { DisputeSheet } from '@/components/parent/DisputeSheet';
 import {
   ApiError,
   closeJob,
@@ -59,6 +60,7 @@ export default function JobApplicantsScreen() {
   const [awardApp, setAwardApp] = useState<JobApplication | null>(null);
   const [counterApp, setCounterApp] = useState<JobApplication | null>(null);
   const [confirmClose, setConfirmClose] = useState(false);
+  const [disputeOpen, setDisputeOpen] = useState(false);
   const [closing, setClosing] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -179,7 +181,17 @@ export default function JobApplicantsScreen() {
               <Text style={[styles.manageText, { color: colors.danger }]}>Close</Text>
             </Pressable>
           </View>
-        ) : null}
+        ) : (
+          <View style={styles.manageRow}>
+            <Pressable
+              onPress={() => setDisputeOpen(true)}
+              style={({ pressed }) => [styles.manageBtn, { opacity: pressed ? 0.85 : 1 }]}
+            >
+              <Icon name="shield" size={15} color={colors.ink} />
+              <Text style={styles.manageText}>Report a billing issue</Text>
+            </Pressable>
+          </View>
+        )}
       </View>
 
       {actionError ? <Text style={styles.bannerError}>{actionError}</Text> : null}
@@ -244,6 +256,17 @@ export default function JobApplicantsScreen() {
         offer={counterApp?.offer ?? null}
         onClose={() => setCounterApp(null)}
         onSubmit={doCounter}
+      />
+
+      {/* Past-Job billing dispute (OH-213 — admin escalation, no money) */}
+      <DisputeSheet
+        visible={disputeOpen}
+        jobId={job.id}
+        onClose={() => setDisputeOpen(false)}
+        onDisputed={() => {
+          setDisputeOpen(false);
+          setActionError(null);
+        }}
       />
 
       {/* Close confirmation (story 92) */}

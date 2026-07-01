@@ -3010,6 +3010,28 @@ components:
           maxLength: 1000
       required:
         - reason
+    BookingReportNoShow:
+      type: object
+      properties:
+        id:
+          type: string
+        state:
+          type: string
+          enum:
+            - cancelled
+        refunded:
+          type: boolean
+        supplyStanding:
+          type: string
+          enum:
+            - ok
+            - manual-review
+            - suspended
+      required:
+        - id
+        - state
+        - refunded
+        - supplyStanding
     BookingExtend:
       type: object
       properties:
@@ -4070,6 +4092,34 @@ components:
               type: integer
           required:
             - applicationCount
+    JobDispute:
+      type: object
+      properties:
+        jobId:
+          type: string
+        escalation:
+          type: boolean
+          enum:
+            - true
+      required:
+        - jobId
+        - escalation
+    JobDisputeRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          enum:
+            - overcharged
+            - no-show
+            - safety
+            - quality
+            - other
+        details:
+          type: string
+          maxLength: 1000
+      required:
+        - reason
     ApplicationList:
       type: object
       properties:
@@ -4999,6 +5049,109 @@ components:
           type: integer
       required:
         - state
+    AdminDisputeList:
+      type: object
+      properties:
+        disputes:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminDispute"
+      required:
+        - disputes
+    AdminDispute:
+      type: object
+      properties:
+        id:
+          type: string
+        subjectType:
+          type: string
+          enum:
+            - booking
+            - job
+        subjectId:
+          type: string
+        filedByUid:
+          type: string
+        reason:
+          type: string
+          enum:
+            - overcharged
+            - no-show
+            - safety
+            - quality
+            - other
+        details:
+          type: string
+          nullable: true
+        inWindow:
+          type: boolean
+        holdApplied:
+          type: boolean
+        status:
+          type: string
+          enum:
+            - open
+            - resolved
+            - dismissed
+        createdAt:
+          type: string
+      required:
+        - id
+        - subjectType
+        - subjectId
+        - filedByUid
+        - reason
+        - details
+        - inWindow
+        - holdApplied
+        - status
+        - createdAt
+    AdminDisputeError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
+    AdminDisputeResolved:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum:
+            - open
+            - resolved
+            - dismissed
+        resolution:
+          type: string
+          enum:
+            - released
+            - refunded
+            - clawback
+            - dismissed
+      required:
+        - id
+        - status
+        - resolution
+    AdminDisputeResolveRequest:
+      type: object
+      properties:
+        resolution:
+          type: string
+          enum:
+            - released
+            - refunded
+            - clawback
+            - dismissed
+        note:
+          type: string
+          maxLength: 1000
+      required:
+        - resolution
   parameters: {}
 paths:
   /v1/healthz:
@@ -7644,6 +7797,57 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/BookingError"
+  /v1/bookings/{bookingId}/report-no-show:
+    post:
+      tags:
+        - bookings
+      summary: Report a supply no-show → full refund + supply flag — OH-213
+      description: Reports that the Caregiver/Provider did not show for an `accepted`
+        Booking (CONTEXT § No-show). A Caregiver no-show → the Booking is
+        cancelled, the authorization hold is released in full, and the Caregiver
+        is auto-flagged (2 flags → manual review, 3 → suspension). A Provider
+        consultation no-show is a supply-quality flag only (no money).
+        Reportable only at/after the scheduled start; 409 otherwise.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: bookingId
+          in: path
+      responses:
+        "200":
+          description: No-show recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingReportNoShow"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingError"
+        "404":
+          description: Booking not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingError"
+        "409":
+          description: Not reportable (wrong state or before the scheduled start)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingError"
   /v1/bookings/{bookingId}/extend:
     post:
       tags:
@@ -7873,7 +8077,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/CaregiverBookingError"
         "403":
-          description: Wrong role
+          description: Wrong role, or the Caregiver is suspended
           content:
             application/json:
               schema:
@@ -9157,6 +9361,62 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/JobError"
+  /v1/jobs/{jobId}/dispute:
+    post:
+      tags:
+        - jobs
+      summary: Dispute a past Job (charge/billing) — admin escalation — OH-213
+      description: Files a charge/billing complaint against one of the caller's posted
+        Jobs (`Job.dispute`, ADR-0013 amended / PRD story 132). A Job carries no
+        on-platform money, so this is purely an admin-escalation record — it
+        never moves money. Same reason chip + free text as the Booking dispute.
+        404 when the Job is not the caller's.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: jobId
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JobDisputeRequest"
+      responses:
+        "200":
+          description: Dispute filed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobDispute"
+        "400":
+          description: Invalid dispute
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobError"
+        "404":
+          description: Job not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobError"
   /v1/jobs/{jobId}/applications:
     get:
       tags:
@@ -10058,3 +10318,104 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AdminStripeTaxError"
+  /v1/admin/disputes:
+    get:
+      tags:
+        - admin
+      summary: List disputes (admin queue) — OH-213
+      description: The dispute queue — in-window holds, out-of-window escalations,
+        past-Job complaints, and no-shows. Defaults to `open`; pass `?status=`
+        to view resolved/dismissed.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            enum:
+              - open
+              - resolved
+              - dismissed
+          required: false
+          name: status
+          in: query
+      responses:
+        "200":
+          description: The dispute queue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDisputeList"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDisputeError"
+        "403":
+          description: Not an admin (or no aal2/TOTP)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDisputeError"
+  /v1/admin/disputes/{disputeId}/resolve:
+    post:
+      tags:
+        - admin
+      summary: Resolve a dispute — release / refund / clawback / dismiss — OH-213
+      description: Resolves an open dispute. For a `disputed` Booking (held payout)
+        `released` captures the payout to the Caregiver and
+        `refunded`/`clawback` refunds the Parent; an out-of-window escalation
+        refunds (or dismisses); a no-show `dismissed` clears the supply flag +
+        lifts any suspension. Step-up-MFA gated (money movement).
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: disputeId
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminDisputeResolveRequest"
+      responses:
+        "200":
+          description: Resolved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDisputeResolved"
+        "400":
+          description: Invalid resolution for this subject
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDisputeError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDisputeError"
+        "403":
+          description: Not an admin / step-up required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDisputeError"
+        "404":
+          description: Dispute not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDisputeError"
+        "409":
+          description: Already resolved, or not resolvable that way
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDisputeError"

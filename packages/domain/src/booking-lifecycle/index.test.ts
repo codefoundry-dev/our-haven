@@ -10,7 +10,9 @@ import {
   approveBookingTimeReduction,
   cancelBookingTimeReductionRequest,
   canFileBillingComplaint,
+  canReportNoShow,
   declineBookingTimeReduction,
+  evaluateSupplyStanding,
   expandRecurrence,
   extendBookingTime,
   initialBookingSideEffects,
@@ -30,6 +32,7 @@ import {
   type BookingShape,
   type BookingState,
   type CaregiverOrigin,
+  type DisputeResolutionOutcome,
   type RecurrenceRule,
 } from './index.js';
 
@@ -41,6 +44,15 @@ const PROVIDER: BookingShape = { kind: 'provider' };
 
 function at(shape: BookingShape, state: BookingState): Booking {
   return { ...shape, state };
+}
+
+/**
+ * Build a `BookingEvent` from a bare event type for the exhaustive matrices.
+ * `admin-resolve-dispute` carries a required `outcome`; default it to `rejected`
+ * (the completed/capture branch) so the matrix exercises a real resolution.
+ */
+function evt(type: BookingEventType): BookingEvent {
+  return type === 'admin-resolve-dispute' ? { type, outcome: 'rejected' } : { type };
 }
 
 const REQUESTED_AT = new Date('2026-06-25T12:00:00.000Z');
@@ -93,7 +105,7 @@ describe('initialBookingSideEffects', () => {
 // ── Predicates ───────────────────────────────────────────────────────────────
 
 describe('predicates', () => {
-  it('isBookingTerminal: declined/expired/completed/cancelled/disputed are terminal', () => {
+  it('isBookingTerminal: declined/expired/completed/cancelled are terminal', () => {
     for (const s of BOOKING_STATES) {
       expect(isBookingTerminal(s)).toBe(
         (BOOKING_TERMINAL_STATES as readonly string[]).includes(s),
@@ -103,6 +115,11 @@ describe('predicates', () => {
 
   it('completed is terminal (ADR-0013 retired the 7-day post-completion dispute edge)', () => {
     expect(isBookingTerminal('completed')).toBe(true);
+  });
+
+  it('disputed is NOT terminal (OH-213 — admin resolution is the only exit)', () => {
+    expect(isBookingTerminal('disputed')).toBe(false);
+    expect(isBookingActive('disputed')).toBe(false); // but never cancellable either
   });
 
   it('isBookingActive: requested/accepted/in-progress/awaiting-confirmation', () => {
@@ -318,12 +335,90 @@ describe('Cancellation', () => {
   });
 });
 
+// ── No-show (OH-213) ─────────────────────────────────────────────────────────
+
+describe('parent-report-no-show', () => {
+  it('caregiver no-show from accepted → cancelled: full refund + supply flag', () => {
+    const r = transitionBooking(at(DM, 'accepted'), { type: 'parent-report-no-show' });
+    expect(r.ok && r.next).toBe('cancelled');
+    if (r.ok) {
+      expect(r.sideEffects).toContainEqual({ type: 'enqueue-payment-full-refund' });
+      expect(r.sideEffects).toContainEqual({ type: 'flag-supply-no-show' });
+      expect(r.sideEffects).toContainEqual({ type: 'notify-caregiver' });
+      // No cancellation-fee math — a no-show is always a full refund.
+      expect(r.sideEffects).not.toContainEqual({ type: 'enqueue-payment-cancellation-charge' });
+    }
+  });
+
+  it('provider no-show from accepted → cancelled: slot released + flag, NO money', () => {
+    const r = transitionBooking(at(PROVIDER, 'accepted'), { type: 'parent-report-no-show' });
+    expect(r.ok && r.next).toBe('cancelled');
+    if (r.ok) {
+      expect(r.sideEffects).toContainEqual({ type: 'release-consultation-slot' });
+      expect(r.sideEffects).toContainEqual({ type: 'flag-supply-no-show' });
+      expect(r.sideEffects.some((e) => e.type.startsWith('enqueue-payment'))).toBe(false);
+    }
+  });
+
+  it('is rejected from any state other than accepted', () => {
+    for (const s of BOOKING_STATES) {
+      if (s === 'accepted') continue;
+      expect(transitionBooking(at(DM, s), { type: 'parent-report-no-show' }).ok).toBe(false);
+      expect(transitionBooking(at(PROVIDER, s), { type: 'parent-report-no-show' }).ok).toBe(false);
+    }
+  });
+
+  it('canReportNoShow is accepted-only', () => {
+    expect(BOOKING_STATES.filter(canReportNoShow)).toEqual(['accepted']);
+  });
+});
+
+// ── Dispute resolution (OH-213) ──────────────────────────────────────────────
+
+describe('admin-resolve-dispute', () => {
+  it('rejected → completed: caregiver paid (capture + payout)', () => {
+    const r = transitionBooking(at(DM, 'disputed'), { type: 'admin-resolve-dispute', outcome: 'rejected' });
+    expect(r.ok && r.next).toBe('completed');
+    if (r.ok) {
+      expect(r.sideEffects).toContainEqual({ type: 'enqueue-payment-capture' });
+      expect(r.sideEffects).toContainEqual({ type: 'enqueue-payout' });
+    }
+  });
+
+  it('upheld → cancelled: parent refunded in full', () => {
+    const r = transitionBooking(at(DM, 'disputed'), { type: 'admin-resolve-dispute', outcome: 'upheld' });
+    expect(r.ok && r.next).toBe('cancelled');
+    if (r.ok) expect(r.sideEffects).toContainEqual({ type: 'enqueue-payment-full-refund' });
+  });
+
+  it('is rejected from any non-disputed state', () => {
+    for (const s of BOOKING_STATES) {
+      if (s === 'disputed') continue;
+      expect(transitionBooking(at(DM, s), { type: 'admin-resolve-dispute', outcome: 'rejected' }).ok).toBe(false);
+    }
+  });
+
+  it('is rejected for a provider booking (providers never enter disputed)', () => {
+    expect(transitionBooking(at(PROVIDER, 'disputed'), { type: 'admin-resolve-dispute', outcome: 'rejected' }).ok).toBe(false);
+  });
+});
+
+describe('evaluateSupplyStanding', () => {
+  it('0–1 flags → ok, 2 → manual-review, ≥3 → suspended', () => {
+    expect(evaluateSupplyStanding(0)).toBe('ok');
+    expect(evaluateSupplyStanding(1)).toBe('ok');
+    expect(evaluateSupplyStanding(2)).toBe('manual-review');
+    expect(evaluateSupplyStanding(3)).toBe('suspended');
+    expect(evaluateSupplyStanding(9)).toBe('suspended');
+  });
+});
+
 // ── Exhaustive legal matrices + terminal rejection ───────────────────────────
 
 describe('Exhaustive legal matrix — caregiver posted-job', () => {
   const LEGAL: Record<BookingState, ReadonlyArray<BookingEventType>> = {
     requested: ['caregiver-accept', 'caregiver-decline', 'request-expire', 'parent-cancel'],
-    accepted: ['session-start', 'parent-cancel', 'caregiver-cancel'],
+    accepted: ['session-start', 'parent-cancel', 'caregiver-cancel', 'parent-report-no-show'],
     'in-progress': ['session-end-propose-hours', 'parent-cancel', 'caregiver-cancel'],
     'awaiting-confirmation': [
       'parent-confirm-hours',
@@ -336,14 +431,14 @@ describe('Exhaustive legal matrix — caregiver posted-job', () => {
     declined: [],
     expired: [],
     cancelled: [],
-    disputed: [],
+    disputed: ['admin-resolve-dispute'],
   };
 
   for (const state of BOOKING_STATES) {
     for (const type of BOOKING_EVENT_TYPES) {
       const expected = LEGAL[state].includes(type);
       it(`${state} ⨯ ${type} → ${expected ? 'legal' : 'illegal'}`, () => {
-        expect(transitionBooking(at(POSTED, state), { type }).ok).toBe(expected);
+        expect(transitionBooking(at(POSTED, state), evt(type)).ok).toBe(expected);
       });
     }
   }
@@ -352,13 +447,14 @@ describe('Exhaustive legal matrix — caregiver posted-job', () => {
 describe('Exhaustive legal matrix — provider consultation', () => {
   const LEGAL: Record<BookingState, ReadonlyArray<BookingEventType>> = {
     requested: [],
-    accepted: ['consultation-auto-complete', 'parent-cancel', 'provider-cancel'],
+    accepted: ['consultation-auto-complete', 'parent-cancel', 'provider-cancel', 'parent-report-no-show'],
     'in-progress': [],
     'awaiting-confirmation': [],
     completed: [],
     declined: [],
     expired: [],
     cancelled: [],
+    // Providers never enter `disputed`; admin-resolve-dispute is rejected for them.
     disputed: [],
   };
 
@@ -366,7 +462,7 @@ describe('Exhaustive legal matrix — provider consultation', () => {
     for (const type of BOOKING_EVENT_TYPES) {
       const expected = LEGAL[state].includes(type);
       it(`${state} ⨯ ${type} → ${expected ? 'legal' : 'illegal'}`, () => {
-        expect(transitionBooking(at(PROVIDER, state), { type }).ok).toBe(expected);
+        expect(transitionBooking(at(PROVIDER, state), evt(type)).ok).toBe(expected);
       });
     }
   }
@@ -376,8 +472,8 @@ describe('Terminal states reject all events', () => {
   for (const state of BOOKING_TERMINAL_STATES) {
     for (const type of BOOKING_EVENT_TYPES) {
       it(`${state} rejects ${type}`, () => {
-        expect(transitionBooking(at(POSTED, state), { type }).ok).toBe(false);
-        expect(transitionBooking(at(PROVIDER, state), { type }).ok).toBe(false);
+        expect(transitionBooking(at(POSTED, state), evt(type)).ok).toBe(false);
+        expect(transitionBooking(at(PROVIDER, state), evt(type)).ok).toBe(false);
       });
     }
   }
@@ -638,9 +734,16 @@ describe('Property-based — transitionBooking', () => {
   const bookingArb: fc.Arbitrary<Booking> = fc
     .tuple(shapeArb, stateArb)
     .map(([shape, state]) => ({ ...shape, state }));
+  // admin-resolve-dispute additionally needs an `outcome`; vary it so the
+  // property tests exercise both the completed (rejected) and cancelled (upheld)
+  // resolutions, and the missing-outcome refusal.
   const eventArb: fc.Arbitrary<BookingEvent> = fc
     .constantFrom(...BOOKING_EVENT_TYPES)
-    .map((type) => ({ type }));
+    .chain((type) =>
+      fc
+        .constantFrom<DisputeResolutionOutcome | undefined>('rejected', 'upheld', undefined)
+        .map((outcome) => (outcome === undefined ? { type } : { type, outcome })),
+    );
 
   it('always returns a well-formed result', () => {
     fc.assert(
