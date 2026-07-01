@@ -18,6 +18,7 @@ import { registerHealthRoutes } from './routes/health.ts';
 import { registerJobRoutes } from './routes/jobs.ts';
 import { registerMessagingRoutes } from './routes/messaging.ts';
 import { registerOfferRoutes } from './routes/offers.ts';
+import { registerOpportunityRoutes } from './routes/opportunities.ts';
 import { registerVideoCallRoutes } from './routes/video-calls.ts';
 import { registerParentProfileRoutes } from './routes/parent-profile.ts';
 import { registerParentSubscriptionRoutes } from './routes/parent-subscription.ts';
@@ -102,6 +103,11 @@ export const openApiInfo = {
       name: 'jobs',
       description:
         'Posted Jobs (OH-209) — a Parent composes + publishes a Job open to verified in-category Caregivers (Category + ZIP + scope + concrete schedule + child count/ages + disclosed Safety-Behaviors subset + service address + optional budget hint). Publishing is Parent-Subscription-gated (402); the disclosure consent is timestamped (ADR-0016). A multi-day one-off fans out into one Job per date; a recurring rule posts a single Job (ADR-0014).',
+    },
+    {
+      name: 'opportunities',
+      description:
+        'Caregiver Opportunities (OH-218) — the Caregiver-facing READ side of the Posted-Job chain: the open-Jobs feed across the categories a Caregiver offers (ranked recency + distance, one-off/recurring + category filters), one Job\'s detail (disclosed child bundle + approximate distance, exact street reveal-at-accept), and My Applications with the derived monthly quota. Filing/Counter/Withdraw + cap enforcement are the Application composer (OH-219).',
     },
     { name: 'verification', description: 'Supply verification — state + email/phone/ID-doc facts (OH-184)' },
     {
@@ -191,6 +197,7 @@ export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerVideoCallRoutes(v1);
   registerJobRoutes(v1);
   registerApplicationRoutes(v1);
+  registerOpportunityRoutes(v1);
   registerContactUsRoutes(v1);
   registerScreeningRoutes(v1);
   registerUploadRoutes(v1);
