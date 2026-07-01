@@ -488,6 +488,81 @@ describe('POST /v1/offers/{id}/accept', () => {
     const app = buildApp(makeDeps(makeDb({ message_threads: [threadRow()], offers: [] }).db));
     expect((await app.request(acceptPath, post(await caregiverToken()))).status).toBe(404);
   });
+
+  it('materialises Job + Application + Booking and rebinds the thread (OH-207)', async () => {
+    const { db, captures } = makeDb({ message_threads: [threadRow()], offers: [offerRow()] });
+    const app = buildApp(makeDeps(db));
+    const res = await app.request(acceptPath, post(await caregiverToken()));
+    expect(res.status).toBe(200);
+
+    // Job born awarded (direct-message), awarded to the thread's provider + parent.
+    const job = captures.inserts.find((i) => i.table === 'jobs');
+    expect(job?.values).toMatchObject({
+      origin: 'direct-message',
+      state: 'awarded',
+      parent_uid: 'uid-par',
+      provider_id: PID,
+      category: 'babysitter',
+    });
+    // One Application, born awarded, on the accepted Offer.
+    const application = captures.inserts.find((i) => i.table === 'applications');
+    expect(application?.values).toMatchObject({
+      origin: 'direct-message',
+      state: 'awarded',
+      provider_id: PID,
+      accepted_offer_id: OID,
+    });
+    // One caregiver Booking (one-off), born accepted, carrying the Offer back-link.
+    const bookingIns = captures.inserts.find((i) => i.table === 'bookings');
+    const bookingRows = bookingIns?.values as unknown as Record<string, unknown>[];
+    expect(Array.isArray(bookingRows)).toBe(true);
+    expect(bookingRows).toHaveLength(1);
+    expect(bookingRows[0]).toMatchObject({
+      kind: 'caregiver',
+      state: 'accepted',
+      origin: 'direct-message',
+      offer_id: OID,
+      provider_id: PID,
+      parent_uid: 'uid-par',
+      scheduled_date: '2026-08-01',
+      // reveal-at-accept address snapshot + child detail carried onto the Booking.
+      service_address_line1: '12 Oak St',
+      child_count: 1,
+    });
+
+    // The Offer + thread both rebind to the SAME new job id.
+    const jobId = (job?.values as Record<string, unknown>).id;
+    expect(jobId).toEqual(expect.any(String));
+    expect(captures.updates.find((u) => u.table === 'offers')?.set).toMatchObject({
+      status: 'accepted',
+      job_id: jobId,
+    });
+    expect(captures.updates.find((u) => u.table === 'message_threads')?.set).toMatchObject({
+      job_id: jobId,
+    });
+  });
+
+  it('materialises one Booking per slot for a multi-day Offer, with no Series', async () => {
+    const { db, captures } = makeDb({
+      message_threads: [threadRow()],
+      offers: [
+        offerRow({
+          schedule_kind: 'multi-day',
+          slots: [slot('2026-08-01'), slot('2026-08-02')],
+        }),
+      ],
+    });
+    const app = buildApp(makeDeps(db));
+    const res = await app.request(acceptPath, post(await caregiverToken()));
+    expect(res.status).toBe(200);
+
+    const bookingRows = captures.inserts.find((i) => i.table === 'bookings')
+      ?.values as unknown as Record<string, unknown>[];
+    expect(bookingRows).toHaveLength(2);
+    // A multi-day one-off is not a Series (ADR-0014 §A1).
+    expect(bookingRows.every((b) => b.series_id === null)).toBe(true);
+    expect(captures.inserts.find((i) => i.table === 'booking_series')).toBeUndefined();
+  });
 });
 
 describe('POST /v1/offers/{id}/decline', () => {
@@ -514,6 +589,32 @@ describe('POST /v1/offers/{id}/withdraw', () => {
     const res = await app.request(withdrawPath, post(await caregiverToken()));
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ error: 'not_sender' });
+  });
+
+  it('cascade-cancels the materialised Bookings when withdrawing an accepted Offer (OH-207)', async () => {
+    const { db, captures } = makeDb({
+      message_threads: [threadRow({ job_id: 'job-x' })],
+      offers: [offerRow({ status: 'accepted', job_id: 'job-x' })],
+    });
+    const app = buildApp(makeDeps(db));
+    const res = await app.request(withdrawPath, post(await parentToken()));
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as Record<string, unknown>).status).toBe('withdrawn');
+
+    // Every Booking this Offer materialised flips to cancelled.
+    const bookingUpdate = captures.updates.find((u) => u.table === 'bookings');
+    expect(bookingUpdate?.set).toMatchObject({ state: 'cancelled' });
+    expect(captures.updates.find((u) => u.table === 'offers')?.set).toMatchObject({
+      status: 'withdrawn',
+    });
+  });
+
+  it('does NOT touch Bookings when withdrawing a pending Offer', async () => {
+    const { db, captures } = makeDb({ message_threads: [threadRow()], offers: [offerRow()] });
+    const app = buildApp(makeDeps(db));
+    const res = await app.request(withdrawPath, post(await parentToken()));
+    expect(res.status).toBe(200);
+    expect(captures.updates.find((u) => u.table === 'bookings')).toBeUndefined();
   });
 });
 

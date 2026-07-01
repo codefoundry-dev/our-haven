@@ -1,15 +1,34 @@
 import { createRoute, type OpenAPIHono, z } from '@hono/zod-openapi';
+import type { Insertable } from 'kysely';
 
 import { requireAuth } from '../auth/middleware.ts';
 import type { AppEnv } from '../context.ts';
 import type { Db } from '../db/kysely.ts';
+import type {
+  ApplicationsTable,
+  BookingSeriesTable,
+  BookingsTable,
+  JobsTable,
+} from '../../../../apps/backend/src/db/schema.ts';
 // Cross-tree, Deno-clean domain modules (ADR-0019; explicit-`.ts`). The Offer
 // STATE MACHINE (offer-lifecycle/index.ts) is Deno-clean (OH-206 split its pricing
 // helper into ./total.ts); the `computed_total` is derived from the Deno-clean
 // Pricing leaf directly (the same six-line passthrough as `computeOfferTotal`).
 // Redaction is the OH-180 detector (scope_note only — numerics bypass); the
 // Parent gate is the paywall's `deriveAccessDecision` (OH-193).
-import type { RecurrenceRule } from '../../../../packages/domain/src/booking-lifecycle/index.ts';
+// The Deno-clean booking-lifecycle LEAF (no runtime relative imports) supplies
+// the slot-expansion + id/slot validation for the OH-207 materialisation. The
+// `direct-message-materialisation` domain module encodes the same accept
+// contract but carries runtime relative imports (booking-lifecycle + pricing),
+// so it is the Node-side spec — NOT Edge-importable (ADR-0019; the same reason
+// offers uses the Pricing leaf directly rather than offer-lifecycle/total.ts).
+import {
+  expandRecurrence,
+  materialiseMultiDayOneOff,
+  materialiseSeries,
+  type BookingSlot,
+  type RecurrenceRule,
+} from '../../../../packages/domain/src/booking-lifecycle/index.ts';
 import { scanScopeNote } from '../../../../packages/domain/src/disintermediation/index.ts';
 import {
   canCounter,
@@ -57,9 +76,13 @@ import {
  * each commits the Parent to (or proposes) a Booking. Caregiver actions and a
  * Parent decline / withdraw are never gated.
  *
- * SCOPE BOUNDARY (OH-207): accept flips the Offer to `accepted`; the atomic
- * Job + Application + Booking materialisation + thread→job rebind on accept is
- * OH-207 (the domain emits those side-effects; this ticket does not act on them).
+ * MATERIALISATION (OH-207): accepting a Direct-Message (thread-anchored) Offer
+ * atomically materialises the Job + single Application + Booking(s) — all born
+ * in their post-award state — and rebinds the thread + the Offer from `thread_id`
+ * to the new `job_id`, in one `db.transaction()`. Withdrawing an already-accepted
+ * Offer cascade-cancels every Booking it materialised (resolved by `offer_id`).
+ * The Booking(s) follow the Offer schedule: one-off → one, multi-day → one per
+ * slot (no Series), recurring → a stateless Series + one Booking per occurrence.
  */
 
 const json = <T extends z.ZodTypeAny>(schema: T) => ({ 'application/json': { schema } });
@@ -507,9 +530,9 @@ const acceptOfferRoute = createRoute({
   method: 'post',
   path: '/offers/{offerId}/accept',
   tags: ['offers'],
-  summary: 'Accept an Offer (status → accepted) — OH-206',
+  summary: 'Accept an Offer (status → accepted) — OH-207',
   description:
-    'The counterparty accepts a pending Offer. A Parent accept is Parent-Subscription-gated. (The atomic Booking materialisation + thread rebind on accept is OH-207.) 409 if the Offer is not pending or has expired.',
+    'The counterparty accepts a pending Offer. A Parent accept is Parent-Subscription-gated. Accepting a Direct-Message Book-request atomically materialises the Job + Application + Booking(s) (born accepted) and rebinds the thread to the new Job. 409 if the Offer is not pending or has expired.',
   security: [{ supabaseAccessToken: [] }],
   middleware: [requireAuth({ roles: ['parent', 'caregiver'] })] as const,
   request: { params: OfferIdParam },
@@ -545,9 +568,9 @@ const withdrawOfferRoute = createRoute({
   method: 'post',
   path: '/offers/{offerId}/withdraw',
   tags: ['offers'],
-  summary: 'Withdraw an Offer — OH-206',
+  summary: 'Withdraw an Offer — OH-207',
   description:
-    'The sender withdraws their own Offer (status → withdrawn) from pending or accepted. (Cascade-cancelling Bookings a withdrawn-accepted Offer materialised is OH-207 — no Bookings exist yet.) Never gated.',
+    'The sender withdraws their own Offer (status → withdrawn) from pending or accepted. Withdrawing an already-accepted Offer cascade-cancels every Booking it materialised (resolved by offer_id). Never gated.',
   security: [{ supabaseAccessToken: [] }],
   middleware: [requireAuth({ roles: ['parent', 'caregiver'] })] as const,
   request: { params: OfferIdParam },
@@ -727,13 +750,57 @@ export function registerOfferRoutes(app: OpenAPIHono<AppEnv>): void {
     }
 
     const now = new Date();
-    const res = transitionOffer(rowToDomainOffer(offer), { type: 'counterparty-accept', now });
+    const domainOffer = rowToDomainOffer(offer);
+    const res = transitionOffer(domainOffer, { type: 'counterparty-accept', now });
     if (!res.ok) return c.json({ error: 'invalid_transition', reason: res.reason }, 409);
 
-    // OH-207: res.sideEffects carries materialise-direct-message-job +
-    // rebind-anchor-to-job — the atomic Job/Application/Booking creation is that
-    // ticket. OH-206 only flips the Offer's status.
-    const updated = await updateOfferStatus(db, offer, 'accepted', now, 'Booking request accepted');
+    // A Posted-Job (job-anchored) Offer's accept takes no materialisation — its
+    // Job already exists (that accept path is a later ticket); just flip status.
+    // Every OH-206 Offer is Direct-Message (thread-anchored), so the branch below
+    // is the live path today.
+    if (domainOffer.anchor.kind !== 'thread') {
+      const updated = await updateOfferStatus(db, offer, 'accepted', now, 'Booking request accepted');
+      return c.json(toOfferDTO(updated, side), 200);
+    }
+
+    // OH-207: atomically materialise the Job + Application + Booking(s) and rebind
+    // the thread + Offer from thread_id → the new job_id. A plan failure (e.g. an
+    // invalid recurrence rule or Offer pricing) refuses BEFORE any TX is opened.
+    const mat = buildDirectMessageMaterialisation(offer, thread, now);
+    if (!mat.ok) return c.json({ error: 'materialisation_failed', reason: mat.reason }, 409);
+    const { plan } = mat;
+
+    const updated = await db.transaction().execute(async (trx) => {
+      await trx.insertInto('jobs').values(plan.job).execute();
+      await trx.insertInto('applications').values(plan.application).execute();
+      if (plan.series) await trx.insertInto('booking_series').values(plan.series).execute();
+      if (plan.bookings.length > 0) await trx.insertInto('bookings').values(plan.bookings).execute();
+
+      const row = (await trx
+        .updateTable('offers')
+        .set({ status: 'accepted', job_id: plan.jobId, updated_at: now })
+        .where('id', '=', offer.id)
+        .returning(OFFER_COLUMNS)
+        .executeTakeFirstOrThrow()) as unknown as OfferRow;
+
+      await trx
+        .updateTable('message_threads')
+        .set({
+          job_id: plan.jobId,
+          last_message_at: now,
+          last_message_preview: offerPreview(
+            'Booking request accepted',
+            offer.slots,
+            offer.computed_total_cents,
+          ),
+          last_message_redacted: false,
+        })
+        .where('id', '=', thread.id)
+        .execute();
+
+      return row;
+    });
+
     return c.json(toOfferDTO(updated, side), 200);
   });
 
@@ -776,9 +843,45 @@ export function registerOfferRoutes(app: OpenAPIHono<AppEnv>): void {
     const res = transitionOffer(rowToDomainOffer(offer), { type: 'sender-withdraw', now });
     if (!res.ok) return c.json({ error: 'invalid_transition', reason: res.reason }, 409);
 
-    // OH-207: cascade-cancel of any Bookings a withdrawn-accepted Offer
-    // materialised — none exist yet (materialisation is OH-207).
-    const updated = await updateOfferStatus(db, offer, 'withdrawn', now, 'Booking request withdrawn');
+    // OH-207: withdrawing an already-ACCEPTED Offer cascade-cancels every Booking
+    // it materialised (the domain emits `cascade-cancel-materialised-bookings`;
+    // resolved here by offer_id — ADR-0014 amended). A pending withdraw has no
+    // Bookings, so this is skipped.
+    const cascade = res.sideEffects.some(
+      (e) => e.type === 'cascade-cancel-materialised-bookings',
+    );
+
+    const updated = await db.transaction().execute(async (trx) => {
+      if (cascade) {
+        await trx
+          .updateTable('bookings')
+          .set({ state: 'cancelled', updated_at: now })
+          .where('offer_id', '=', offer.id)
+          // Only still-live occurrences flip — a completed/disputed Booking is settled.
+          .where('state', 'in', ['requested', 'accepted', 'in-progress', 'awaiting-confirmation'])
+          .execute();
+      }
+
+      const row = (await trx
+        .updateTable('offers')
+        .set({ status: 'withdrawn', updated_at: now })
+        .where('id', '=', offer.id)
+        .returning(OFFER_COLUMNS)
+        .executeTakeFirstOrThrow()) as unknown as OfferRow;
+
+      await trx
+        .updateTable('message_threads')
+        .set({
+          last_message_at: now,
+          last_message_preview: 'Booking request withdrawn',
+          last_message_redacted: false,
+        })
+        .where('id', '=', offer.thread_id)
+        .execute();
+
+      return row;
+    });
+
     return c.json(toOfferDTO(updated, side), 200);
   });
 
@@ -931,6 +1034,196 @@ async function loadActableOffer(db: Db, offerId: string, uid: string): Promise<A
   const side = thread ? viewerSide(thread, uid) : null;
   if (!thread || !side) return { error: { error: 'offer_not_found' }, status: 404 };
   return { offer, thread, side };
+}
+
+/* ── OH-207: Direct-Message accept → atomic Job/Application/Booking plan ──────── */
+
+/** The row bundle the accept handler INSERTs in one TX (dependency order:
+ *  job → application → series? → bookings). Built purely from the accepted Offer
+ *  row + its thread, so the handler opens NO transaction on a plan failure. */
+interface MaterialisationPlan {
+  jobId: string;
+  job: Insertable<JobsTable>;
+  application: Insertable<ApplicationsTable>;
+  series: Insertable<BookingSeriesTable> | null;
+  bookings: Insertable<BookingsTable>[];
+}
+
+type MaterialisationOutcome =
+  | { ok: true; plan: MaterialisationPlan }
+  | { ok: false; reason: string };
+
+/**
+ * Build the atomic materialisation for a Direct-Message Book-request accept
+ * (OH-207; CONTEXT § Job / § Application / § Booking, ADR-0014). Orchestrates the
+ * Deno-clean leaves — booking-lifecycle's `materialiseMultiDayOneOff` /
+ * `materialiseSeries` (slot expansion + id/slot validation) and the Pricing
+ * calculator (per-Booking parent-charge snapshot) — mirroring the pure
+ * `direct-message-materialisation` domain module (which is not Edge-importable).
+ *
+ * Supply identity is `providers.id` (`thread.provider_id`); the Parent is the
+ * thread's `parent_uid`. Every materialised row carries the accepted Offer's id
+ * so a later sender-withdraw cascade-cancels them. Any validation failure returns
+ * `{ ok: false }` with NO partial plan.
+ */
+function buildDirectMessageMaterialisation(
+  offer: OfferRow,
+  thread: ThreadRow,
+  now: Date,
+): MaterialisationOutcome {
+  const domain = rowToDomainOffer(offer);
+  const parentUid = thread.parent_uid;
+  const caregiverId = thread.provider_id;
+  const category = offer.category;
+  const agreedRate = offer.proposed_rate_cents;
+
+  const jobId = crypto.randomUUID();
+  const applicationId = crypto.randomUUID();
+
+  interface Occurrence {
+    id: string;
+    slot: BookingSlot;
+    seriesId: string | null;
+    durationHours: number;
+  }
+  let occurrences: Occurrence[];
+  let seriesRow: Insertable<BookingSeriesTable> | null = null;
+
+  if (domain.schedule.kind === 'recurring') {
+    const rule: RecurrenceRule = domain.schedule.rule;
+    const expanded = expandRecurrence(rule);
+    if (!expanded.ok) return { ok: false, reason: expanded.reason };
+    const seriesId = crypto.randomUUID();
+    const occurrenceIds = expanded.slots.map(() => crypto.randomUUID());
+    const m = materialiseSeries({
+      seriesId,
+      parentId: parentUid,
+      caregiverId,
+      category,
+      origin: 'direct-message',
+      agreedRate,
+      rule,
+      occurrenceIds,
+      offerId: offer.id,
+    });
+    if (!m.ok) return { ok: false, reason: m.reason };
+    seriesRow = {
+      id: seriesId,
+      job_id: jobId,
+      parent_uid: parentUid,
+      provider_id: caregiverId,
+      category,
+      // The domain rule's `weekdays` is readonly; the jsonb column is a plain
+      // array — copy it into the mutable OfferRecurrenceRow shape.
+      rule: { ...rule, weekdays: [...rule.weekdays] },
+      agreed_rate_cents: agreedRate,
+      offer_id: offer.id,
+    };
+    occurrences = m.occurrences.map((o) => ({
+      id: o.id,
+      slot: o.slot,
+      seriesId: o.seriesId,
+      durationHours: o.schedule.durationHours,
+    }));
+  } else {
+    const slots = domain.schedule.kind === 'one-off' ? [domain.schedule.slot] : domain.schedule.slots;
+    const bookingIds = slots.map(() => crypto.randomUUID());
+    const m = materialiseMultiDayOneOff({
+      parentId: parentUid,
+      caregiverId,
+      category,
+      origin: 'direct-message',
+      agreedRate,
+      slots,
+      bookingIds,
+      offerId: offer.id,
+    });
+    if (!m.ok) return { ok: false, reason: m.reason };
+    occurrences = m.bookings.map((o) => ({
+      id: o.id,
+      slot: o.slot,
+      seriesId: o.seriesId,
+      durationHours: o.schedule.durationHours,
+    }));
+  }
+
+  // Per-Booking parent charge via the Pricing leaf (throws on caller-bug Offer
+  // pricing, e.g. a Tutor with >1 child — surface as a refusal, never a 500).
+  let bookings: Insertable<BookingsTable>[];
+  try {
+    bookings = occurrences.map((o) => ({
+      id: o.id,
+      kind: 'caregiver',
+      state: 'accepted',
+      parent_uid: parentUid,
+      provider_id: caregiverId,
+      slot_id: null,
+      rate_cents: null,
+      auto_complete_at: null,
+      scheduled_date: o.slot.date,
+      start_min: o.slot.startMin,
+      end_min: o.slot.endMin,
+      origin: 'direct-message',
+      job_id: jobId,
+      application_id: applicationId,
+      offer_id: offer.id,
+      series_id: o.seriesId,
+      agreed_rate_cents: agreedRate,
+      computed_total_cents: calculatePricing({
+        agreedRateCents: agreedRate,
+        hours: o.durationHours,
+        childCount: offer.child_count,
+        perChildSurchargeCents: offer.per_child_surcharge_cents,
+        commissionBp: 0,
+        category,
+      }).parentChargeCents,
+      category,
+      child_count: offer.child_count,
+      child_ages: offer.child_ages ?? [],
+      service_address_line1: offer.service_address_line1,
+      service_address_line2: offer.service_address_line2,
+      service_city: offer.service_city,
+      service_state: offer.service_state,
+      service_postal_code: offer.service_postal_code,
+      accepted_at: now,
+      updated_at: now,
+    }));
+  } catch (e) {
+    return { ok: false, reason: `invalid offer pricing: ${(e as Error).message}` };
+  }
+
+  return {
+    ok: true,
+    plan: {
+      jobId,
+      job: {
+        id: jobId,
+        origin: 'direct-message',
+        state: 'awarded',
+        parent_uid: parentUid,
+        provider_id: caregiverId,
+        category,
+        // Direct-Message Jobs have no composer step (plumbing — neither party sees
+        // a Job UI); a short marker records where the conversation lived.
+        description: `[direct-message ${thread.id}]`,
+        awarded_at: now,
+        updated_at: now,
+      },
+      application: {
+        id: applicationId,
+        job_id: jobId,
+        provider_id: caregiverId,
+        origin: 'direct-message',
+        state: 'awarded',
+        accepted_offer_id: offer.id,
+        proposal: null,
+        awarded_at: now,
+        updated_at: now,
+      },
+      series: seriesRow,
+      bookings,
+    },
+  };
 }
 
 /** Persist a status flip + bump the thread preview, returning the updated row. */
