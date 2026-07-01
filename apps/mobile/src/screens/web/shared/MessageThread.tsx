@@ -49,6 +49,8 @@ export function MessageThreadWeb() {
     declineOffer,
     withdrawOffer,
     counterOffer,
+    editOffer,
+    deleteOffer,
   } = useMessageThread({ providerId: id, threadId });
   const counterpart =
     (name && name.trim().length > 0 ? name.trim() : null) ?? thread?.counterpartyName ?? 'Conversation';
@@ -59,6 +61,7 @@ export function MessageThreadWeb() {
   const [bannerOpen, setBannerOpen] = useState(true);
   const [draft, setDraft] = useState('');
   const [composerOpen, setComposerOpen] = useState(false);
+  const [editing, setEditing] = useState<Offer | null>(null);
   const [countering, setCountering] = useState<Offer | null>(null);
   const [busyOfferId, setBusyOfferId] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
@@ -150,6 +153,8 @@ export function MessageThreadWeb() {
                           onDecline={() => runOffer(item.offer.id, () => declineOffer(item.offer.id))}
                           onWithdraw={() => runOffer(item.offer.id, () => withdrawOffer(item.offer.id))}
                           onCounter={() => setCountering(item.offer)}
+                          onEdit={() => setEditing(item.offer)}
+                          onDelete={() => runOffer(item.offer.id, () => deleteOffer(item.offer.id))}
                         />
                       ),
                     )
@@ -226,12 +231,17 @@ export function MessageThreadWeb() {
 
       {iAmParent && providerId ? (
         <OfferComposer
-          visible={composerOpen}
+          visible={composerOpen || editing != null}
           providerId={providerId}
           counterpartName={counterpart}
-          onClose={() => setComposerOpen(false)}
+          initial={editing}
+          onClose={() => {
+            setComposerOpen(false);
+            setEditing(null);
+          }}
           onSubmit={async (body) => {
-            await composeOffer(body);
+            if (editing) await editOffer(editing.id, body);
+            else await composeOffer(body);
           }}
         />
       ) : null}

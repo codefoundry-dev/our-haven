@@ -19,6 +19,7 @@ function makeDb(
   const captures = {
     inserts: [] as Array<{ table: string; values: Record<string, unknown> }>,
     updates: [] as Array<{ table: string; set: Record<string, unknown> }>,
+    deletes: [] as Array<{ table: string }>,
   };
   const NOW = '2026-07-09T00:00:00.000Z';
 
@@ -96,10 +97,22 @@ function makeDb(
     return c;
   };
 
+  const deleteChain = (t: string) => {
+    const c: Record<string, unknown> = {
+      where: () => c,
+      execute: async () => {
+        captures.deletes.push({ table: t });
+        return [];
+      },
+    };
+    return c;
+  };
+
   const handle: Record<string, unknown> = {
     selectFrom: (t: string) => selectChain(tables[t] ?? []),
     insertInto: (t: string) => insertChain(t),
     updateTable: (t: string) => updateChain(t),
+    deleteFrom: (t: string) => deleteChain(t),
   };
   const db = {
     ...handle,
@@ -202,6 +215,15 @@ const post = (token: string, body?: unknown): RequestInit => ({
   body: body === undefined ? undefined : JSON.stringify(body),
 });
 const getReq = (token: string): RequestInit => ({ headers: { authorization: `Bearer ${token}` } });
+const patchReq = (token: string, body?: unknown): RequestInit => ({
+  method: 'PATCH',
+  headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+  body: body === undefined ? undefined : JSON.stringify(body),
+});
+const delReq = (token: string): RequestInit => ({
+  method: 'DELETE',
+  headers: { authorization: `Bearer ${token}` },
+});
 
 // ── POST /v1/threads/{id}/offers (compose) ───────────────────────────────────
 describe('POST /v1/threads/{threadId}/offers (compose)', () => {
@@ -437,6 +459,116 @@ describe('GET /v1/threads/{threadId}/offers', () => {
   it('404 for a non-participant', async () => {
     const app = buildApp(makeDeps(makeDb({ message_threads: [threadRow()], offers: [offerRow()] }).db));
     expect((await app.request(OFFERS_PATH, getReq(await parentToken('uid-other')))).status).toBe(404);
+  });
+});
+
+// ── PATCH /v1/offers/{id} (edit a pending Offer) — OH-208 ─────────────────────
+const editPath = `/v1/offers/${OID}`;
+const editBody = (over: Record<string, unknown> = {}) => ({ ...composeBody(), ...over });
+
+describe('PATCH /v1/offers/{id} (edit pending)', () => {
+  it('200 the sender edits their pending Offer and the total is recomputed', async () => {
+    const { db, captures } = makeDb({ ...composable(), offers: [offerRow()] });
+    const app = buildApp(makeDeps(db));
+    const res = await app.request(editPath, patchReq(await parentToken(), editBody({ proposedRateCents: 6000 })));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    // Stays pending; total re-derived from the new rate (6000¢ × 3h, single child).
+    expect(body.status).toBe('pending');
+    expect(body.computedTotalCents).toBe(18000);
+    const upd = captures.updates.find((u) => u.table === 'offers');
+    expect(upd?.set).toMatchObject({ proposed_rate_cents: 6000, computed_total_cents: 18000 });
+    // The 72h validity window is re-armed on edit.
+    expect(upd?.set.valid_until).toBeInstanceOf(Date);
+    // Thread preview bumped with the update marker.
+    expect(captures.updates.find((u) => u.table === 'message_threads')?.set).toMatchObject({
+      last_message_redacted: false,
+    });
+  });
+
+  it('409 when a non-sender tries to edit', async () => {
+    const app = buildApp(makeDeps(makeDb({ ...composable(), offers: [offerRow()] }).db));
+    const res = await app.request(editPath, patchReq(await caregiverToken(), editBody()));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: 'not_sender' });
+  });
+
+  it('409 when the Offer is no longer pending', async () => {
+    const app = buildApp(makeDeps(makeDb({ ...composable(), offers: [offerRow({ status: 'accepted' })] }).db));
+    const res = await app.request(editPath, patchReq(await parentToken(), editBody()));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: 'not_editable' });
+  });
+
+  it('402 when the Parent editing has no active Subscription', async () => {
+    const app = buildApp(
+      makeDeps(makeDb({ ...composable({ parent_subscriptions: [] }), offers: [offerRow()] }).db),
+    );
+    expect((await app.request(editPath, patchReq(await parentToken(), editBody()))).status).toBe(402);
+  });
+
+  it('400 when childAges length does not match childCount', async () => {
+    const app = buildApp(makeDeps(makeDb({ ...composable(), offers: [offerRow()] }).db));
+    const res = await app.request(editPath, patchReq(await parentToken(), editBody({ childCount: 2, childAges: [4] })));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'invalid_child_detail' });
+  });
+
+  it('404 for an unknown Offer', async () => {
+    const app = buildApp(makeDeps(makeDb({ ...composable(), offers: [] }).db));
+    expect((await app.request(editPath, patchReq(await parentToken(), editBody()))).status).toBe(404);
+  });
+
+  it('re-redacts the scope_note and refreshes the T&S flag on edit', async () => {
+    const { db, captures } = makeDb({ ...composable(), offers: [offerRow()] });
+    const app = buildApp(makeDeps(db));
+    const note = 'reach me at 415-555-1234';
+    const res = await app.request(editPath, patchReq(await parentToken(), editBody({ scopeNote: note })));
+    expect(res.status).toBe(200);
+    // The prior flag (if any) is cleared, then a fresh flag is queued for the new note.
+    expect(captures.deletes.some((d) => d.table === 'message_flags')).toBe(true);
+    const flag = captures.inserts.find((i) => i.table === 'message_flags');
+    expect(flag?.values).toMatchObject({ original_body: note, offer_id: OID });
+    expect(((await res.json()) as Record<string, unknown>).scopeNoteRedacted).toBe(true);
+  });
+});
+
+// ── DELETE /v1/offers/{id} (hard-delete a pending Offer) — OH-208 ─────────────
+const deletePath = `/v1/offers/${OID}`;
+
+describe('DELETE /v1/offers/{id} (delete pending)', () => {
+  it('200 the sender hard-deletes their pending Offer', async () => {
+    const { db, captures } = makeDb({ message_threads: [threadRow()], offers: [offerRow()] });
+    const app = buildApp(makeDeps(db));
+    const res = await app.request(deletePath, delReq(await parentToken()));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ deleted: true });
+    expect(captures.deletes.some((d) => d.table === 'offers')).toBe(true);
+    // Inbox preview bumped so the removed request no longer shows as latest activity.
+    expect(captures.updates.find((u) => u.table === 'message_threads')?.set).toMatchObject({
+      last_message_redacted: false,
+    });
+  });
+
+  it('409 when a non-sender tries to delete', async () => {
+    const app = buildApp(makeDeps(makeDb({ message_threads: [threadRow()], offers: [offerRow()] }).db));
+    const res = await app.request(deletePath, delReq(await caregiverToken()));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: 'not_sender' });
+  });
+
+  it('409 when the Offer is no longer pending (withdraw instead)', async () => {
+    const app = buildApp(
+      makeDeps(makeDb({ message_threads: [threadRow()], offers: [offerRow({ status: 'accepted' })] }).db),
+    );
+    const res = await app.request(deletePath, delReq(await parentToken()));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: 'not_deletable' });
+  });
+
+  it('404 for an unknown Offer', async () => {
+    const app = buildApp(makeDeps(makeDb({ message_threads: [threadRow()], offers: [] }).db));
+    expect((await app.request(deletePath, delReq(await parentToken()))).status).toBe(404);
   });
 });
 

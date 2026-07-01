@@ -1,13 +1,17 @@
 /**
- * OfferComposer (OH-206) — the Parent's structured Book-request builder, opened
- * from a Direct-Message thread. Collects the concrete schedule (a single date or
- * several hand-picked dates → multi-day one-off, ADR-0014), the child count + ages
- * (Tutor is single-child), an EXPLICIT Safety-Behaviors disclosure (a chosen
+ * OfferComposer (OH-206 / OH-208) — the Parent's structured Book-request builder,
+ * opened from a Direct-Message thread. Collects the concrete schedule (a single
+ * date or several hand-picked dates → multi-day one-off, ADR-0014), the child count
+ * + ages (Tutor is single-child), an EXPLICIT Safety-Behaviors disclosure (a chosen
  * subset of the Parent's checklist OR "Share none" — required before sending,
  * ADR-0016 / story 133), the service address (pre-filled from the Parent profile;
  * revealed to the Caregiver only on accept), and the rate (locked to the
  * Caregiver's published Rate when they are non-negotiable, ADR-0017). Shows a live
  * total preview. Shared native + web (RN primitives → RN-web).
+ *
+ * EDIT MODE (OH-208): pass `initial` to reopen the sheet pre-filled from an existing
+ * still-pending Offer; the copy switches to "Update", and the parent screen routes
+ * `onSubmit` to `editOffer` instead of `composeOffer`. Same body shape either way.
  */
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -27,11 +31,12 @@ import {
   getParentProfile,
   getSupplyProfile,
   type ComposeOfferBody,
+  type Offer,
   type ParentProfile,
   type SupplyProfile,
 } from '@/api/client';
 import { SAFETY_BEHAVIOR_OPTIONS } from '@/lib/parent-profile';
-import { formatMoney } from '@/lib/offerCopy';
+import { formatMoney, formatTimeOfDay } from '@/lib/offerCopy';
 import { colors, fonts, radii, shadow } from '@/theme/tokens';
 
 type Category = 'babysitter' | 'tutor' | 'nanny';
@@ -47,6 +52,8 @@ export interface OfferComposerProps {
   visible: boolean;
   providerId: string;
   counterpartName: string;
+  /** When set, the sheet opens pre-filled to EDIT this still-pending Offer (OH-208). */
+  initial?: Offer | null;
   onClose: () => void;
   onSubmit: (body: ComposeOfferBody) => Promise<void>;
 }
@@ -77,7 +84,8 @@ function emptySlot(): SlotDraft {
   return { date: '', start: '', end: '' };
 }
 
-export function OfferComposer({ visible, providerId, counterpartName, onClose, onSubmit }: OfferComposerProps) {
+export function OfferComposer({ visible, providerId, counterpartName, initial, onClose, onSubmit }: OfferComposerProps) {
+  const isEdit = initial != null;
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [supply, setSupply] = useState<SupplyProfile | null>(null);
@@ -95,6 +103,8 @@ export function OfferComposer({ visible, providerId, counterpartName, onClose, o
   const [stateCode, setStateCode] = useState('');
   const [postal, setPostal] = useState('');
   const [rate, setRate] = useState('');
+  // Carried through so an edit doesn't wipe a note the composer has no field for.
+  const [scopeNote, setScopeNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -104,22 +114,56 @@ export function OfferComposer({ visible, providerId, counterpartName, onClose, o
     let cancelled = false;
     setLoading(true);
     setLoadError(null);
+    setSubmitError(null);
     (async () => {
       try {
         const [s, p] = await Promise.all([getSupplyProfile(providerId), getParentProfile()]);
         if (cancelled) return;
         setSupply(s);
         setParent(p);
-        const firstCat = (s.categoryRates[0]?.category ?? 'babysitter') as Category;
-        setCategory(firstCat);
-        const r = s.categoryRates.find((c) => c.category === firstCat)?.publishedRateCents ?? 0;
-        setRate(r ? String(r / 100) : '');
-        const a = p.defaultAddress;
-        setLine1(a?.line1 ?? '');
-        setLine2(a?.line2 ?? '');
-        setCity(a?.city ?? '');
-        setStateCode(a?.state ?? '');
-        setPostal(a?.postalCode ?? '');
+        if (initial) {
+          // EDIT: seed every field from the Offer's own snapshot (OH-208).
+          setCategory(initial.category);
+          setRate(initial.proposedRateCents ? String(initial.proposedRateCents / 100) : '');
+          setSlots(
+            initial.slots.length > 0
+              ? initial.slots.map((sl) => ({
+                  date: sl.date,
+                  start: formatTimeOfDay(sl.startMin),
+                  end: formatTimeOfDay(sl.endMin),
+                }))
+              : [emptySlot()],
+          );
+          setChildCount(initial.childCount);
+          setChildAges(initial.childAges.map((n) => String(n)));
+          setDisclosed(new Set(initial.safetyBehaviors));
+          setDiscloseNone(initial.safetyBehaviors.length === 0);
+          const ia = initial.serviceAddress;
+          setLine1(ia?.line1 ?? '');
+          setLine2(ia?.line2 ?? '');
+          setCity(ia?.city ?? '');
+          setStateCode(ia?.state ?? '');
+          setPostal(ia?.postalCode ?? '');
+          setScopeNote(initial.scopeNote ?? '');
+        } else {
+          // COMPOSE: defaults — first category, its published rate, profile address.
+          const firstCat = (s.categoryRates[0]?.category ?? 'babysitter') as Category;
+          setCategory(firstCat);
+          const r = s.categoryRates.find((c) => c.category === firstCat)?.publishedRateCents ?? 0;
+          setRate(r ? String(r / 100) : '');
+          setSlots([emptySlot()]);
+          setChildCount(1);
+          setChildAges(['']);
+          setDisclosed(new Set());
+          setDiscloseNone(false);
+          const a = p.defaultAddress;
+          setLine1(a?.line1 ?? '');
+          setLine2(a?.line2 ?? '');
+          setCity(a?.city ?? '');
+          setStateCode(a?.state ?? '');
+          setPostal(a?.postalCode ?? '');
+          setScopeNote('');
+        }
         setLoading(false);
       } catch {
         if (cancelled) return;
@@ -130,7 +174,7 @@ export function OfferComposer({ visible, providerId, counterpartName, onClose, o
     return () => {
       cancelled = true;
     };
-  }, [visible, providerId]);
+  }, [visible, providerId, initial]);
 
   const negotiable = supply?.negotiable ?? true;
   const rateLocked = !negotiable;
@@ -227,11 +271,18 @@ export function OfferComposer({ visible, providerId, counterpartName, onClose, o
             }
           : null,
         schedule,
+        ...(scopeNote.trim() ? { scopeNote: scopeNote.trim() } : {}),
       };
       await onSubmit(body);
       onClose();
     } catch (e) {
-      setSubmitError(e instanceof Error ? e.message : 'Could not send your booking request.');
+      setSubmitError(
+        e instanceof Error
+          ? e.message
+          : isEdit
+            ? 'Could not update your booking request.'
+            : 'Could not send your booking request.',
+      );
     } finally {
       setSubmitting(false);
     }
@@ -241,7 +292,7 @@ export function OfferComposer({ visible, providerId, counterpartName, onClose, o
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <SafeAreaView edges={['top', 'bottom']} style={styles.sheet}>
         <View style={styles.handleRow}>
-          <Text style={styles.heading}>Send a booking request</Text>
+          <Text style={styles.heading}>{isEdit ? 'Update booking request' : 'Send a booking request'}</Text>
           <Pressable onPress={onClose} accessibilityLabel="Close" style={styles.close} hitSlop={8}>
             <Icon name="x" size={20} color={colors.ink2} />
           </Pressable>
@@ -417,7 +468,7 @@ export function OfferComposer({ visible, providerId, counterpartName, onClose, o
               {submitting ? (
                 <ActivityIndicator color={colors.inkInv} />
               ) : (
-                <Text style={styles.submitText}>Send booking request</Text>
+                <Text style={styles.submitText}>{isEdit ? 'Update booking request' : 'Send booking request'}</Text>
               )}
             </Pressable>
           </ScrollView>

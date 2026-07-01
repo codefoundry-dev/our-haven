@@ -3092,6 +3092,15 @@ components:
             $ref: "#/components/schemas/Offer"
       required:
         - offers
+    OfferDeleted:
+      type: object
+      properties:
+        deleted:
+          type: boolean
+          enum:
+            - true
+      required:
+        - deleted
     CounterOfferRequest:
       type: object
       properties:
@@ -6520,6 +6529,126 @@ paths:
                 $ref: "#/components/schemas/OfferError"
         "404":
           description: Thread not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+  /v1/offers/{offerId}:
+    patch:
+      tags:
+        - offers
+      summary: Edit a still-pending Offer / Book-request — OH-208
+      description: The sender revises their own still-pending Offer in place (schedule
+        / rate / child-detail / disclosure / address / note). The rate +
+        per-child surcharge are re-snapshotted from the Caregiver's current
+        profile, the total is recomputed, the scope_note is re-redacted (its T&S
+        flag refreshed), and the 72h validity is re-armed — the Offer stays
+        pending. A Parent edit is Parent-Subscription-gated (402). 409 if the
+        caller isn't the sender or the Offer is no longer pending. 400 on
+        invalid child-detail / schedule / an unavailable category.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: offerId
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ComposeOfferRequest"
+      responses:
+        "200":
+          description: The updated Offer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Offer"
+        "400":
+          description: Invalid transition input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "402":
+          description: No active Parent Subscription
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "404":
+          description: Offer not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "409":
+          description: Transition not allowed from the Offer's current state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+    delete:
+      tags:
+        - offers
+      summary: Delete a still-pending Offer / Book-request — OH-208
+      description: The sender hard-deletes their own still-pending Offer, removing it
+        from the transcript as though never sent (its Trust & Safety flag, if
+        any, cascades away). Never gated. 409 if the caller isn't the sender or
+        the Offer is no longer pending (an accepted Offer must be withdrawn
+        instead, which cascade-cancels its Bookings).
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: offerId
+          in: path
+      responses:
+        "200":
+          description: The Offer was deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferDeleted"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "404":
+          description: Offer not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferError"
+        "409":
+          description: Not the sender, or the Offer is no longer pending
           content:
             application/json:
               schema:

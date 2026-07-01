@@ -365,8 +365,10 @@ export function sendMessage(threadId: string, body: string): Promise<ChatMessage
  * (a Parent send is Subscription-gated; the rate locks to the published Rate when
  * the Caregiver is non-negotiable; the Safety-Behaviors disclosure is required).
  * accept / decline / withdraw / counter drive the Offer state machine — Counter is
- * unavailable against a non-negotiable Caregiver. Offers are read through the Edge
- * (never direct/Realtime); the thread refetches them on a messages poke + focus.
+ * unavailable against a non-negotiable Caregiver. The sender may also edit (PATCH)
+ * or delete (DELETE) their OWN Offer while it is still pending (OH-208). Offers are
+ * read through the Edge (never direct/Realtime); the thread refetches them on a
+ * messages poke + focus.
  */
 export type Offer = paths['/v1/threads/{threadId}/offers']['get']['responses'][200]['content']['application/json']['offers'][number];
 export type OfferStatus = Offer['status'];
@@ -375,6 +377,8 @@ export type OfferSlot = Offer['slots'][number];
 export type ComposeOfferBody = paths['/v1/threads/{threadId}/offers']['post']['requestBody']['content']['application/json'];
 export type OfferSchedule = ComposeOfferBody['schedule'];
 export type CounterOfferBody = paths['/v1/offers/{offerId}/counter']['post']['requestBody']['content']['application/json'];
+/** An edit revises the same fields as a compose (the Edge re-runs the full pipeline). */
+export type EditOfferBody = paths['/v1/offers/{offerId}']['patch']['requestBody']['content']['application/json'];
 
 export function getThreadOffers(threadId: string): Promise<Offer[]> {
   return get<{ offers: Offer[] }>(`/v1/threads/${threadId}/offers`).then((r) => r.offers);
@@ -398,6 +402,16 @@ export function withdrawOffer(offerId: string): Promise<Offer> {
 
 export function counterOffer(offerId: string, body: CounterOfferBody): Promise<Offer> {
   return post<Offer>(`/v1/offers/${offerId}/counter`, body);
+}
+
+/** Edit a still-pending Offer in place (sender only) — returns the revised Offer. */
+export function editOffer(offerId: string, body: EditOfferBody): Promise<Offer> {
+  return patchJson<Offer>(`/v1/offers/${offerId}`, body);
+}
+
+/** Hard-delete a still-pending Offer (sender only). */
+export function deleteOffer(offerId: string): Promise<{ deleted: true }> {
+  return del<{ deleted: true }>(`/v1/offers/${offerId}`);
 }
 
 // ── Posted Jobs (OH-209) ─────────────────────────────────────────────────────

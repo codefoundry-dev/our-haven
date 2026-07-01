@@ -3870,6 +3870,166 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/offers/{offerId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a still-pending Offer / Book-request — OH-208
+         * @description The sender hard-deletes their own still-pending Offer, removing it from the transcript as though never sent (its Trust & Safety flag, if any, cascades away). Never gated. 409 if the caller isn't the sender or the Offer is no longer pending (an accepted Offer must be withdrawn instead, which cascade-cancels its Bookings).
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    offerId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The Offer was deleted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferDeleted"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Offer not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Not the sender, or the Offer is no longer pending */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        /**
+         * Edit a still-pending Offer / Book-request — OH-208
+         * @description The sender revises their own still-pending Offer in place (schedule / rate / child-detail / disclosure / address / note). The rate + per-child surcharge are re-snapshotted from the Caregiver's current profile, the total is recomputed, the scope_note is re-redacted (its T&S flag refreshed), and the 72h validity is re-armed — the Offer stays pending. A Parent edit is Parent-Subscription-gated (402). 409 if the caller isn't the sender or the Offer is no longer pending. 400 on invalid child-detail / schedule / an unavailable category.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    offerId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ComposeOfferRequest"];
+                };
+            };
+            responses: {
+                /** @description The updated Offer */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Offer"];
+                    };
+                };
+                /** @description Invalid transition input */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description No active Parent Subscription */
+                402: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Offer not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+                /** @description Transition not allowed from the Offer's current state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
     "/v1/offers/{offerId}/accept": {
         parameters: {
             query?: never;
@@ -5766,6 +5926,10 @@ export interface components {
         };
         OfferList: {
             offers: components["schemas"]["Offer"][];
+        };
+        OfferDeleted: {
+            /** @enum {boolean} */
+            deleted: true;
         };
         CounterOfferRequest: {
             proposedRateCents: number;

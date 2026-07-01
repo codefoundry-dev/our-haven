@@ -7,7 +7,9 @@
  * already projects it), the rate + total, a status chip, and the action pills:
  *   - counterparty + pending → Decline / Counter / Accept (Counter HIDDEN when the
  *     Caregiver is non-negotiable, ADR-0017)
- *   - sender + pending|accepted → Withdraw
+ *   - sender + pending → Edit / Withdraw / Delete (OH-208 — edit + hard-delete are
+ *     pre-engagement only; delete removes the bubble entirely)
+ *   - sender + accepted → Withdraw (its one exit; cascade-cancels the Booking(s))
  * Driven by `useMessageThread`'s offer actions; presentational only.
  */
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -53,9 +55,13 @@ export interface OfferBubbleProps {
   onDecline?: () => void;
   onCounter?: () => void;
   onWithdraw?: () => void;
+  /** Sender + pending only: revise the request in place (OH-208). */
+  onEdit?: () => void;
+  /** Sender + pending only: hard-delete the request (OH-208). */
+  onDelete?: () => void;
 }
 
-export function OfferBubble({ offer, mine, busy, onAccept, onDecline, onCounter, onWithdraw }: OfferBubbleProps) {
+export function OfferBubble({ offer, mine, busy, onAccept, onDecline, onCounter, onWithdraw, onEdit, onDelete }: OfferBubbleProps) {
   const isCounter = offer.supersedesOfferId != null;
   const isMultiDay = offer.scheduleKind === 'multi-day';
   const childLabel =
@@ -68,7 +74,10 @@ export function OfferBubble({ offer, mine, busy, onAccept, onDecline, onCounter,
   const exactHidden = addr != null && addr.line1 == null && offer.status !== 'accepted';
 
   const showCounterparty = offer.status === 'pending' && !mine;
-  const showWithdraw = (offer.status === 'pending' || offer.status === 'accepted') && mine;
+  // Sender-side controls split by state: a pending request is editable + removable
+  // (edit / withdraw / delete); an accepted one has only its withdraw exit (OH-208).
+  const showSenderPending = offer.status === 'pending' && mine;
+  const showSenderAccepted = offer.status === 'accepted' && mine;
 
   return (
     <View style={[styles.wrap, mine ? styles.wrapMe : styles.wrapThem]}>
@@ -181,7 +190,34 @@ export function OfferBubble({ offer, mine, busy, onAccept, onDecline, onCounter,
               <Text style={styles.pillFillText}>Accept</Text>
             </Pressable>
           </View>
-        ) : showWithdraw ? (
+        ) : showSenderPending ? (
+          <View style={styles.actions}>
+            <Pressable
+              onPress={onDelete}
+              disabled={busy}
+              style={({ pressed }) => [styles.pill, styles.pillGhost, pressed && styles.pressed]}
+              accessibilityRole="button"
+            >
+              <Text style={styles.pillDangerText}>Delete</Text>
+            </Pressable>
+            <Pressable
+              onPress={onWithdraw}
+              disabled={busy}
+              style={({ pressed }) => [styles.pill, styles.pillGhost, pressed && styles.pressed]}
+              accessibilityRole="button"
+            >
+              <Text style={styles.pillGhostText}>Withdraw</Text>
+            </Pressable>
+            <Pressable
+              onPress={onEdit}
+              disabled={busy}
+              style={({ pressed }) => [styles.pill, styles.pillOutline, pressed && styles.pressed]}
+              accessibilityRole="button"
+            >
+              <Text style={styles.pillOutlineText}>Edit</Text>
+            </Pressable>
+          </View>
+        ) : showSenderAccepted ? (
           <View style={styles.actions}>
             <Pressable
               onPress={onWithdraw}
@@ -234,7 +270,7 @@ const styles = StyleSheet.create({
   metaMuted: { fontFamily: fonts.regular, fontSize: 12, color: colors.ink3, flex: 1 },
   note: { fontFamily: fonts.regular, fontSize: 13, color: colors.ink2, fontStyle: 'italic', marginTop: 2 },
 
-  actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 4 },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8, marginTop: 4 },
   pill: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: radii.pill, alignItems: 'center', justifyContent: 'center' },
   pressed: { opacity: 0.7 },
   pillFill: { backgroundColor: colors.brand },
@@ -243,4 +279,5 @@ const styles = StyleSheet.create({
   pillOutlineText: { fontFamily: fonts.semibold, fontSize: 13, color: colors.brand },
   pillGhost: { backgroundColor: colors.surfaceAlt },
   pillGhostText: { fontFamily: fonts.medium, fontSize: 13, color: colors.ink2 },
+  pillDangerText: { fontFamily: fonts.medium, fontSize: 13, color: colors.danger },
 });

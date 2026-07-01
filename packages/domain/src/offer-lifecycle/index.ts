@@ -220,6 +220,31 @@ export function canCounter(offer: Offer): boolean {
   return offer.state === 'pending' && offer.negotiable;
 }
 
+/**
+ * Whether the SENDER may still EDIT their Offer in place (OH-208; PRD story 131).
+ * Only a `pending` Offer is editable — an edit revises the immutable snapshot
+ * (rate / schedule / child-detail / disclosure / address) WITHOUT changing state
+ * and re-arms the `valid_until` window at the handler. Once the counterparty has
+ * acted (`accepted` / `countered` / `declined`) or the Offer `expired`, the terms
+ * are settled and can no longer be revised. Authorisation (sender-only) is a
+ * handler concern; this is the pure state gate the UI + handler both consult.
+ */
+export function canEditOffer(offer: Pick<Offer, 'state'>): boolean {
+  return offer.state === 'pending';
+}
+
+/**
+ * Whether the SENDER may DELETE (hard-remove) their Offer (OH-208; PRD story 131),
+ * erasing it from the transcript as though never sent. Only a `pending` Offer is
+ * deletable — an already-`accepted` Offer has materialised Bookings and must be
+ * `sender-withdraw`n instead (which cascade-cancels them; see `transitionOffer`),
+ * never silently deleted. Delete is thus the pre-engagement sibling of withdraw:
+ * withdraw leaves a `withdrawn` tombstone, delete leaves nothing.
+ */
+export function canDeleteOffer(offer: Pick<Offer, 'state'>): boolean {
+  return offer.state === 'pending';
+}
+
 /** The state a newly-sent Offer is born in. Always `pending`. */
 export function initialOfferState(): OfferState {
   return 'pending';

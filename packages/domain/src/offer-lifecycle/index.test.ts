@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 import type { OfferSchedule } from './index.js';
 import {
   canCounter,
+  canDeleteOffer,
+  canEditOffer,
   defaultValidUntil,
   initialOfferState,
   isExpiredAt,
@@ -167,6 +169,26 @@ describe('canCounter (negotiable gate — ADR-0017)', () => {
     expect(canCounter(makeOffer({ negotiable: true }))).toBe(true);
     expect(canCounter(makeOffer({ negotiable: false }))).toBe(false);
     expect(canCounter(makeOffer({ state: 'accepted', negotiable: true }))).toBe(false);
+  });
+});
+
+describe('canEditOffer / canDeleteOffer (sender pre-engagement gate — OH-208)', () => {
+  it('both are true only for a pending Offer', () => {
+    expect(canEditOffer(makeOffer({ state: 'pending' }))).toBe(true);
+    expect(canDeleteOffer(makeOffer({ state: 'pending' }))).toBe(true);
+  });
+
+  it('both are false for every non-pending state (accepted incl.)', () => {
+    for (const state of OFFER_STATES) {
+      if (state === 'pending') continue;
+      expect(canEditOffer(makeOffer({ state }))).toBe(false);
+      expect(canDeleteOffer(makeOffer({ state }))).toBe(false);
+    }
+  });
+
+  it('are independent of negotiable (unlike canCounter)', () => {
+    expect(canEditOffer(makeOffer({ state: 'pending', negotiable: false }))).toBe(true);
+    expect(canDeleteOffer(makeOffer({ state: 'pending', negotiable: false }))).toBe(true);
   });
 });
 
