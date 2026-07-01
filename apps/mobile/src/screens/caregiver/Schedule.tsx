@@ -1,186 +1,545 @@
 /**
- * Caregiver Schedule — the Caregiver's booking calendar + availability (synthesised
- * from the design's date-rail/day-selector + the dashboard time-slot booking cards,
- * plus an availability section). A horizontal week/day selector drives the day's
- * bookings; an Availability card toggles whether new requests are accepted and links
- * to the weekly-availability editor. Caregiver = Babysitter/Tutor/Nanny (ADR-0011).
+ * Caregiver Schedule (OH-220) — the Caregiver's hourly-booking landing surface
+ * (PRD-0001 v1.7 stories 52–54, 82, 130; ADR-0014 amended). Wires the design's
+ * §5.11.3 Today screen to the live `GET /v1/caregiver/bookings` feed:
+ *
+ *  - a sticky **active-session banner** (live elapsed timer + one-tap "End session
+ *    & propose hours") whenever a Booking is `in-progress`;
+ *  - a **Needs your attention** block — awarded Bookings to confirm within 24h
+ *    (accept / decline) and a Parent's shorten request to approve / decline;
+ *  - **Today / Upcoming** lists of confirmed sessions, each a time card with the
+ *    family + the lifecycle StatusPill (and a Start control when it's time);
+ *  - a link into the weekly **Availability** editor.
+ *
+ * Pre-activation (story 83): until verification clears, the Caregiver can't take
+ * Bookings, so the schedule shows the shared PreActivation empty state instead.
+ *
+ * Design reference: Claude design — screens/provider-schedule.jsx (bound
+ * role="caregiver"), adapted to the live lifecycle.
  */
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { AppBar } from '@/components/AppBar';
 import { Icon } from '@/components/Icon';
 import { Screen } from '@/components/Screen';
 import { CategoryChip, type Category } from '@/components/ui/CategoryChip';
-import { StatusPill, type BookingState } from '@/components/ui/StatusPill';
-import { Toggle } from '@/components/ui/Toggle';
+import { StatusPill } from '@/components/ui/StatusPill';
+import { TabStrip } from '@/components/ui/TabStrip';
+import { CaregiverPreActivation } from '@/screens/caregiver/PreActivation';
+import { ProposeHoursSheet } from '@/components/caregiver/ProposeHoursSheet';
+import { useCaregiverBookings } from '@/lib/useCaregiverBookings';
+import { useSupplyActivation } from '@/lib/SupplyActivationProvider';
+import { minutesToClock } from '@/lib/consultation';
+import { formatMoney } from '@/lib/offerCopy';
+import {
+  ApiError,
+  acceptCaregiverBooking,
+  approveCaregiverTimeChange,
+  declineCaregiverBooking,
+  declineCaregiverTimeChange,
+  startCaregiverSession,
+  type CaregiverBooking,
+} from '@/api/client';
 import { colors, fonts, radii, shadow } from '@/theme/tokens';
 
-const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const TABS = ['Today', 'Upcoming'] as const;
+type Tab = (typeof TABS)[number];
 
-interface Day {
-  dow: string;
-  date: number;
-  jobs: number;
+function localISO(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
-const DAYS: Day[] = [
-  { dow: 'Mon', date: 11, jobs: 3 },
-  { dow: 'Tue', date: 12, jobs: 2 },
-  { dow: 'Wed', date: 13, jobs: 2 },
-  { dow: 'Thu', date: 14, jobs: 2 },
-  { dow: 'Fri', date: 15, jobs: 1 },
-  { dow: 'Sat', date: 16, jobs: 0 },
-  { dow: 'Sun', date: 17, jobs: 0 },
-];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const WEEKDAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-interface Slot {
-  time: string;
-  band: string;
-  category: Category;
-  title: string;
-  sub: string;
-  state: BookingState;
+/** A ticking `now`, re-rendering every `ms` — drives the live session timer. */
+function useNow(ms: number): Date {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), ms);
+    return () => clearInterval(id);
+  }, [ms]);
+  return now;
 }
 
-const SLOTS: Slot[] = [
-  { time: '3:30', band: 'PM', category: 'Tutor', title: 'Math review · Anika P.', sub: '1h · $35 · 1 child', state: 'accepted' },
-  { time: '5:00', band: 'PM', category: 'Babysitter', title: 'After-school sitter · Mateo & Lia', sub: '2h · $61 · 2 children', state: 'accepted' },
-  { time: '7:30', band: 'PM', category: 'Nanny', title: 'Evening care · Delgado', sub: '2h · $58 · confirm hours', state: 'awaiting-confirmation' },
-];
+function fmtElapsed(fromMs: number, nowMs: number): string {
+  const total = Math.max(0, Math.floor((nowMs - fromMs) / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+function categoryLabel(c: CaregiverBooking['category']): Category {
+  if (c === 'tutor') return 'Tutor';
+  if (c === 'nanny') return 'Nanny';
+  return 'Babysitter';
+}
+
+function hoursOf(b: CaregiverBooking): number {
+  return Math.round(((b.endMin - b.startMin) / 60) * 10) / 10;
+}
+
+function childLabel(b: CaregiverBooking): string {
+  if (b.childCount == null) return '';
+  return ` · ${b.childCount} ${b.childCount === 1 ? 'child' : 'children'}`;
+}
+
+function subLine(b: CaregiverBooking): string {
+  const money = b.computedTotalCents != null ? ` · ${formatMoney(b.computedTotalCents)}` : '';
+  return `${hoursOf(b)}h${money}${childLabel(b)}`;
+}
 
 export function CaregiverSchedule() {
   const router = useRouter();
-  const [selected, setSelected] = useState(2); // Wed
-  const [accepting, setAccepting] = useState(true);
+  const { data: bookings, loading, error, refetch } = useCaregiverBookings();
+  const { loading: actLoading, activated, verification, blockingStep } = useSupplyActivation();
+  const now = useNow(1000);
+  const [tab, setTab] = useState<Tab>('Today');
+  const [proposeFor, setProposeFor] = useState<CaregiverBooking | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
-  const day = DAYS[selected];
+  const todayIso = localISO(now);
+
+  const active = useMemo(() => bookings.find((b) => b.state === 'in-progress') ?? null, [bookings]);
+
+  const awarded = useMemo(
+    () => bookings.filter((b) => b.state === 'requested').sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate)),
+    [bookings],
+  );
+  const shortenRequests = useMemo(
+    () => bookings.filter((b) => b.state === 'accepted' && b.pendingTimeChange != null),
+    [bookings],
+  );
+
+  const today = useMemo(
+    () =>
+      bookings
+        .filter(
+          (b) =>
+            b.scheduledDate === todayIso &&
+            (b.state === 'accepted' || b.state === 'in-progress' || b.state === 'awaiting-confirmation'),
+        )
+        .sort((a, b) => a.startMin - b.startMin),
+    [bookings, todayIso],
+  );
+  const upcoming = useMemo(
+    () =>
+      bookings
+        .filter(
+          (b) =>
+            b.scheduledDate > todayIso && (b.state === 'accepted' || b.state === 'awaiting-confirmation'),
+        )
+        .sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate) || a.startMin - b.startMin),
+    [bookings, todayIso],
+  );
+
+  // Gate on activation AFTER hooks so the hook order is stable.
+  if (actLoading) {
+    return (
+      <Screen scroll edges={['top']} contentStyle={styles.content}>
+        <AppBar large title="Schedule" />
+        <View style={styles.state}>
+          <ActivityIndicator color={colors.brand} />
+        </View>
+      </Screen>
+    );
+  }
+  if (!activated) {
+    return <CaregiverPreActivation verification={verification} blockingStep={blockingStep} />;
+  }
+
+  const runAction = async (id: string, fn: () => Promise<unknown>, failMsg: string) => {
+    if (busyId) return;
+    setBusyId(id);
+    try {
+      await fn();
+      refetch();
+    } catch (e) {
+      Alert.alert('Something went wrong', e instanceof ApiError ? e.message : failMsg);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const list = tab === 'Today' ? today : upcoming;
 
   return (
     <Screen scroll edges={['top']} contentStyle={styles.content}>
-      <AppBar large title="Schedule" actions={[{ icon: 'calendar', label: 'Month view' }]} />
+      <AppBar large title="Schedule" actions={[{ icon: 'bell', badge: awarded.length > 0, label: 'Notifications' }]} />
 
-      <Text style={styles.monthLabel}>May 2026</Text>
+      {/* Sticky active-session banner */}
+      {active ? (
+        <ActiveSessionBanner booking={active} nowMs={now.getTime()} onEnd={() => setProposeFor(active)} />
+      ) : null}
 
-      {/* Week / day selector */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.rail} contentContainerStyle={styles.railContent}>
-        {DAYS.map((d, i) => {
-          const on = i === selected;
-          return (
-            <Pressable
-              key={i}
-              onPress={() => setSelected(i)}
-              accessibilityLabel={`${d.dow} ${d.date}`}
-              style={[styles.datePill, on ? styles.datePillOn : null]}
-            >
-              <Text style={[styles.datePillDow, on ? styles.datePillTextOn : null]}>{d.dow}</Text>
-              <Text style={[styles.datePillNum, on ? styles.datePillTextOn : null]}>{d.date}</Text>
-              <View style={styles.dot}>
-                {d.jobs > 0 ? (
-                  <View style={[styles.dotMark, { backgroundColor: on ? colors.highlight : colors.brand }]} />
-                ) : null}
-              </View>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
-
-      {/* The selected day's bookings */}
-      <Text style={styles.dayHeading}>
-        {DOW[selected]} · {day.jobs} {day.jobs === 1 ? 'booking' : 'bookings'}
-      </Text>
-
-      {day.jobs > 0 ? (
-        <View style={styles.list}>
-          {SLOTS.slice(0, day.jobs).map((s, i) => (
-            <Pressable key={i} onPress={() => router.push('/booking-detail')} style={styles.slot}>
-              <View style={styles.timeChip}>
-                <Text style={styles.timeNum}>{s.time}</Text>
-                <Text style={styles.timeBand}>{s.band}</Text>
-              </View>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <CategoryChip category={s.category} />
-                <Text style={styles.slotTitle}>{s.title}</Text>
-                <Text style={styles.slotSub}>{s.sub}</Text>
-              </View>
-              <View style={styles.slotRight}>
-                <StatusPill state={s.state} />
-                <Icon name="chevron-right" size={16} color={colors.ink3} />
-              </View>
-            </Pressable>
+      {/* Needs your attention — awarded confirms + shorten requests */}
+      {awarded.length > 0 || shortenRequests.length > 0 ? (
+        <View style={styles.attention}>
+          <Text style={styles.attentionTitle}>Needs your attention</Text>
+          {awarded.map((b) => (
+            <AwardedCard
+              key={b.id}
+              booking={b}
+              busy={busyId === b.id}
+              onAccept={() => runAction(b.id, () => acceptCaregiverBooking(b.id), 'Could not accept the booking.')}
+              onDecline={() =>
+                confirmThen('Decline this booking?', 'The family will be notified and their hold released.', () =>
+                  runAction(b.id, () => declineCaregiverBooking(b.id), 'Could not decline the booking.'),
+                )
+              }
+            />
+          ))}
+          {shortenRequests.map((b) => (
+            <ShortenCard
+              key={b.id}
+              booking={b}
+              busy={busyId === b.id}
+              onApprove={() =>
+                runAction(b.id, () => approveCaregiverTimeChange(b.id), 'Could not approve the change.')
+              }
+              onDecline={() =>
+                runAction(b.id, () => declineCaregiverTimeChange(b.id), 'Could not decline the change.')
+              }
+            />
           ))}
         </View>
-      ) : (
+      ) : null}
+
+      <TabStrip tabs={TABS} value={tab} onChange={setTab} style={styles.tabStrip} />
+
+      {loading ? (
+        <View style={styles.state}>
+          <ActivityIndicator color={colors.brand} />
+        </View>
+      ) : error ? (
+        <View style={styles.state}>
+          <Text style={styles.stateText}>{error}</Text>
+          <Pressable onPress={refetch} style={styles.retry}>
+            <Text style={styles.retryText}>Try again</Text>
+          </Pressable>
+        </View>
+      ) : list.length === 0 ? (
         <View style={styles.empty}>
-          <Icon name="calendar" size={22} color={colors.ink3} />
-          <Text style={styles.emptyText}>No bookings this day.</Text>
+          <View style={styles.emptyIcon}>
+            <Icon name="calendar" size={22} color={colors.brand} />
+          </View>
+          <Text style={styles.emptyTitle}>{tab === 'Today' ? 'Nothing today' : 'Nothing upcoming'}</Text>
+          <Text style={styles.emptySub}>
+            {tab === 'Today'
+              ? 'Your accepted sessions for today will appear here.'
+              : 'Sessions you accept will show up here until the day arrives.'}
+          </Text>
+        </View>
+      ) : (
+        <View style={styles.list}>
+          {list.map((b) => (
+            <SessionCard
+              key={b.id}
+              booking={b}
+              showDate={tab === 'Upcoming'}
+              busy={busyId === b.id}
+              onStart={
+                b.state === 'accepted'
+                  ? () => runAction(b.id, () => startCaregiverSession(b.id), 'Could not start the session.')
+                  : undefined
+              }
+            />
+          ))}
         </View>
       )}
 
-      {/* Availability section */}
-      <Text style={styles.sectionTitle}>Availability</Text>
-      <View style={styles.availCard}>
-        <View style={styles.availRow}>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={styles.availTitle}>Accepting new bookings</Text>
-            <Text style={styles.availSub}>When off, your profile is hidden from new Job matches.</Text>
-          </View>
-          <Toggle on={accepting} onPress={() => setAccepting((v) => !v)} />
+      {/* Availability entry */}
+      <Pressable onPress={() => router.push('/availability')} style={styles.availCard}>
+        <View style={styles.availIcon}>
+          <Icon name="clock" size={18} color={colors.brand} />
         </View>
+        <View style={styles.flexMin}>
+          <Text style={styles.availTitle}>Availability &amp; pauses</Text>
+          <Text style={styles.availSub}>Set your weekly grid, a note, and pause new bookings.</Text>
+        </View>
+        <Icon name="chevron-right" size={20} color={colors.ink3} />
+      </Pressable>
 
-        <View style={styles.divider} />
-
-        <Pressable onPress={() => router.push('/availability')} style={styles.availLink}>
-          <View style={styles.availLinkIcon}>
-            <Icon name="clock" size={18} color={colors.brand} />
-          </View>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={styles.availTitle}>Weekly availability</Text>
-            <Text style={styles.availSub}>Mon–Fri afternoons · Sat evenings</Text>
-          </View>
-          <Icon name="chevron-right" size={20} color={colors.ink3} />
-        </Pressable>
-      </View>
+      <ProposeHoursSheet
+        booking={proposeFor}
+        onClose={() => setProposeFor(null)}
+        onProposed={() => {
+          setProposeFor(null);
+          refetch();
+        }}
+      />
     </Screen>
   );
+}
+
+function confirmThen(title: string, message: string, onConfirm: () => void) {
+  Alert.alert(title, message, [
+    { text: 'Cancel', style: 'cancel' },
+    { text: 'Confirm', style: 'destructive', onPress: onConfirm },
+  ]);
+}
+
+function ActiveSessionBanner({
+  booking,
+  nowMs,
+  onEnd,
+}: {
+  booking: CaregiverBooking;
+  nowMs: number;
+  onEnd: () => void;
+}) {
+  // No precise session-start timestamp in v1 — the elapsed clock counts from the
+  // booked start instant (today + startMin). Precise start capture is a follow-up.
+  const startInstant = useMemo(() => {
+    const [y, m, d] = booking.scheduledDate.split('-').map(Number);
+    const dt = new Date(y ?? 1970, (m ?? 1) - 1, d ?? 1, 0, 0, 0, 0);
+    dt.setMinutes(booking.startMin);
+    return dt.getTime();
+  }, [booking.scheduledDate, booking.startMin]);
+
+  return (
+    <View style={styles.banner}>
+      <View style={styles.bannerTop}>
+        <View style={styles.liveRow}>
+          <View style={styles.liveDot} />
+          <Text style={styles.liveText}>In session</Text>
+        </View>
+        <Text style={styles.timer}>{fmtElapsed(startInstant, nowMs)}</Text>
+      </View>
+      <Text style={styles.bannerTitle} numberOfLines={1}>
+        {booking.parentName ?? 'Family'} · {categoryLabel(booking.category)}
+      </Text>
+      <Text style={styles.bannerSub}>
+        {minutesToClock(booking.startMin)}–{minutesToClock(booking.endMin)} · {hoursOf(booking)}h planned
+      </Text>
+      <Pressable onPress={onEnd} accessibilityRole="button" style={styles.endBtn}>
+        <Text style={styles.endText}>End session &amp; propose hours</Text>
+        <Icon name="arrow-right" size={15} color={colors.inkInv} />
+      </Pressable>
+    </View>
+  );
+}
+
+function AwardedCard({
+  booking,
+  busy,
+  onAccept,
+  onDecline,
+}: {
+  booking: CaregiverBooking;
+  busy: boolean;
+  onAccept: () => void;
+  onDecline: () => void;
+}) {
+  const deadline = booking.requestExpiresAt ? respondIn(booking.requestExpiresAt) : null;
+  return (
+    <View style={styles.actionCard}>
+      <View style={styles.actionHead}>
+        <CategoryChip category={categoryLabel(booking.category)} />
+        {deadline ? <Text style={styles.deadline}>{deadline}</Text> : null}
+      </View>
+      <Text style={styles.actionTitle}>New booking · {booking.parentName ?? 'Family'}</Text>
+      <Text style={styles.actionSub}>
+        {dateLabel(booking.scheduledDate)} · {minutesToClock(booking.startMin)} · {subLine(booking)}
+      </Text>
+      <View style={styles.actionRow}>
+        <Pressable onPress={onDecline} disabled={busy} style={[styles.ghostBtn, busy && styles.btnDisabled]}>
+          <Text style={styles.ghostText}>Decline</Text>
+        </Pressable>
+        <Pressable onPress={onAccept} disabled={busy} style={[styles.primaryBtn, busy && styles.btnDisabled]}>
+          {busy ? <ActivityIndicator color={colors.inkInv} /> : <Text style={styles.primaryText}>Accept</Text>}
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function ShortenCard({
+  booking,
+  busy,
+  onApprove,
+  onDecline,
+}: {
+  booking: CaregiverBooking;
+  busy: boolean;
+  onApprove: () => void;
+  onDecline: () => void;
+}) {
+  const pending = booking.pendingTimeChange;
+  return (
+    <View style={[styles.actionCard, styles.actionCardWarn]}>
+      <View style={styles.actionHead}>
+        <View style={styles.warnTag}>
+          <Text style={styles.warnTagText}>Shorten request</Text>
+        </View>
+      </View>
+      <Text style={styles.actionTitle}>{booking.parentName ?? 'Family'} asked to shorten</Text>
+      <Text style={styles.actionSub}>
+        {hoursOf(booking)}h → {pending ? Math.round(pending.proposedDurationHours * 10) / 10 : '?'}h
+        {pending?.note ? ` · “${pending.note}”` : ''}
+      </Text>
+      <View style={styles.actionRow}>
+        <Pressable onPress={onDecline} disabled={busy} style={[styles.ghostBtn, busy && styles.btnDisabled]}>
+          <Text style={styles.ghostText}>Decline</Text>
+        </Pressable>
+        <Pressable onPress={onApprove} disabled={busy} style={[styles.primaryBtn, busy && styles.btnDisabled]}>
+          {busy ? <ActivityIndicator color={colors.inkInv} /> : <Text style={styles.primaryText}>Approve</Text>}
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function SessionCard({
+  booking,
+  showDate,
+  busy,
+  onStart,
+}: {
+  booking: CaregiverBooking;
+  showDate: boolean;
+  busy: boolean;
+  onStart?: () => void;
+}) {
+  const label = minutesToClock(booking.startMin);
+  const [time, mer] = label.split(' ');
+  return (
+    <View style={styles.card}>
+      <View style={styles.timeBlock}>
+        <Text style={styles.timeNum}>{time}</Text>
+        <Text style={styles.timeMeridiem}>{mer}</Text>
+      </View>
+      <View style={styles.cardBody}>
+        <Text style={styles.cardTitle} numberOfLines={1}>
+          {booking.parentName ?? 'Family'} · {categoryLabel(booking.category)}
+        </Text>
+        <Text style={styles.cardSub} numberOfLines={1}>
+          {showDate ? `${dateLabel(booking.scheduledDate)} · ` : ''}
+          {subLine(booking)}
+        </Text>
+        <View style={styles.pillRow}>
+          <StatusPill state={booking.state} />
+        </View>
+      </View>
+      {onStart ? (
+        <Pressable onPress={onStart} disabled={busy} style={[styles.startBtn, busy && styles.btnDisabled]}>
+          {busy ? <ActivityIndicator color={colors.inkInv} /> : <Text style={styles.startText}>Start</Text>}
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+function dateLabel(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(y ?? 1970, (m ?? 1) - 1, d ?? 1);
+  return `${WEEKDAYS_LONG[dt.getDay()]?.slice(0, 3)}, ${MONTHS[dt.getMonth()]} ${dt.getDate()}`;
+}
+
+function respondIn(iso: string): string | null {
+  const ms = new Date(iso).getTime() - Date.now();
+  if (ms <= 0) return 'Expired';
+  const h = Math.floor(ms / 3_600_000);
+  if (h >= 1) return `Respond in ${h}h`;
+  const m = Math.max(1, Math.floor(ms / 60_000));
+  return `Respond in ${m}m`;
 }
 
 const styles = StyleSheet.create({
   content: { paddingBottom: 120 },
 
-  monthLabel: { fontFamily: fonts.semibold, fontSize: 13, color: colors.ink, marginTop: 8 },
+  banner: {
+    backgroundColor: 'rgba(58,111,168,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(58,111,168,0.22)',
+    borderRadius: radii.xl,
+    padding: 16,
+    marginTop: 14,
+  },
+  bannerTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  liveRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  liveDot: { width: 8, height: 8, borderRadius: radii.pill, backgroundColor: colors.info },
+  liveText: { fontFamily: fonts.bold, fontSize: 11, letterSpacing: 0.5, textTransform: 'uppercase', color: colors.info },
+  timer: { fontFamily: fonts.bold, fontSize: 15, color: colors.ink, fontVariant: ['tabular-nums'] },
+  bannerTitle: { fontFamily: fonts.bold, fontSize: 17, letterSpacing: -0.2, color: colors.ink, marginTop: 10 },
+  bannerSub: { fontFamily: fonts.regular, fontSize: 12.5, color: colors.ink2, marginTop: 3 },
+  endBtn: {
+    marginTop: 14,
+    height: 48,
+    borderRadius: radii.pill,
+    backgroundColor: colors.ink,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  endText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.inkInv },
 
-  rail: { marginHorizontal: -24, marginTop: 12 },
-  railContent: { paddingHorizontal: 24, gap: 8 },
-  datePill: { width: 52, paddingVertical: 10, borderRadius: 16, alignItems: 'center', gap: 3, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.hairline },
-  datePillOn: { backgroundColor: colors.ink, borderColor: colors.ink },
-  datePillDow: { fontFamily: fonts.semibold, fontSize: 10, letterSpacing: 0.3, textTransform: 'uppercase', color: colors.ink3 },
-  datePillNum: { fontFamily: fonts.bold, fontSize: 17, color: colors.ink, fontVariant: ['tabular-nums'] },
-  datePillTextOn: { color: colors.inkInv },
-  dot: { height: 6, justifyContent: 'center' },
-  dotMark: { width: 5, height: 5, borderRadius: radii.pill },
+  attention: { marginTop: 18, gap: 10 },
+  attentionTitle: { fontFamily: fonts.bold, fontSize: 16, color: colors.ink },
+  actionCard: { backgroundColor: colors.surface, borderRadius: radii.lg, padding: 14, ...shadow.e1 },
+  actionCardWarn: { borderWidth: 1, borderColor: 'rgba(201,122,42,0.4)' },
+  actionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  deadline: { fontFamily: fonts.semibold, fontSize: 11.5, color: colors.warning },
+  warnTag: { paddingHorizontal: 9, height: 20, borderRadius: radii.pill, backgroundColor: 'rgba(201,122,42,0.14)', justifyContent: 'center' },
+  warnTagText: { fontFamily: fonts.bold, fontSize: 10.5, letterSpacing: 0.3, textTransform: 'uppercase', color: colors.warning },
+  actionTitle: { fontFamily: fonts.semibold, fontSize: 14.5, color: colors.ink },
+  actionSub: { fontFamily: fonts.regular, fontSize: 12.5, color: colors.ink2, marginTop: 3 },
+  actionRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  ghostBtn: {
+    flex: 1,
+    height: 42,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.hairline,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ghostText: { fontFamily: fonts.semibold, fontSize: 13.5, color: colors.ink2 },
+  primaryBtn: {
+    flex: 1,
+    height: 42,
+    borderRadius: radii.pill,
+    backgroundColor: colors.ink,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primaryText: { fontFamily: fonts.semibold, fontSize: 13.5, color: colors.inkInv },
+  btnDisabled: { opacity: 0.5 },
 
-  dayHeading: { fontFamily: fonts.semibold, fontSize: 13, color: colors.ink2, marginTop: 18 },
+  tabStrip: { marginTop: 18 },
 
-  list: { marginTop: 10, gap: 8 },
-  slot: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.surface, borderRadius: radii.lg, padding: 14, ...shadow.e1 },
-  timeChip: { width: 52, paddingVertical: 8, borderRadius: 14, backgroundColor: colors.surfaceAlt, alignItems: 'center' },
-  timeNum: { fontFamily: fonts.bold, fontSize: 15, lineHeight: 17, color: colors.ink, fontVariant: ['tabular-nums'] },
-  timeBand: { fontFamily: fonts.semibold, fontSize: 10, letterSpacing: 0.5, color: colors.ink2 },
-  slotTitle: { fontFamily: fonts.semibold, fontSize: 14, color: colors.ink, marginTop: 6 },
-  slotSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.ink2, marginTop: 2 },
-  slotRight: { alignItems: 'flex-end', gap: 8 },
+  list: { marginTop: 14, gap: 10 },
+  card: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.surface, borderRadius: radii.lg, padding: 14, ...shadow.e1 },
+  timeBlock: { width: 56, paddingVertical: 8, borderRadius: radii.sm, backgroundColor: colors.surfaceAlt, alignItems: 'center' },
+  timeNum: { fontFamily: fonts.bold, fontSize: 15, color: colors.ink, fontVariant: ['tabular-nums'] },
+  timeMeridiem: { fontFamily: fonts.semibold, fontSize: 10, letterSpacing: 0.5, color: colors.ink2, marginTop: 1 },
+  cardBody: { flex: 1, minWidth: 0 },
+  cardTitle: { fontFamily: fonts.semibold, fontSize: 14, color: colors.ink },
+  cardSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.ink2, marginTop: 2 },
+  pillRow: { flexDirection: 'row', marginTop: 8 },
+  startBtn: { height: 36, paddingHorizontal: 16, borderRadius: radii.pill, backgroundColor: colors.brand, alignItems: 'center', justifyContent: 'center' },
+  startText: { fontFamily: fonts.semibold, fontSize: 13, color: colors.inkInv },
 
-  empty: { marginTop: 12, alignItems: 'center', gap: 8, backgroundColor: colors.surface, borderRadius: radii.lg, paddingVertical: 28, ...shadow.e1 },
-  emptyText: { fontFamily: fonts.regular, fontSize: 13, color: colors.ink2 },
+  state: { alignItems: 'center', gap: 12, paddingVertical: 48 },
+  stateText: { fontFamily: fonts.regular, fontSize: 14, color: colors.ink2, textAlign: 'center' },
+  retry: { height: 40, paddingHorizontal: 18, borderRadius: radii.pill, backgroundColor: colors.brand, alignItems: 'center', justifyContent: 'center' },
+  retryText: { fontFamily: fonts.semibold, fontSize: 13, color: colors.inkInv },
 
-  sectionTitle: { fontFamily: fonts.bold, fontSize: 16, color: colors.ink, marginTop: 28 },
-  availCard: { backgroundColor: colors.surface, borderRadius: radii.lg, padding: 16, marginTop: 10, ...shadow.e1 },
-  availRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  empty: { alignItems: 'center', gap: 8, paddingTop: 40, paddingHorizontal: 24 },
+  emptyIcon: { width: 56, height: 56, borderRadius: radii.lg, backgroundColor: colors.brandSoft, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+  emptyTitle: { fontFamily: fonts.bold, fontSize: 17, letterSpacing: -0.3, color: colors.ink },
+  emptySub: { fontFamily: fonts.regular, fontSize: 13, color: colors.ink2, textAlign: 'center', maxWidth: 280, lineHeight: 19 },
+
+  availCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.surface, borderRadius: radii.lg, padding: 16, marginTop: 22, ...shadow.e1 },
+  availIcon: { width: 38, height: 38, borderRadius: radii.pill, backgroundColor: colors.brandSoft, alignItems: 'center', justifyContent: 'center' },
+  flexMin: { flex: 1, minWidth: 0 },
   availTitle: { fontFamily: fonts.semibold, fontSize: 14, color: colors.ink },
   availSub: { fontFamily: fonts.regular, fontSize: 12, lineHeight: 17, color: colors.ink2, marginTop: 2 },
-  divider: { height: 1, backgroundColor: colors.hairline, marginVertical: 14 },
-  availLink: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  availLinkIcon: { width: 38, height: 38, borderRadius: radii.pill, backgroundColor: colors.brandSoft, alignItems: 'center', justifyContent: 'center' },
 });

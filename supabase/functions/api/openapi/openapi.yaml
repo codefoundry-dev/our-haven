@@ -3104,6 +3104,223 @@ components:
           maxLength: 500
       required:
         - newDurationHours
+    CaregiverBookingList:
+      type: object
+      properties:
+        bookings:
+          type: array
+          items:
+            $ref: "#/components/schemas/CaregiverBooking"
+      required:
+        - bookings
+    CaregiverBooking:
+      type: object
+      properties:
+        id:
+          type: string
+        state:
+          type: string
+          enum:
+            - requested
+            - accepted
+            - declined
+            - expired
+            - in-progress
+            - awaiting-confirmation
+            - completed
+            - disputed
+            - cancelled
+        origin:
+          type: string
+          nullable: true
+          enum:
+            - posted-job
+            - direct-message
+            - null
+        jobId:
+          type: string
+          nullable: true
+        offerId:
+          type: string
+          nullable: true
+        seriesId:
+          type: string
+          nullable: true
+        parentName:
+          type: string
+          nullable: true
+        category:
+          type: string
+          nullable: true
+          enum:
+            - babysitter
+            - tutor
+            - nanny
+            - null
+        scheduledDate:
+          type: string
+        startMin:
+          type: integer
+        endMin:
+          type: integer
+        childCount:
+          type: integer
+          nullable: true
+        childAges:
+          type: array
+          items:
+            type: integer
+        serviceAddress:
+          $ref: "#/components/schemas/CaregiverBookingAddress"
+        agreedRateCents:
+          type: integer
+          nullable: true
+        computedTotalCents:
+          type: integer
+          nullable: true
+        proposedHours:
+          type: number
+          nullable: true
+        proposedAmountCents:
+          type: integer
+          nullable: true
+        requestExpiresAt:
+          type: string
+          nullable: true
+        confirmDeadlineAt:
+          type: string
+          nullable: true
+        pendingTimeChange:
+          $ref: "#/components/schemas/CaregiverBookingPendingTimeChange"
+      required:
+        - id
+        - state
+        - origin
+        - jobId
+        - offerId
+        - seriesId
+        - parentName
+        - category
+        - scheduledDate
+        - startMin
+        - endMin
+        - childCount
+        - childAges
+        - serviceAddress
+        - agreedRateCents
+        - computedTotalCents
+        - proposedHours
+        - proposedAmountCents
+        - requestExpiresAt
+        - confirmDeadlineAt
+        - pendingTimeChange
+    CaregiverBookingAddress:
+      type: object
+      nullable: true
+      properties:
+        line1:
+          type: string
+          nullable: true
+        line2:
+          type: string
+          nullable: true
+        city:
+          type: string
+          nullable: true
+        state:
+          type: string
+          nullable: true
+        postalCode:
+          type: string
+          nullable: true
+      required:
+        - line1
+        - line2
+        - city
+        - state
+        - postalCode
+    CaregiverBookingPendingTimeChange:
+      type: object
+      nullable: true
+      properties:
+        proposedDurationHours:
+          type: number
+        proposedEndMin:
+          type: integer
+          nullable: true
+        note:
+          type: string
+          nullable: true
+        requestedAt:
+          type: string
+      required:
+        - proposedDurationHours
+        - proposedEndMin
+        - note
+        - requestedAt
+    CaregiverBookingError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
+    CaregiverBookingTransition:
+      type: object
+      properties:
+        id:
+          type: string
+        state:
+          type: string
+          enum:
+            - requested
+            - accepted
+            - declined
+            - expired
+            - in-progress
+            - awaiting-confirmation
+            - completed
+            - disputed
+            - cancelled
+      required:
+        - id
+        - state
+    CaregiverBookingProposeHoursResult:
+      type: object
+      properties:
+        id:
+          type: string
+        state:
+          type: string
+          enum:
+            - awaiting-confirmation
+        proposedHours:
+          type: number
+        proposedAmountCents:
+          type: integer
+        confirmDeadlineAt:
+          type: string
+      required:
+        - id
+        - state
+        - proposedHours
+        - proposedAmountCents
+        - confirmDeadlineAt
+    CaregiverBookingProposeHours:
+      type: object
+      properties:
+        hours:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          maximum: 24
+        note:
+          type: string
+          maxLength: 1000
+      required:
+        - hours
     MessageThreadSummary:
       type: object
       properties:
@@ -7300,6 +7517,329 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/BookingError"
+  /v1/caregiver/bookings:
+    get:
+      tags:
+        - caregiver-bookings
+      summary: The Caregiver's schedule feed — OH-220
+      description: Returns all of the authenticated Caregiver's hourly Bookings (`kind
+        = caregiver`, `provider_id = caller`) across every state, newest first.
+        The client buckets them into Today / Upcoming / needs-attention (awarded
+        confirm, live session, pending shorten).
+      security:
+        - supabaseAccessToken: []
+      responses:
+        "200":
+          description: The schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingList"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingError"
+  /v1/caregiver/bookings/{bookingId}/accept:
+    post:
+      tags:
+        - caregiver-bookings
+      summary: Accept an awarded (requested) Booking — OH-220
+      description: Confirms a posted-Job award within the 24h window (`requested →
+        accepted`). The service address reveals to the Caregiver from here on.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: bookingId
+          in: path
+      responses:
+        "200":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingTransition"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingError"
+        "404":
+          description: Not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingError"
+        "409":
+          description: Not acceptable from the current state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingError"
+  /v1/caregiver/bookings/{bookingId}/decline:
+    post:
+      tags:
+        - caregiver-bookings
+      summary: Decline an awarded (requested) Booking — OH-220
+      description: Declines a posted-Job award (`requested → declined`) and releases
+        any authorization hold back to the Parent.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: bookingId
+          in: path
+      responses:
+        "200":
+          description: Declined
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingTransition"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingError"
+        "404":
+          description: Not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingError"
+        "409":
+          description: Not declinable from the current state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingError"
+  /v1/caregiver/bookings/{bookingId}/start:
+    post:
+      tags:
+        - caregiver-bookings
+      summary: Mark the session in-progress — OH-220
+      description: Starts the session (`accepted → in-progress`); the active-session
+        banner + timer begin.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: bookingId
+          in: path
+      responses:
+        "200":
+          description: In session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingTransition"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingError"
+        "404":
+          description: Not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingError"
+        "409":
+          description: Not startable from the current state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingError"
+  /v1/caregiver/bookings/{bookingId}/propose-hours:
+    post:
+      tags:
+        - caregiver-bookings
+      summary: End session → propose hours — OH-220
+      description: Ends the session and proposes the hours worked (`in-progress →
+        awaiting-confirmation`), opening the ~24h Parent review window
+        (ADR-0013). Records `proposed_hours` + the derived
+        `proposed_amount_cents` (capped at the authorized hold); the Parent
+        confirms (OH-211) or it auto-confirms + captures on lapse.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: bookingId
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CaregiverBookingProposeHours"
+      responses:
+        "200":
+          description: Proposed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingProposeHoursResult"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingError"
+        "404":
+          description: Not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingError"
+        "409":
+          description: Not in-progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingError"
+  /v1/caregiver/bookings/{bookingId}/time-change/approve:
+    post:
+      tags:
+        - caregiver-bookings
+      summary: Approve the Parent's shorten request — OH-220
+      description: "Approves a pending shorten (ADR-0014 §A3): applies the proposed
+        shorter window + re-derives the estimate, and clears the proposal. The
+        existing authorization hold already covers the smaller amount, so no
+        re-authorize is needed — capture-at-session-end simply captures less."
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: bookingId
+          in: path
+      responses:
+        "200":
+          description: Approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingTransition"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingError"
+        "404":
+          description: Not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingError"
+        "409":
+          description: No pending change / not accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingError"
+  /v1/caregiver/bookings/{bookingId}/time-change/decline:
+    post:
+      tags:
+        - caregiver-bookings
+      summary: Decline the Parent's shorten request — OH-220
+      description: "Declines a pending shorten: drops the proposal; the Booking keeps
+        its original window + pay."
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: bookingId
+          in: path
+      responses:
+        "200":
+          description: Declined
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingTransition"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingError"
+        "404":
+          description: Not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingError"
+        "409":
+          description: No pending change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverBookingError"
   /v1/threads:
     post:
       tags:
