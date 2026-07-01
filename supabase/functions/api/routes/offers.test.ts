@@ -123,7 +123,7 @@ function makeDb(
 
 function makeDeps(db: AppDeps['db']): AppDeps {
   const stub = new Proxy({} as never, { get: () => stub });
-  return { env: buildTestEnv(), db, supabase: stub, stripe: stub, backgroundCheck: stub };
+  return { env: buildTestEnv(), db, supabase: stub, stripe: stub, backgroundCheck: stub, daily: stub };
 }
 
 const parentToken = (uid = 'uid-par') =>

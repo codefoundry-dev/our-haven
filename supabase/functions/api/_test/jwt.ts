@@ -33,7 +33,7 @@ export function buildTestEnv(overrides: Record<string, string | undefined> = {})
  *  stubs. */
 export function stubDeps(): AppDeps {
   const stub = new Proxy({} as never, { get: () => stub });
-  return { env: buildTestEnv(), db: stub, supabase: stub, stripe: stub, backgroundCheck: stub };
+  return { env: buildTestEnv(), db: stub, supabase: stub, stripe: stub, backgroundCheck: stub, daily: stub };
 }
 
 export interface TestTokenInput {

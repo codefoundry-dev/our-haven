@@ -24,7 +24,7 @@ function fakeDeps(): AppDeps {
     STRIPE_PARENT_SUBSCRIPTION_PRICE_ID: 'price_unused_parent_sub',
     CHECKR_WEBHOOK_SECRET: 'checkr_whsec_unused',
   });
-  return { env, db: stub, supabase: stub, stripe: stub, backgroundCheck: stub };
+  return { env, db: stub, supabase: stub, stripe: stub, backgroundCheck: stub, daily: stub };
 }
 
 export async function edgeOpenApiDocument(): Promise<unknown> {

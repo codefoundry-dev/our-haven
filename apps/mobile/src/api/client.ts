@@ -390,6 +390,30 @@ export function sendMessage(threadId: string, body: string): Promise<ChatMessage
 }
 
 /**
+ * Ad-hoc embedded video calls inside a thread (OH-216; ADR-0008). `startThreadCall`
+ * creates a short-lived (~30 min) Daily.co private room, logs the link generation
+ * for Trust & Safety (no content recorded), and posts a "Join video call" poke the
+ * counterparty receives over the messaging Realtime pipe — it returns the
+ * initiator's join session (room URL + owner token) plus the poke message so the
+ * caller can add the bubble without a refetch. `joinCall` mints a fresh per-user
+ * token for a still-live call (throws 410 `call_expired` once it has ended). A
+ * Parent start/join is Subscription-gated (402); 503 when video is unconfigured.
+ * The room is entered via the Daily SDK on native / an iframe on web.
+ */
+export type VideoCallSession =
+  paths['/v1/calls/{callId}/join']['post']['responses'][200]['content']['application/json'];
+export type StartVideoCallResult =
+  paths['/v1/threads/{threadId}/calls']['post']['responses'][201]['content']['application/json'];
+
+export function startThreadCall(threadId: string): Promise<StartVideoCallResult> {
+  return post<StartVideoCallResult>(`/v1/threads/${threadId}/calls`, undefined);
+}
+
+export function joinCall(callId: string): Promise<VideoCallSession> {
+  return post<VideoCallSession>(`/v1/calls/${callId}/join`, undefined);
+}
+
+/**
  * Structured Offers / Book-requests inside a thread (OH-206). `getThreadOffers`
  * lists a thread's Offers (the exact service address is projected per viewer +
  * status — hidden from the Caregiver until accept); `sendOffer` composes one
