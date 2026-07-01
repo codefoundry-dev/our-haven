@@ -4599,6 +4599,96 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/bookings/{bookingId}/rating": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit this side of a two-way Booking rating — OH-214
+         * @description Submits the caller's 1–5 star rating (+ optional text) for a `completed` Booking. Direction is derived from the caller: a Parent rates the supply member (a PUBLIC profile rating); a Caregiver/Provider rates the Parent (a supply-internal, aggregate-only rating). Ratings are BLIND — the mutual reveal happens once both sides submit or the 14-day window closes. 409 when the Booking isn't completed, the window has closed, or the caller already rated their side; 404 when the Booking isn't the caller's.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    bookingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SubmitRatingRequest"];
+                };
+            };
+            responses: {
+                /** @description Rating submitted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RatingStatus"];
+                    };
+                };
+                /** @description Invalid rating */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RatingError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RatingError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RatingError"];
+                    };
+                };
+                /** @description Booking not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RatingError"];
+                    };
+                };
+                /** @description Not ratable (not completed / window closed / already rated) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RatingError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/threads": {
         parameters: {
             query?: never;
@@ -8225,6 +8315,24 @@ export interface components {
             endMin: number;
             rateCents: number | null;
             autoCompleteAt: string | null;
+            rating: components["schemas"]["RatingStatus"];
+            counterpartyRating: {
+                averageStars: number | null;
+                count: number;
+            } | null;
+        };
+        RatingStatus: {
+            canRate: boolean;
+            windowClosesAt: string | null;
+            mine: {
+                stars: number;
+                text: string | null;
+            } | null;
+            revealed: boolean;
+            counterparty: {
+                stars: number;
+                text: string | null;
+            } | null;
         };
         ConsultationBookingError: {
             error: string;
@@ -8278,6 +8386,7 @@ export interface components {
             /** @enum {string|null} */
             disputeReason: "overcharged" | "no-show" | "safety" | "quality" | "other" | null;
             pendingTimeChange: components["schemas"]["BookingPendingTimeChange"];
+            rating: components["schemas"]["RatingStatus"];
         };
         BookingServiceAddress: {
             line1: string | null;
@@ -8382,6 +8491,11 @@ export interface components {
             requestExpiresAt: string | null;
             confirmDeadlineAt: string | null;
             pendingTimeChange: components["schemas"]["CaregiverBookingPendingTimeChange"];
+            rating: components["schemas"]["RatingStatus"];
+            parentRating: {
+                averageStars: number | null;
+                count: number;
+            };
         };
         CaregiverBookingAddress: {
             line1: string | null;
@@ -8416,6 +8530,14 @@ export interface components {
         CaregiverBookingProposeHours: {
             hours: number;
             note?: string;
+        };
+        RatingError: {
+            error: string;
+            reason?: string;
+        };
+        SubmitRatingRequest: {
+            stars: number;
+            text?: string;
         };
         MessageThreadSummary: {
             id: string;

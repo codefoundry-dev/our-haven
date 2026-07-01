@@ -13,6 +13,15 @@ import {
   type BookingState,
 } from '../../../../packages/domain/src/booking-lifecycle/index.ts';
 import { releaseBookingHold, type BookingPaymentStatus } from '../services/booking-payments.ts';
+import {
+  buildBookingRatingView,
+  completionAnchor,
+  loadParentRatingAggregates,
+  loadRatingsByBooking,
+  type RatingAggregate,
+  type RatingStatusView,
+} from '../services/ratings.ts';
+import { RatingAggregateSchema, RatingStatusSchema } from './ratings.ts';
 
 /**
  * Caregiver Schedule (OH-220) — the Caregiver-facing side of the hourly Booking
@@ -100,6 +109,11 @@ const CaregiverBookingSchema = z
     confirmDeadlineAt: z.string().nullable(),
     /** A live Parent shorten proposal awaiting approve/decline, or null. */
     pendingTimeChange: PendingTimeChangeSchema.nullable(),
+    /** Two-way rating status from the Caregiver's perspective (OH-214). */
+    rating: RatingStatusSchema,
+    /** The Parent's supply-internal standing (aggregate stars + count, no text) —
+     *  the asymmetric parent-rating projection a supply member sees (OH-214). */
+    parentRating: RatingAggregateSchema,
   })
   .openapi('CaregiverBooking');
 
@@ -175,6 +189,9 @@ interface BookingRow {
   pending_time_change_hours: string | number | null;
   pending_time_change_note: string | null;
   pending_time_change_requested_at: Date | string | null;
+  confirmed_at: Date | string | null;
+  auto_complete_at: Date | string | null;
+  updated_at: Date | string | null;
 }
 
 const BOOKING_COLUMNS = [
@@ -211,6 +228,9 @@ const BOOKING_COLUMNS = [
   'pending_time_change_hours',
   'pending_time_change_note',
   'pending_time_change_requested_at',
+  'confirmed_at',
+  'auto_complete_at',
+  'updated_at',
 ] as const;
 
 /** The proposed shorter end-of-window, derived (OH-212 stores hours only). */
@@ -297,7 +317,12 @@ function toAdjustable(row: BookingRow): AdjustableBooking {
   };
 }
 
-function serialiseBooking(row: BookingRow, parentName: string | null): z.infer<typeof CaregiverBookingSchema> {
+function serialiseBooking(
+  row: BookingRow,
+  parentName: string | null,
+  rating: RatingStatusView,
+  parentRating: RatingAggregate,
+): z.infer<typeof CaregiverBookingSchema> {
   const revealed = ADDRESS_REVEALED.has(row.state);
   return {
     id: row.id,
@@ -337,6 +362,8 @@ function serialiseBooking(row: BookingRow, parentName: string | null): z.infer<t
             requestedAt: toIsoOrNull(row.pending_time_change_requested_at)!,
           }
         : null,
+    rating,
+    parentRating,
   };
 }
 
@@ -511,6 +538,13 @@ export function registerCaregiverBookingRoutes(app: OpenAPIHono<AppEnv>): void {
 
     const parentUids = [...new Set(rows.map((r) => r.parent_uid))];
     const nameByUid = new Map<string, string | null>();
+    const now = new Date();
+    // Two-way ratings (OH-214): each Booking's viewer-relative status + the Parent's
+    // supply-internal standing (batched — one query each, not per row).
+    const [pairs, parentAggs] = await Promise.all([
+      loadRatingsByBooking(db, rows.map((r) => r.id)),
+      loadParentRatingAggregates(db, parentUids, now),
+    ]);
     if (parentUids.length > 0) {
       const profs = (await db
         .selectFrom('profiles')
@@ -520,7 +554,18 @@ export function registerCaregiverBookingRoutes(app: OpenAPIHono<AppEnv>): void {
       profs.forEach((p) => nameByUid.set(p.id, fullName(p.first_name, p.last_name)));
     }
 
-    const bookings = rows.map((r) => serialiseBooking(r, nameByUid.get(r.parent_uid) ?? null));
+    const bookings = rows.map((r) => {
+      const pair = pairs.get(r.id) ?? { parentToSupply: null, supplyToParent: null };
+      const rating = buildBookingRatingView({
+        state: r.state,
+        completedAt: completionAnchor(r),
+        pair,
+        viewerDirection: 'supply-to-parent',
+        now,
+      });
+      const parentRating = parentAggs.get(r.parent_uid) ?? { averageStars: null, count: 0 };
+      return serialiseBooking(r, nameByUid.get(r.parent_uid) ?? null, rating, parentRating);
+    });
     return c.json({ bookings }, 200);
   });
 

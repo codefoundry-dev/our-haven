@@ -818,6 +818,31 @@ export interface SupplyFlagsTable {
   created_at: Generated<Date>;
 }
 
+/**
+ * Two-way Ratings (OH-214) — the store the OH-180 `rating-reveal` deep module
+ * projects. One row per (completed Booking, direction). `direction` names who
+ * rated whom; `subject_provider_id` / `subject_parent_uid` denormalise the rated
+ * party (snapshotted from the Booking) so the public per-supply and supply-internal
+ * per-parent aggregations are single-table scans. The 14-day reveal-window anchor
+ * is derived from the Booking's completion instant, NOT stored here.
+ * Service-role-only (read through the Edge).
+ */
+export interface RatingsTable {
+  id: Generated<string>;
+  booking_id: string;
+  direction: 'parent-to-supply' | 'supply-to-parent';
+  rater_uid: string;
+  // Set on a 'parent-to-supply' row (the rated supply); NULL on the other direction.
+  subject_provider_id: string | null;
+  // Set on a 'supply-to-parent' row (the rated Parent uid); NULL on the other direction.
+  subject_parent_uid: string | null;
+  stars: number;
+  text: string | null;
+  submitted_at: Generated<Date>;
+  created_at: Generated<Date>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
 export interface Database {
   auth_email_otps: AuthEmailOtpsTable;
   auth_step_up_grants: AuthStepUpGrantsTable;
@@ -851,4 +876,5 @@ export interface Database {
   notification_web_push_subscriptions: NotificationWebPushSubscriptionsTable;
   disputes: DisputesTable;
   supply_flags: SupplyFlagsTable;
+  ratings: RatingsTable;
 }

@@ -26,9 +26,11 @@ import { Icon } from '@/components/Icon';
 import { Screen } from '@/components/Screen';
 import { CategoryChip, type Category } from '@/components/ui/CategoryChip';
 import { StatusPill } from '@/components/ui/StatusPill';
+import { RatingValue } from '@/components/ui/StarRating';
 import { TabStrip } from '@/components/ui/TabStrip';
 import { CaregiverPreActivation } from '@/screens/caregiver/PreActivation';
 import { ProposeHoursSheet } from '@/components/caregiver/ProposeHoursSheet';
+import { RatingSheet } from '@/components/RatingSheet';
 import { useCaregiverBookings } from '@/lib/useCaregiverBookings';
 import { useSupplyActivation } from '@/lib/SupplyActivationProvider';
 import { minutesToClock } from '@/lib/consultation';
@@ -44,7 +46,7 @@ import {
 } from '@/api/client';
 import { colors, fonts, radii, shadow } from '@/theme/tokens';
 
-const TABS = ['Today', 'Upcoming'] as const;
+const TABS = ['Today', 'Upcoming', 'Past'] as const;
 type Tab = (typeof TABS)[number];
 
 function localISO(d: Date): string {
@@ -102,6 +104,7 @@ export function CaregiverSchedule() {
   const now = useNow(1000);
   const [tab, setTab] = useState<Tab>('Today');
   const [proposeFor, setProposeFor] = useState<CaregiverBooking | null>(null);
+  const [ratingFor, setRatingFor] = useState<CaregiverBooking | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const todayIso = localISO(now);
@@ -138,6 +141,15 @@ export function CaregiverSchedule() {
         .sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate) || a.startMin - b.startMin),
     [bookings, todayIso],
   );
+  // Completed sessions — the two-way rating surface (OH-214): rate the family, or
+  // see the rating already left + the family's standing.
+  const past = useMemo(
+    () =>
+      bookings
+        .filter((b) => b.state === 'completed')
+        .sort((a, b) => b.scheduledDate.localeCompare(a.scheduledDate) || b.startMin - a.startMin),
+    [bookings],
+  );
 
   // Gate on activation AFTER hooks so the hook order is stable.
   if (actLoading) {
@@ -167,7 +179,7 @@ export function CaregiverSchedule() {
     }
   };
 
-  const list = tab === 'Today' ? today : upcoming;
+  const list = tab === 'Today' ? today : tab === 'Upcoming' ? upcoming : past;
 
   return (
     <Screen scroll edges={['top']} contentStyle={styles.content}>
@@ -227,14 +239,24 @@ export function CaregiverSchedule() {
       ) : list.length === 0 ? (
         <View style={styles.empty}>
           <View style={styles.emptyIcon}>
-            <Icon name="calendar" size={22} color={colors.brand} />
+            <Icon name={tab === 'Past' ? 'star' : 'calendar'} size={22} color={colors.brand} />
           </View>
-          <Text style={styles.emptyTitle}>{tab === 'Today' ? 'Nothing today' : 'Nothing upcoming'}</Text>
+          <Text style={styles.emptyTitle}>
+            {tab === 'Today' ? 'Nothing today' : tab === 'Upcoming' ? 'Nothing upcoming' : 'No past sessions'}
+          </Text>
           <Text style={styles.emptySub}>
             {tab === 'Today'
               ? 'Your accepted sessions for today will appear here.'
-              : 'Sessions you accept will show up here until the day arrives.'}
+              : tab === 'Upcoming'
+                ? 'Sessions you accept will show up here until the day arrives.'
+                : 'Completed sessions appear here so you can rate the family.'}
           </Text>
+        </View>
+      ) : tab === 'Past' ? (
+        <View style={styles.list}>
+          {list.map((b) => (
+            <PastCard key={b.id} booking={b} onRate={() => setRatingFor(b)} />
+          ))}
         </View>
       ) : (
         <View style={styles.list}>
@@ -271,6 +293,18 @@ export function CaregiverSchedule() {
         onClose={() => setProposeFor(null)}
         onProposed={() => {
           setProposeFor(null);
+          refetch();
+        }}
+      />
+
+      <RatingSheet
+        visible={ratingFor != null}
+        bookingId={ratingFor?.id ?? null}
+        subjectName={ratingFor?.parentName ?? null}
+        target="parent"
+        onClose={() => setRatingFor(null)}
+        onRated={() => {
+          setRatingFor(null);
           refetch();
         }}
       />
@@ -436,6 +470,49 @@ function SessionCard({
   );
 }
 
+/** A completed session — the two-way rating surface (OH-214). Shows the family's
+ *  standing (aggregate, no text — the asymmetric parent projection), the rating
+ *  already left, and a Rate action while the 14-day window is open. */
+function PastCard({ booking, onRate }: { booking: CaregiverBooking; onRate: () => void }) {
+  const { rating, parentRating } = booking;
+  return (
+    <View style={styles.card}>
+      <View style={styles.cardBody}>
+        <View style={styles.pastTitleRow}>
+          <Text style={styles.cardTitle} numberOfLines={1}>
+            {booking.parentName ?? 'Family'} · {categoryLabel(booking.category)}
+          </Text>
+          {parentRating.count > 0 && parentRating.averageStars != null ? (
+            <RatingValue value={parentRating.averageStars} count={parentRating.count} size={13} />
+          ) : null}
+        </View>
+        <Text style={styles.cardSub} numberOfLines={1}>
+          {dateLabel(booking.scheduledDate)} · {subLine(booking)}
+        </Text>
+        {rating.mine ? (
+          <View style={styles.ratedRow}>
+            <Text style={styles.ratedText}>You rated</Text>
+            <RatingValue value={rating.mine.stars} size={13} />
+            {rating.revealed && rating.counterparty ? (
+              <>
+                <Text style={styles.ratedDot}>·</Text>
+                <Text style={styles.ratedText}>They rated you</Text>
+                <RatingValue value={rating.counterparty.stars} size={13} />
+              </>
+            ) : null}
+          </View>
+        ) : null}
+      </View>
+      {rating.canRate ? (
+        <Pressable onPress={onRate} accessibilityRole="button" style={styles.rateBtn}>
+          <Icon name="star" size={14} color={colors.inkInv} />
+          <Text style={styles.startText}>Rate</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
 function dateLabel(iso: string): string {
   const [y, m, d] = iso.split('-').map(Number);
   const dt = new Date(y ?? 1970, (m ?? 1) - 1, d ?? 1);
@@ -526,6 +603,11 @@ const styles = StyleSheet.create({
   pillRow: { flexDirection: 'row', marginTop: 8 },
   startBtn: { height: 36, paddingHorizontal: 16, borderRadius: radii.pill, backgroundColor: colors.brand, alignItems: 'center', justifyContent: 'center' },
   startText: { fontFamily: fonts.semibold, fontSize: 13, color: colors.inkInv },
+  rateBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 36, paddingHorizontal: 14, borderRadius: radii.pill, backgroundColor: colors.brand, justifyContent: 'center' },
+  pastTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  ratedRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, flexWrap: 'wrap' },
+  ratedText: { fontFamily: fonts.semibold, fontSize: 12, color: colors.ink2 },
+  ratedDot: { fontFamily: fonts.regular, fontSize: 12, color: colors.ink3 },
 
   state: { alignItems: 'center', gap: 12, paddingVertical: 48 },
   stateText: { fontFamily: fonts.regular, fontSize: 14, color: colors.ink2, textAlign: 'center' },

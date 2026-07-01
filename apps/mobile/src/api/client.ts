@@ -364,6 +364,25 @@ export function reportNoShow(bookingId: string): Promise<BookingReportNoShowResu
 }
 
 /**
+ * Two-way Ratings (OH-214) — after a Booking completes, both parties may rate 1–5
+ * (+ optional text) within 14 days. Submissions are BLIND; the reveal happens once
+ * both submit or the window closes. `submitBookingRating` posts the caller's side
+ * (direction is derived server-side from the caller) and returns the viewer's
+ * updated rating status. The same `RatingStatus` shape is folded into every
+ * Booking read surface (booking detail, caregiver + consultation schedule feeds),
+ * so the UI can gate "Rate / You rated / their rating" without a separate fetch.
+ */
+export type RatingStatus = BookingDetail['rating'];
+export type SubmittedRating = NonNullable<RatingStatus['mine']>;
+export type RatingAggregate = CaregiverBooking['parentRating'];
+export type SubmitRatingBody =
+  paths['/v1/bookings/{bookingId}/rating']['post']['requestBody']['content']['application/json'];
+
+export function submitBookingRating(bookingId: string, body: SubmitRatingBody): Promise<RatingStatus> {
+  return post<RatingStatus>(`/v1/bookings/${bookingId}/rating`, body);
+}
+
+/**
  * Adjust booked time (OH-212, ADR-0014 §A3) — Parent-side. `extendBooking` buys
  * more time on an `accepted` Booking: it applies immediately + re-authorizes the
  * larger total (the result carries a `clientSecret` for opportunistic 3DS when
