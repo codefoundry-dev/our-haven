@@ -40,8 +40,11 @@ import {
 } from '../../../../packages/domain/src/parent-subscription/index.ts';
 import { calculatePricing } from '../../../../packages/domain/src/pricing/index.ts';
 import { scanScopeNote } from '../../../../packages/domain/src/disintermediation/index.ts';
-import type { StripeAdapter } from '../vendors/stripe.ts';
 import { authorizeBooking, priceBooking } from '../services/booking-payments.ts';
+import {
+  resolveCaregiverConnectAccount,
+  resolveParentPaymentSource,
+} from '../services/payment-source.ts';
 
 /**
  * Applications review + Award (OH-210) — CONTEXT.md § Application / § Job /
@@ -383,37 +386,6 @@ const REQUEST_TTL_MS = 24 * 60 * 60 * 1000;
 function slotStartAtUtc(date: string, startMin: number): Date {
   const [y, m, d] = date.split('-').map(Number);
   return new Date(Date.UTC(y!, (m ?? 1) - 1, d ?? 1, 0, startMin, 0, 0));
-}
-
-/** The awarded Caregiver's ready Connect account (`acct_…`), or null if not payable. */
-async function resolveCaregiverConnectAccount(db: Db, providerId: string): Promise<string | null> {
-  const row = (await db
-    .selectFrom('provider_connect_accounts')
-    .select(['stripe_account_id', 'charges_enabled', 'payouts_enabled'])
-    .where('provider_id', '=', providerId)
-    .executeTakeFirst()) as
-    | { stripe_account_id: string | null; charges_enabled: boolean; payouts_enabled: boolean }
-    | undefined;
-  if (!row?.stripe_account_id || !row.charges_enabled || !row.payouts_enabled) return null;
-  return row.stripe_account_id;
-}
-
-/** The Parent's Stripe Customer + saved default card, or null if either is missing. */
-async function resolveParentPaymentSource(
-  db: Db,
-  stripe: StripeAdapter,
-  uid: string,
-): Promise<{ customerId: string; paymentMethodId: string } | null> {
-  const sub = (await db
-    .selectFrom('parent_subscriptions')
-    .select(['stripe_customer_id'])
-    .where('uid', '=', uid)
-    .executeTakeFirst()) as { stripe_customer_id: string | null } | undefined;
-  const customerId = sub?.stripe_customer_id;
-  if (!customerId) return null;
-  const paymentMethodId = await stripe.retrieveCustomerDefaultPaymentMethod(customerId);
-  if (!paymentMethodId) return null;
-  return { customerId, paymentMethodId };
 }
 
 /** The same Subscription gate the paywall reads (OH-193): entitled iff active|trialing. */
@@ -761,6 +733,9 @@ function buildBookingBase(
     series_id: occ.seriesId,
     agreed_rate_cents: offer.proposed_rate_cents,
     computed_total_cents: occ.parentChargeCents,
+    // Per-child, per-hour surcharge snapshot — lets adjust-time (OH-212) re-price
+    // the Booking for a new duration without re-reading the Offer.
+    per_child_surcharge_cents: offer.per_child_surcharge_cents ?? 0,
     category: job.category,
     child_count: job.child_count ?? 1,
     child_ages: job.child_ages ?? [],

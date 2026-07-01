@@ -22,7 +22,8 @@ import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { StatusPill } from '@/components/ui/StatusPill';
 import { CancelSheet } from '@/components/parent/CancelSheet';
 import { DisputeSheet } from '@/components/parent/DisputeSheet';
-import { ApiError, confirmBookingHours } from '@/api/client';
+import { AdjustTimeSheet } from '@/components/parent/AdjustTimeSheet';
+import { ApiError, confirmBookingHours, rescindReduceRequest } from '@/api/client';
 import { formatMoney } from '@/lib/offerCopy';
 import {
   bookingActionsFor,
@@ -44,6 +45,7 @@ export default function BookingDetailScreen() {
 
   const [cancelOpen, setCancelOpen] = useState(false);
   const [disputeOpen, setDisputeOpen] = useState(false);
+  const [adjustOpen, setAdjustOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -56,6 +58,20 @@ export default function BookingDetailScreen() {
       await reload();
     } catch (e) {
       setActionError(e instanceof ApiError ? e.message : 'Could not confirm the hours.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const rescindShorten = async () => {
+    if (!bookingId || busy) return;
+    setBusy(true);
+    setActionError(null);
+    try {
+      await rescindReduceRequest(bookingId);
+      await reload();
+    } catch (e) {
+      setActionError(e instanceof ApiError ? e.message : 'Could not withdraw the request.');
     } finally {
       setBusy(false);
     }
@@ -176,6 +192,35 @@ export default function BookingDetailScreen() {
           </View>
         </View>
 
+        {actions.hasPendingTimeChange && booking.pendingTimeChange ? (
+          <View style={styles.pendingCard}>
+            <View style={styles.pendingHead}>
+              <Icon name="clock" size={16} color={colors.ink} />
+              <Text style={styles.pendingTitle}>Shorten request pending</Text>
+            </View>
+            <Text style={styles.pendingText}>
+              You asked to change this to {booking.pendingTimeChange.proposedDurationHours}h. Waiting for the
+              caregiver to approve — nothing changes until they do.
+            </Text>
+            <Pressable onPress={rescindShorten} disabled={busy} accessibilityRole="button" style={styles.pendingBtn}>
+              <Text style={styles.pendingBtnText}>{busy ? 'Withdrawing…' : 'Withdraw request'}</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {actions.canAdjustTime ? (
+          <Pressable style={styles.manageRow} onPress={() => setAdjustOpen(true)} accessibilityRole="button">
+            <View style={styles.manageIcon}>
+              <Icon name="clock" size={17} color={colors.ink} />
+            </View>
+            <View style={styles.manageText}>
+              <Text style={styles.manageLabel}>Adjust time</Text>
+              <Text style={styles.manageSub}>Add hours now, or request a shorter session</Text>
+            </View>
+            <Icon name="chevron-right" size={16} color={colors.ink3} />
+          </Pressable>
+        ) : null}
+
         {actionError ? <Text style={styles.err}>{actionError}</Text> : null}
 
         {actions.canDispute ? (
@@ -234,6 +279,15 @@ export default function BookingDetailScreen() {
           void reload();
         }}
       />
+      <AdjustTimeSheet
+        visible={adjustOpen}
+        booking={booking}
+        onClose={() => setAdjustOpen(false)}
+        onAdjusted={() => {
+          setAdjustOpen(false);
+          void reload();
+        }}
+      />
     </Screen>
   );
 }
@@ -280,6 +334,28 @@ const styles = StyleSheet.create({
   payIcon: { width: 36, height: 36, borderRadius: radii.pill, backgroundColor: colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' },
   payLabel: { fontFamily: fonts.semibold, fontSize: 14, color: colors.ink },
   payNote: { fontFamily: fonts.regular, fontSize: 11.5, lineHeight: 16, color: colors.ink2, marginTop: 2 },
+
+  pendingCard: {
+    backgroundColor: colors.highlight,
+    borderRadius: radii.lg,
+    padding: 16,
+    marginBottom: 12,
+    gap: 8,
+  },
+  pendingHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  pendingTitle: { fontFamily: fonts.semibold, fontSize: 14.5, color: colors.ink },
+  pendingText: { fontFamily: fonts.regular, fontSize: 13, lineHeight: 19, color: colors.ink2 },
+  pendingBtn: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: radii.pill,
+    borderWidth: 1.5,
+    borderColor: colors.ink,
+    backgroundColor: colors.surface,
+  },
+  pendingBtnText: { fontFamily: fonts.semibold, fontSize: 13.5, color: colors.ink },
 
   manageRow: {
     flexDirection: 'row',

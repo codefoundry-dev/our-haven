@@ -2851,6 +2851,8 @@ components:
             - quality
             - other
             - null
+        pendingTimeChange:
+          $ref: "#/components/schemas/BookingPendingTimeChange"
       required:
         - id
         - kind
@@ -2876,6 +2878,7 @@ components:
         - requestExpiresAt
         - cancellationTier
         - disputeReason
+        - pendingTimeChange
     BookingServiceAddress:
       type: object
       nullable: true
@@ -2901,6 +2904,24 @@ components:
         - city
         - state
         - postalCode
+    BookingPendingTimeChange:
+      type: object
+      nullable: true
+      properties:
+        proposedDurationHours:
+          type: number
+        proposedEndMin:
+          type: integer
+        note:
+          type: string
+          nullable: true
+        requestedAt:
+          type: string
+      required:
+        - proposedDurationHours
+        - proposedEndMin
+        - note
+        - requestedAt
     BookingError:
       type: object
       properties:
@@ -2981,6 +3002,108 @@ components:
           maxLength: 1000
       required:
         - reason
+    BookingExtend:
+      type: object
+      properties:
+        id:
+          type: string
+        state:
+          type: string
+          enum:
+            - requested
+            - accepted
+            - declined
+            - expired
+            - in-progress
+            - awaiting-confirmation
+            - completed
+            - disputed
+            - cancelled
+        startMin:
+          type: integer
+        endMin:
+          type: integer
+        durationHours:
+          type: number
+        computedTotalCents:
+          type: integer
+        authorizedAmountCents:
+          type: integer
+        paymentStatus:
+          type: string
+          nullable: true
+          enum:
+            - scheduled
+            - requires_action
+            - authorized
+            - captured
+            - canceled
+            - refunded
+            - failed
+            - null
+        paymentIntentId:
+          type: string
+          nullable: true
+        clientSecret:
+          type: string
+          nullable: true
+      required:
+        - id
+        - state
+        - startMin
+        - endMin
+        - durationHours
+        - computedTotalCents
+        - authorizedAmountCents
+        - paymentStatus
+        - paymentIntentId
+        - clientSecret
+    BookingExtendRequest:
+      type: object
+      properties:
+        newDurationHours:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          maximum: 24
+      required:
+        - newDurationHours
+    BookingAdjustPending:
+      type: object
+      properties:
+        id:
+          type: string
+        state:
+          type: string
+          enum:
+            - requested
+            - accepted
+            - declined
+            - expired
+            - in-progress
+            - awaiting-confirmation
+            - completed
+            - disputed
+            - cancelled
+        pendingTimeChange:
+          $ref: "#/components/schemas/BookingPendingTimeChange"
+      required:
+        - id
+        - state
+        - pendingTimeChange
+    BookingReduceRequestBody:
+      type: object
+      properties:
+        newDurationHours:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          maximum: 24
+        note:
+          type: string
+          maxLength: 500
+      required:
+        - newDurationHours
     MessageThreadSummary:
       type: object
       properties:
@@ -7004,6 +7127,175 @@ paths:
                 $ref: "#/components/schemas/BookingError"
         "409":
           description: Not disputable from the current state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingError"
+  /v1/bookings/{bookingId}/extend:
+    post:
+      tags:
+        - bookings
+      summary: Extend a booked session — applies immediately + re-authorizes — OH-212
+      description: "Buys more of the Caregiver's time on an `accepted` Caregiver
+        Booking. Applies at once (no Caregiver approval needed — ADR-0014 §A3):
+        the duration/end grows and the larger total is re-authorized on the
+        Parent's card. A card hold can't be raised in place, so the old hold is
+        released and a new one placed; when 3DS is needed the response carries a
+        `clientSecret`. A still-`scheduled` Booking just raises the amount the
+        lazy authorize sweep will hold. 409 unless `accepted`, the target adds
+        time, and no shorten is pending."
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: bookingId
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BookingExtendRequest"
+      responses:
+        "200":
+          description: Extended + re-authorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingExtend"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingError"
+        "402":
+          description: Card declined on re-authorization
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingError"
+        "404":
+          description: Booking not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingError"
+        "409":
+          description: Not extendable from the current state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingError"
+  /v1/bookings/{bookingId}/reduce-request:
+    post:
+      tags:
+        - bookings
+      summary: Request to shorten a booked session (Caregiver approval) — OH-212
+      description: Requests fewer paid hours on an `accepted` Caregiver Booking. Does
+        NOT apply immediately — it removes hours the Caregiver agreed to, so it
+        writes a transient `pendingTimeChange` the Caregiver approves/declines
+        (ADR-0014 §A3). The Booking keeps its original duration and pay until
+        approved. 409 unless `accepted`, the target shortens, and no shorten is
+        already pending.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: bookingId
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BookingReduceRequestBody"
+      responses:
+        "200":
+          description: Shorten requested (pending)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingAdjustPending"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingError"
+        "404":
+          description: Booking not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingError"
+        "409":
+          description: Not reducible from the current state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingError"
+    delete:
+      tags:
+        - bookings
+      summary: Rescind the Parent’s own pending shorten — OH-212
+      description: Drops a pending shorten the Parent filed, before the Caregiver has
+        acted (ADR-0014 §A3). The Booking resolves back to a plain `accepted`
+        with its original duration/pay. 409 when there is no pending shorten.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: bookingId
+          in: path
+      responses:
+        "200":
+          description: Pending shorten rescinded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingAdjustPending"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingError"
+        "404":
+          description: Booking not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingError"
+        "409":
+          description: No pending shorten to rescind
           content:
             application/json:
               schema:

@@ -128,6 +128,10 @@ const post = (token: string, body?: unknown): RequestInit => ({
   headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
   body: body === undefined ? undefined : JSON.stringify(body),
 });
+const del = (token: string): RequestInit => ({
+  method: 'DELETE',
+  headers: { authorization: `Bearer ${token}` },
+});
 
 // ── GET /v1/bookings/{bookingId} ───────────────────────────────────────────────
 describe('GET /v1/bookings/{bookingId}', () => {
@@ -284,5 +288,188 @@ describe('POST /v1/bookings/{bookingId}/dispute', () => {
     const { db } = makeDb(fixtures(caregiverBooking({ state: 'requested' })));
     const res = await buildApp(makeDeps(db)).request(path, post(await parentToken(), { reason: 'other' }));
     expect(res.status).toBe(409);
+  });
+});
+
+// ── Adjust booked time (OH-212) ────────────────────────────────────────────────
+// A deterministic 3h window (10:00–13:00) so extend/shorten math is stable
+// regardless of wall-clock (the base fixture derives start_min from `now`).
+const adjustable = (over: Record<string, unknown> = {}) =>
+  caregiverBooking({ start_min: 600, end_min: 780, per_child_surcharge_cents: 0, ...over });
+
+/** Fixtures for the re-auth path: a payable caregiver + a Parent with a card. */
+const payFixtures = (booking: Record<string, unknown>) => ({
+  ...fixtures(booking),
+  providers: [{ id: PID, uid: 'uid-cg' }],
+  provider_connect_accounts: [
+    { provider_id: PID, stripe_account_id: 'acct_1', charges_enabled: true, payouts_enabled: true },
+  ],
+  parent_subscriptions: [{ uid: 'uid-par', stripe_customer_id: 'cus_1' }],
+});
+
+const reauthStripe = (over: Record<string, unknown> = {}) =>
+  makeStripe({
+    retrieveCustomerDefaultPaymentMethod: vi.fn(async () => 'pm_1'),
+    createBookingPaymentIntent: vi.fn(async () => ({ id: 'pi_2', status: 'requires_capture', client_secret: 'cs_2', amount: 0 })),
+    ...over,
+  });
+
+describe('POST /v1/bookings/{bookingId}/extend', () => {
+  const path = `/v1/bookings/${BID}/extend`;
+
+  it('re-authorizes the larger total (cancels old hold, creates new) + returns clientSecret', async () => {
+    const cancel = vi.fn(async () => ({ id: 'pi_1', status: 'canceled', amount: 0 }));
+    const create = vi.fn(async () => ({ id: 'pi_2', status: 'requires_action', client_secret: 'cs_2', amount: 0 }));
+    const { db, captures } = makeDb(payFixtures(adjustable()));
+    const app = buildApp(makeDeps(db, reauthStripe({ cancelPaymentIntent: cancel, createBookingPaymentIntent: create })));
+    const res = await app.request(path, post(await parentToken(), { newDurationHours: 5 }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      state: 'accepted',
+      endMin: 900,
+      durationHours: 5,
+      computedTotalCents: 25000,
+      authorizedAmountCents: 25000,
+      paymentStatus: 'requires_action',
+      paymentIntentId: 'pi_2',
+      clientSecret: 'cs_2',
+    });
+    expect(cancel).toHaveBeenCalled();
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ amountCents: 25000, applicationFeeCents: 3750 }),
+    );
+    expect(captures.updates.find((u) => u.table === 'bookings')?.set).toMatchObject({
+      end_min: 900,
+      computed_total_cents: 25000,
+      payment_intent_id: 'pi_2',
+    });
+  });
+
+  it('scheduled Booking (no hold yet): raises the amount, no Stripe call', async () => {
+    const create = vi.fn(async () => ({ id: 'pi_x', status: 'requires_capture', client_secret: null, amount: 0 }));
+    const { db, captures } = makeDb(payFixtures(adjustable({ payment_status: 'scheduled', payment_intent_id: null })));
+    const app = buildApp(makeDeps(db, reauthStripe({ createBookingPaymentIntent: create })));
+    const res = await app.request(path, post(await parentToken(), { newDurationHours: 4 }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      endMin: 840,
+      durationHours: 4,
+      authorizedAmountCents: 20000,
+      paymentStatus: 'scheduled',
+      paymentIntentId: null,
+      clientSecret: null,
+    });
+    expect(create).not.toHaveBeenCalled();
+    expect(captures.updates.find((u) => u.table === 'bookings')?.set).toMatchObject({
+      end_min: 840,
+      authorized_amount_cents: 20000,
+    });
+  });
+
+  it('409 when the new duration does not add time', async () => {
+    const { db } = makeDb(payFixtures(adjustable()));
+    const res = await buildApp(makeDeps(db, reauthStripe())).request(path, post(await parentToken(), { newDurationHours: 2 }));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: 'not_extendable' });
+  });
+
+  it('409 from a non-accepted state', async () => {
+    const { db } = makeDb(payFixtures(adjustable({ state: 'in-progress' })));
+    const res = await buildApp(makeDeps(db, reauthStripe())).request(path, post(await parentToken(), { newDurationHours: 5 }));
+    expect(res.status).toBe(409);
+  });
+
+  it('409 when a shorten is already pending', async () => {
+    const { db } = makeDb(
+      payFixtures(adjustable({ pending_time_change_hours: 2, pending_time_change_requested_at: new Date() })),
+    );
+    const res = await buildApp(makeDeps(db, reauthStripe())).request(path, post(await parentToken(), { newDurationHours: 5 }));
+    expect(res.status).toBe(409);
+  });
+
+  it('400 when the target is not a half-hour increment', async () => {
+    const { db } = makeDb(payFixtures(adjustable()));
+    const res = await buildApp(makeDeps(db, reauthStripe())).request(path, post(await parentToken(), { newDurationHours: 5.25 }));
+    expect(res.status).toBe(400);
+  });
+
+  it('409 for a provider consultation (no adjust-time)', async () => {
+    const { db } = makeDb(payFixtures(adjustable({ kind: 'provider' })));
+    const res = await buildApp(makeDeps(db, reauthStripe())).request(path, post(await parentToken(), { newDurationHours: 5 }));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: 'not_adjustable' });
+  });
+});
+
+describe('POST /v1/bookings/{bookingId}/reduce-request', () => {
+  const path = `/v1/bookings/${BID}/reduce-request`;
+
+  it('writes a pending shorten (no duration change) + notifies the caregiver', async () => {
+    const { db, captures } = makeDb(payFixtures(adjustable()));
+    const res = await buildApp(makeDeps(db)).request(
+      path,
+      post(await parentToken(), { newDurationHours: 2, note: 'wrap up early' }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      state: 'accepted',
+      pendingTimeChange: { proposedDurationHours: 2, proposedEndMin: 720, note: 'wrap up early' },
+    });
+    const set = captures.updates.find((u) => u.table === 'bookings')?.set as Record<string, unknown>;
+    expect(set).toMatchObject({ pending_time_change_hours: 2, pending_time_change_note: 'wrap up early' });
+    expect(set.pending_time_change_requested_at).toBeInstanceOf(Date);
+    expect(set).not.toHaveProperty('end_min'); // original duration is untouched
+    expect(captures.inserts.find((i) => i.table === 'notification_outbox')?.values).toMatchObject({
+      recipient_uid: 'uid-cg',
+      event_type: 'booking_time_reduce_requested',
+    });
+  });
+
+  it('409 when the new duration does not shorten', async () => {
+    const { db } = makeDb(payFixtures(adjustable()));
+    const res = await buildApp(makeDeps(db)).request(path, post(await parentToken(), { newDurationHours: 3 }));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: 'not_reducible' });
+  });
+
+  it('409 when a shorten is already pending', async () => {
+    const { db } = makeDb(
+      payFixtures(adjustable({ pending_time_change_hours: 2, pending_time_change_requested_at: new Date() })),
+    );
+    const res = await buildApp(makeDeps(db)).request(path, post(await parentToken(), { newDurationHours: 1.5 }));
+    expect(res.status).toBe(409);
+  });
+});
+
+describe('DELETE /v1/bookings/{bookingId}/reduce-request', () => {
+  const path = `/v1/bookings/${BID}/reduce-request`;
+
+  it('rescinds a pending shorten → clears the proposal', async () => {
+    const { db, captures } = makeDb(
+      payFixtures(adjustable({ pending_time_change_hours: 2, pending_time_change_requested_at: new Date() })),
+    );
+    const res = await buildApp(makeDeps(db)).request(path, del(await parentToken()));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ state: 'accepted', pendingTimeChange: null });
+    expect(captures.updates.find((u) => u.table === 'bookings')?.set).toMatchObject({
+      pending_time_change_hours: null,
+      pending_time_change_requested_at: null,
+    });
+    expect(captures.inserts.find((i) => i.table === 'notification_outbox')?.values).toMatchObject({
+      event_type: 'booking_time_reduce_rescinded',
+    });
+  });
+
+  it('409 when there is no pending shorten', async () => {
+    const { db } = makeDb(payFixtures(adjustable()));
+    const res = await buildApp(makeDeps(db)).request(path, del(await parentToken()));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: 'no_pending_change' });
+  });
+
+  it("404 when the Booking is not the caller's", async () => {
+    const { db } = makeDb(payFixtures(adjustable({ pending_time_change_hours: 2, pending_time_change_requested_at: new Date() })));
+    const res = await buildApp(makeDeps(db)).request(path, del(await parentToken('uid-other')));
+    expect(res.status).toBe(404);
   });
 });

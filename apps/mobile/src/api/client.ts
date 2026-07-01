@@ -356,6 +356,39 @@ export function disputeBooking(bookingId: string, body: BookingDisputeBody): Pro
 }
 
 /**
+ * Adjust booked time (OH-212, ADR-0014 §A3) — Parent-side. `extendBooking` buys
+ * more time on an `accepted` Booking: it applies immediately + re-authorizes the
+ * larger total (the result carries a `clientSecret` for opportunistic 3DS when
+ * `paymentStatus === 'requires_action'`). `requestReduceBooking` files a shorten
+ * the Caregiver must approve (writes a `pendingTimeChange`, no change yet);
+ * `rescindReduceRequest` withdraws the Parent's own pending shorten.
+ */
+export type BookingPendingTimeChange = NonNullable<BookingDetail['pendingTimeChange']>;
+export type BookingExtendBody =
+  paths['/v1/bookings/{bookingId}/extend']['post']['requestBody']['content']['application/json'];
+export type BookingExtendResult =
+  paths['/v1/bookings/{bookingId}/extend']['post']['responses'][200]['content']['application/json'];
+export type BookingReduceRequestBody =
+  paths['/v1/bookings/{bookingId}/reduce-request']['post']['requestBody']['content']['application/json'];
+export type BookingAdjustPending =
+  paths['/v1/bookings/{bookingId}/reduce-request']['post']['responses'][200]['content']['application/json'];
+
+export function extendBooking(bookingId: string, body: BookingExtendBody): Promise<BookingExtendResult> {
+  return post<BookingExtendResult>(`/v1/bookings/${bookingId}/extend`, body);
+}
+
+export function requestReduceBooking(
+  bookingId: string,
+  body: BookingReduceRequestBody,
+): Promise<BookingAdjustPending> {
+  return post<BookingAdjustPending>(`/v1/bookings/${bookingId}/reduce-request`, body);
+}
+
+export function rescindReduceRequest(bookingId: string): Promise<BookingAdjustPending> {
+  return del<BookingAdjustPending>(`/v1/bookings/${bookingId}/reduce-request`);
+}
+
+/**
  * Parent Subscription — the demand-side paywall (OH-204) on top of OH-193's
  * server endpoints. `getParentSubscription` reads the gate state (`entitled`,
  * true iff status is active/trialing); `createParentCheckoutLink` returns the

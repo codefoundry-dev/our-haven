@@ -1400,6 +1400,8 @@ function buildDirectMessageMaterialisation(
         commissionBp: 0,
         category,
       }).parentChargeCents,
+      // Snapshot for adjust-time re-pricing (OH-212) — see buildBookingBase.
+      per_child_surcharge_cents: offer.per_child_surcharge_cents,
       category,
       child_count: offer.child_count,
       child_ages: offer.child_ages ?? [],
