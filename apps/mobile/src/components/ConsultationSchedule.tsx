@@ -10,6 +10,7 @@
  */
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
 
 import { Icon } from '@/components/Icon';
 import { Avatar } from '@/components/ui/Avatar';
@@ -25,6 +26,7 @@ type Tab = (typeof TABS)[number];
 
 export function ConsultationSchedule({ viewerRole }: { viewerRole: 'parent' | 'provider' }) {
   const { data, loading, error, refetch } = useBookings();
+  const router = useRouter();
   const [tab, setTab] = useState<Tab>('Upcoming');
   const [busyId, setBusyId] = useState<string | null>(null);
   const [cancelError, setCancelError] = useState<string | null>(null);
@@ -93,6 +95,11 @@ export function ConsultationSchedule({ viewerRole }: { viewerRole: 'parent' | 'p
               viewerRole={viewerRole}
               busy={busyId === b.id}
               onCancel={() => onCancel(b.id)}
+              onOpen={
+                viewerRole === 'parent'
+                  ? () => router.push({ pathname: '/booking-detail', params: { bookingId: b.id } })
+                  : undefined
+              }
             />
           ))}
         </View>
@@ -106,11 +113,14 @@ function ConsultationCard({
   viewerRole,
   busy,
   onCancel,
+  onOpen,
 }: {
   booking: BookingSummary;
   viewerRole: 'parent' | 'provider';
   busy: boolean;
   onCancel: () => void;
+  /** Parent taps a card to open the full Booking detail (payment + actions). */
+  onOpen?: () => void;
 }) {
   const name = booking.counterpartyName ?? (viewerRole === 'parent' ? 'Provider' : 'Family');
   const sub =
@@ -118,29 +128,39 @@ function ConsultationCard({
       ? specialtyLabel(booking.counterpartySpecialty) ?? 'Consultation'
       : 'Consultation';
   const rate = sessionRate(booking.rateCents);
+  // A Caregiver Booking is cancelled from its detail (the M2.5 fee preview lives in
+  // CancelSheet). Only NULL-payment Provider consultations offer an inline cancel.
+  const showInlineCancel = booking.kind === 'provider' && isCancellable(booking);
 
   return (
     <View style={styles.card}>
-      <View style={styles.cardHead}>
-        <Avatar label={name} size="sm" tone="catSpec" />
-        <View style={styles.cardWho}>
-          <Text style={styles.cardName} numberOfLines={1}>
-            {name}
-          </Text>
-          <Text style={styles.cardSub} numberOfLines={1}>
-            {sub}
-          </Text>
+      <Pressable
+        onPress={onOpen}
+        disabled={!onOpen}
+        accessibilityRole={onOpen ? 'button' : undefined}
+        style={({ pressed }) => ({ opacity: pressed && onOpen ? 0.9 : 1, gap: 12 })}
+      >
+        <View style={styles.cardHead}>
+          <Avatar label={name} size="sm" tone="catSpec" />
+          <View style={styles.cardWho}>
+            <Text style={styles.cardName} numberOfLines={1}>
+              {name}
+            </Text>
+            <Text style={styles.cardSub} numberOfLines={1}>
+              {sub}
+            </Text>
+          </View>
+          <StatusPill state={booking.state} />
         </View>
-        <StatusPill state={booking.state} />
-      </View>
 
-      <View style={styles.metaRow}>
-        <Icon name="calendar" size={14} color={colors.ink2} />
-        <Text style={styles.metaText}>{bookingWhen(booking)}</Text>
-        {rate ? <Text style={styles.metaRate}>{rate}</Text> : null}
-      </View>
+        <View style={styles.metaRow}>
+          <Icon name="calendar" size={14} color={colors.ink2} />
+          <Text style={styles.metaText}>{bookingWhen(booking)}</Text>
+          {rate ? <Text style={styles.metaRate}>{rate}</Text> : null}
+        </View>
+      </Pressable>
 
-      {isCancellable(booking) ? (
+      {showInlineCancel ? (
         <Pressable
           onPress={onCancel}
           disabled={busy}

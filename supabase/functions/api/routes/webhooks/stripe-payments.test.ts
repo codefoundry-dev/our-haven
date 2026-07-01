@@ -16,7 +16,11 @@ function sign(rawBody: string, ts = Math.floor(Date.now() / 1000)) {
   return `t=${ts},v1=${sig}`;
 }
 
-function makeDb(opts: { screening?: Record<string, unknown> | null; provider?: Record<string, unknown> | null }) {
+function makeDb(opts: {
+  screening?: Record<string, unknown> | null;
+  provider?: Record<string, unknown> | null;
+  booking?: Record<string, unknown> | null;
+}) {
   const captures = {
     updates: [] as Array<{ table: string; set: Record<string, unknown> }>,
     outbox: [] as Array<{ table: string; values: Record<string, unknown> }>,
@@ -28,37 +32,39 @@ function makeDb(opts: { screening?: Record<string, unknown> | null; provider?: R
       executeTakeFirst: async () => {
         if (table === 'provider_screenings') return opts.screening ?? undefined;
         if (table === 'providers') return opts.provider ?? undefined;
+        if (table === 'bookings') return opts.booking ?? undefined;
         return undefined;
       },
     };
     return chain;
   };
-  const trx = {
-    updateTable: (table: string) => {
-      const chain: Record<string, unknown> = {
-        set: (set: Record<string, unknown>) => {
-          captures.updates.push({ table, set });
-          return chain;
-        },
-        where: () => chain,
-        execute: async () => [],
-      };
-      return chain;
-    },
-    insertInto: (table: string) => {
-      const chain: Record<string, unknown> = {
-        values: (values: Record<string, unknown>) => {
-          captures.outbox.push({ table, values });
-          return chain;
-        },
-        onConflict: () => chain,
-        execute: async () => [],
-      };
-      return chain;
-    },
+  const updateTable = (table: string) => {
+    const chain: Record<string, unknown> = {
+      set: (set: Record<string, unknown>) => {
+        captures.updates.push({ table, set });
+        return chain;
+      },
+      where: () => chain,
+      execute: async () => [],
+    };
+    return chain;
   };
+  const insertInto = (table: string) => {
+    const chain: Record<string, unknown> = {
+      values: (values: Record<string, unknown>) => {
+        captures.outbox.push({ table, values });
+        return chain;
+      },
+      onConflict: () => chain,
+      execute: async () => [],
+    };
+    return chain;
+  };
+  const trx = { updateTable, insertInto };
   const db = {
     selectFrom,
+    updateTable,
+    insertInto,
     transaction: () => ({ execute: async (cb: (t: typeof trx) => Promise<unknown>) => cb(trx) }),
   } as unknown as AppDeps['db'];
   return { db, captures };
@@ -193,5 +199,98 @@ describe('POST /v1/webhooks/stripe-payments', () => {
       lastName: 'Giver',
       state: 'CA',
     });
+  });
+});
+
+// ── Booking payment lifecycle webhook (OH-211) ─────────────────────────────────
+function bookingEvent(type: string, pi: Record<string, unknown>) {
+  return JSON.stringify({
+    id: 'evt_b',
+    type,
+    created: 1,
+    data: { object: { metadata: { purpose: 'booking' }, currency: 'usd', ...pi } },
+  });
+}
+
+const BOOKING = { id: 'bkg-1', parent_uid: 'uid-par', payment_status: 'requires_action' };
+
+describe('POST /v1/webhooks/stripe-payments — booking lifecycle', () => {
+  it('amount_capturable_updated → authorized + authorized amount', async () => {
+    const { db, captures } = makeDb({ booking: BOOKING });
+    const app = buildApp(makeDeps(db));
+    const raw = bookingEvent('payment_intent.amount_capturable_updated', {
+      id: 'pi_1',
+      amount: 15000,
+      amount_capturable: 15000,
+    });
+    const res = await app.request(PATH, postWebhook(raw, sign(raw)));
+    expect(res.status).toBe(200);
+    expect(captures.updates[0]).toMatchObject({
+      table: 'bookings',
+      set: { payment_status: 'authorized', authorized_amount_cents: 15000 },
+    });
+  });
+
+  it('succeeded → captured + captured amount', async () => {
+    const { db, captures } = makeDb({ booking: { ...BOOKING, payment_status: 'authorized' } });
+    const app = buildApp(makeDeps(db));
+    const raw = bookingEvent('payment_intent.succeeded', { id: 'pi_1', amount: 15000, amount_received: 15000 });
+    const res = await app.request(PATH, postWebhook(raw, sign(raw)));
+    expect(res.status).toBe(200);
+    expect(captures.updates[0]).toMatchObject({
+      table: 'bookings',
+      set: { payment_status: 'captured', captured_amount_cents: 15000 },
+    });
+  });
+
+  it('canceled → canceled', async () => {
+    const { db, captures } = makeDb({ booking: { ...BOOKING, payment_status: 'authorized' } });
+    const app = buildApp(makeDeps(db));
+    const raw = bookingEvent('payment_intent.canceled', { id: 'pi_1', amount: 15000 });
+    const res = await app.request(PATH, postWebhook(raw, sign(raw)));
+    expect(res.status).toBe(200);
+    expect(captures.updates[0]).toMatchObject({ table: 'bookings', set: { payment_status: 'canceled' } });
+  });
+
+  it('payment_failed → failed + notifies the Parent', async () => {
+    const { db, captures } = makeDb({ booking: { ...BOOKING, payment_status: 'authorized' } });
+    const app = buildApp(makeDeps(db));
+    const raw = bookingEvent('payment_intent.payment_failed', {
+      id: 'pi_1',
+      amount: 15000,
+      last_payment_error: { code: 'card_declined', message: 'Your card was declined.' },
+    });
+    const res = await app.request(PATH, postWebhook(raw, sign(raw)));
+    expect(res.status).toBe(200);
+    expect(captures.updates[0]).toMatchObject({
+      table: 'bookings',
+      set: { payment_status: 'failed', payment_error: 'Your card was declined.' },
+    });
+    expect(captures.outbox[0]).toMatchObject({
+      table: 'notification_outbox',
+      values: { recipient_uid: 'uid-par', event_type: 'booking_payment_failed' },
+    });
+  });
+
+  it('is out-of-order safe: a late amount_capturable_updated never walks back a captured booking', async () => {
+    const { db, captures } = makeDb({ booking: { ...BOOKING, payment_status: 'captured' } });
+    const app = buildApp(makeDeps(db));
+    const raw = bookingEvent('payment_intent.amount_capturable_updated', {
+      id: 'pi_1',
+      amount: 15000,
+      amount_capturable: 15000,
+    });
+    const res = await app.request(PATH, postWebhook(raw, sign(raw)));
+    expect(res.status).toBe(200);
+    expect(captures.updates).toHaveLength(0);
+  });
+
+  it('acks 200 without writes when no booking matches the intent', async () => {
+    const { db, captures } = makeDb({ booking: null });
+    const app = buildApp(makeDeps(db));
+    const raw = bookingEvent('payment_intent.succeeded', { id: 'pi_none', amount: 15000 });
+    const res = await app.request(PATH, postWebhook(raw, sign(raw)));
+    expect(res.status).toBe(200);
+    expect(captures.updates).toHaveLength(0);
   });
 });

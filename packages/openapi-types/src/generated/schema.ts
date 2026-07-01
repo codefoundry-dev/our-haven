@@ -3417,7 +3417,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ConsultationBookingCancel"];
+                        "application/json": components["schemas"]["BookingCancel"];
                     };
                 };
                 /** @description Unauthenticated */
@@ -3454,6 +3454,309 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["ConsultationBookingError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bookings/{bookingId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A Booking detail (payment + schedule) — OH-211
+         * @description Returns one of the caller's Bookings with its payment lifecycle, pricing, schedule and (from `accepted` onward) the service address. 404 when it is not the caller's.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    bookingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The Booking */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingDetail"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+                /** @description Booking not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bookings/{bookingId}/cancel-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview the cancellation charge (M2.5 calculator) — OH-211
+         * @description Returns what the Parent will be charged if they cancel now (free ≥24h before start / 50% <24h / 100% <2h-or-after), against the authorized amount. A Provider consultation carries no fee (always free).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    bookingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The cancellation preview */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingCancelPreview"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+                /** @description Booking not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bookings/{bookingId}/confirm-hours": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm the session hours → capture + payout (review window) — OH-211
+         * @description Confirms the Caregiver's proposed hours within the ~24h review window (ADR-0013): the Booking → `completed`, the held amount is captured, and the payout releases. 409 when the Booking is not in the review window.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    bookingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Confirmed + captured */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingConfirmHours"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+                /** @description Booking not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+                /** @description Not in the review window */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bookings/{bookingId}/dispute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dispute the charge (in-window hold / admin escalation) — OH-211
+         * @description Files a charge/billing dispute (ADR-0013 amended). Inside the ~24h review window this HOLDS the payout and routes to admin (Booking → `disputed`). On `accepted` / `completed` it is an admin escalation with no automatic money movement (the payout-hold semantics are unchanged). 409 from any other state.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    bookingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BookingDisputeRequest"];
+                };
+            };
+            responses: {
+                /** @description Dispute filed */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingDispute"];
+                    };
+                };
+                /** @description Invalid dispute */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+                /** @description Booking not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+                /** @description Not disputable from the current state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
                     };
                 };
             };
@@ -6663,10 +6966,80 @@ export interface components {
         ConsultationBookingList: {
             bookings: components["schemas"]["ConsultationBookingSummary"][];
         };
-        ConsultationBookingCancel: {
+        BookingCancel: {
             id: string;
             /** @enum {string} */
             state: "requested" | "accepted" | "declined" | "expired" | "in-progress" | "awaiting-confirmation" | "completed" | "disputed" | "cancelled";
+            /** @enum {string} */
+            tier?: "free" | "half" | "full";
+            chargeCents?: number;
+            refundCents?: number;
+        };
+        BookingDetail: {
+            id: string;
+            /** @enum {string} */
+            kind: "caregiver" | "provider";
+            /** @enum {string} */
+            state: "requested" | "accepted" | "declined" | "expired" | "in-progress" | "awaiting-confirmation" | "completed" | "disputed" | "cancelled";
+            providerId: string;
+            counterpartyName: string | null;
+            /** @enum {string|null} */
+            category: "babysitter" | "tutor" | "nanny" | null;
+            scheduledDate: string;
+            startMin: number;
+            endMin: number;
+            childCount: number | null;
+            childAges: number[];
+            serviceAddress: components["schemas"]["BookingServiceAddress"];
+            agreedRateCents: number | null;
+            computedTotalCents: number | null;
+            authorizedAmountCents: number | null;
+            capturedAmountCents: number | null;
+            commissionBp: number | null;
+            commissionCents: number | null;
+            /** @enum {string|null} */
+            paymentStatus: "scheduled" | "requires_action" | "authorized" | "captured" | "canceled" | "refunded" | "failed" | null;
+            paymentIntentId: string | null;
+            confirmDeadlineAt: string | null;
+            requestExpiresAt: string | null;
+            /** @enum {string|null} */
+            cancellationTier: "free" | "half" | "full" | null;
+            /** @enum {string|null} */
+            disputeReason: "overcharged" | "no-show" | "safety" | "quality" | "other" | null;
+        };
+        BookingServiceAddress: {
+            line1: string | null;
+            line2: string | null;
+            city: string | null;
+            state: string | null;
+            postalCode: string | null;
+        } | null;
+        BookingError: {
+            error: string;
+            reason?: string;
+        };
+        BookingCancelPreview: {
+            chargeCents: number;
+            refundCents: number;
+            /** @enum {string} */
+            tier: "free" | "half" | "full";
+        };
+        BookingConfirmHours: {
+            id: string;
+            /** @enum {string} */
+            state: "completed";
+            capturedAmountCents: number;
+        };
+        BookingDispute: {
+            id: string;
+            /** @enum {string} */
+            state: "requested" | "accepted" | "declined" | "expired" | "in-progress" | "awaiting-confirmation" | "completed" | "disputed" | "cancelled";
+            escalation: boolean;
+        };
+        BookingDisputeRequest: {
+            /** @enum {string} */
+            reason: "overcharged" | "no-show" | "safety" | "quality" | "other";
+            details?: string;
         };
         MessageThreadSummary: {
             id: string;
@@ -6949,6 +7322,13 @@ export interface components {
             state: "awarded";
             bookingIds: string[];
             seriesId: string | null;
+            payments: components["schemas"]["AwardPayment"][];
+        };
+        AwardPayment: {
+            bookingId: string;
+            paymentIntentId: string | null;
+            clientSecret: string | null;
+            status: string;
         };
         AwardRequest: {
             paymentMethodId?: string;

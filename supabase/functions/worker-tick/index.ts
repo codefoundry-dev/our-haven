@@ -10,6 +10,7 @@
 // Deployed `--no-verify-jwt`: the caller is pg_cron + pg_net, not an end user,
 // so the function gates itself on the WORKER_TICK_SECRET shared secret instead
 // of a Supabase JWT.
+import { createStripeAdapter } from '../api/vendors/stripe.ts';
 import { createCheckrAdapter } from '../_shared/checkr.ts';
 import { createExpoPushAdapter } from '../_shared/expo-push.ts';
 import { createResendAdapter } from '../_shared/resend.ts';
@@ -39,11 +40,15 @@ let boot: {
   env: ReturnType<typeof loadEnv>;
   db: ReturnType<typeof createDb>;
   dispatcher: ReturnType<typeof createScreeningInviteDispatcher>;
+  stripe: ReturnType<typeof createStripeAdapter>;
 } | null = null;
 let bootError = '';
 try {
   const env = loadEnv(Deno.env.toObject());
   const db = createDb(env);
+  // Shared Stripe adapter for the booking-payment sweeps (OH-211). Unconfigured
+  // (no secret) → those sweeps log + skip; the rest of the tick is unaffected.
+  const stripe = createStripeAdapter({ secretKey: env.STRIPE_SECRET_KEY, apiBase: env.STRIPE_API_BASE });
   // A SECOND db handle, dedicated to dispatcher write-backs. The outbox drain
   // holds `db`'s single pooled connection inside a transaction for the duration
   // of each dispatch (the SKIP-LOCKED guarantee), so the screening dispatcher
@@ -99,7 +104,7 @@ try {
     checkr,
     fallback: notificationsDispatcher,
   });
-  boot = { env, db, dispatcher };
+  boot = { env, db, dispatcher, stripe };
 } catch (err) {
   bootError = err instanceof Error ? err.message : String(err);
   console.error('[worker-tick] boot failed:', bootError);
@@ -116,7 +121,11 @@ async function handler(req: Request): Promise<Response> {
   }
 
   try {
-    const summary = await runTick(boot.db, { dispatcher: boot.dispatcher });
+    const summary = await runTick(boot.db, {
+      dispatcher: boot.dispatcher,
+      stripe: boot.stripe,
+      commissionBp: boot.env.BOOKING_COMMISSION_BP,
+    });
     return json(summary, 200);
   } catch (err) {
     console.error('[worker-tick] tick failed', err);

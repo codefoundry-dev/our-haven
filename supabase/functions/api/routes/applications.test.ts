@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { buildApp } from '../app.ts';
 import { buildTestEnv, mintAccessToken } from '../_test/jwt.ts';
@@ -124,9 +124,30 @@ function makeDb(tables: Record<string, Record<string, unknown>[]> = {}) {
   return { db, captures };
 }
 
-function makeDeps(db: AppDeps['db']): AppDeps {
+/** A Stripe stub whose booking-payment methods work; OH-211 award authorizes. */
+function makeAwardStripe(over: Partial<AppDeps['stripe']> = {}): AppDeps['stripe'] {
+  return {
+    retrieveCustomerDefaultPaymentMethod: async () => 'pm_saved',
+    createBookingPaymentIntent: async () => ({
+      id: 'pi_award',
+      client_secret: 'pi_award_secret',
+      status: 'requires_capture',
+    }),
+    cancelPaymentIntent: async () => ({ id: 'pi_award', status: 'canceled', amount: 0 }),
+    ...over,
+  } as unknown as AppDeps['stripe'];
+}
+
+function makeDeps(db: AppDeps['db'], stripe?: AppDeps['stripe']): AppDeps {
   const stub = new Proxy({} as never, { get: () => stub });
-  return { env: buildTestEnv(), db, supabase: stub, stripe: stub, backgroundCheck: stub, daily: stub };
+  return {
+    env: buildTestEnv(),
+    db,
+    supabase: stub,
+    stripe: stripe ?? makeAwardStripe(),
+    backgroundCheck: stub,
+    daily: stub,
+  };
 }
 
 const parentToken = (uid = 'uid-par') =>
@@ -141,7 +162,13 @@ const TID = '33333333-3333-4333-8333-333333333333';
 const OID = '44444444-4444-4444-8444-444444444444';
 const PID = '55555555-5555-4555-8555-555555555555';
 
-const slot = (date = '2026-08-01', startMin = 1080, endMin = 1260) => ({ date, startMin, endMin });
+// Booking dates are relative to *now* so the authorize-timing branch is
+// deterministic: a NEAR one-off (≤6d) authorizes interactively at Award; a FAR
+// one is born `scheduled` for the authorize-due sweep.
+const ymd = (d: Date) => d.toISOString().slice(0, 10);
+const NEAR = ymd(new Date(Date.now() + 2 * 24 * 60 * 60 * 1000));
+const FAR = ymd(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000));
+const slot = (date = NEAR, startMin = 1080, endMin = 1260) => ({ date, startMin, endMin });
 
 const jobRow = (over: Record<string, unknown> = {}) => ({
   id: JID,
@@ -231,7 +258,11 @@ const awardable = (over: Record<string, Record<string, unknown>[]> = {}) => ({
   provider_profiles: [{ provider_id: PID, display_name: 'Casey', negotiable: true }],
   provider_category_rates: [{ provider_id: PID, published_rate_cents: 5000, per_child_surcharge_cents: 0 }],
   provider_verifications: [{ provider_id: PID, screening_passed_at: '2026-06-01T00:00:00.000Z' }],
-  parent_subscriptions: [{ status: 'active' }],
+  parent_subscriptions: [{ status: 'active', stripe_customer_id: 'cus_par' }],
+  // OH-211 payout target — a ready Caregiver Connect account.
+  provider_connect_accounts: [
+    { provider_id: PID, stripe_account_id: 'acct_cg', charges_enabled: true, payouts_enabled: true },
+  ],
   ...over,
 });
 
@@ -318,16 +349,24 @@ describe('POST /v1/applications/{applicationId}/award', () => {
     expect(await res.json()).toMatchObject({ error: 'subscription_required' });
   });
 
-  it('200 awards: one-off Booking `requested`, Job/App awarded, others auto-declined, notify', async () => {
+  it('200 awards: one-off Booking `requested` + authorizes the hold, others auto-declined, notify', async () => {
     const { db, captures } = makeDb(awardable());
     const app = buildApp(makeDeps(db));
-    const res = await app.request(path, post(await parentToken(), { paymentMethodId: 'pm_mock' }));
+    const res = await app.request(path, post(await parentToken(), {}));
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, any>;
     expect(body).toMatchObject({ applicationId: AID, jobId: JID, state: 'awarded', seriesId: null });
     expect(body.bookingIds).toHaveLength(1);
+    // The near-term one-off was authorized interactively → the client gets a secret.
+    expect(body.payments).toHaveLength(1);
+    expect(body.payments[0]).toMatchObject({
+      paymentIntentId: 'pi_award',
+      clientSecret: 'pi_award_secret',
+      status: 'authorized',
+    });
 
-    // One caregiver Booking, born `requested` (posted-Job), carrying the chain FKs.
+    // One caregiver Booking, born `requested` (posted-Job), carrying the chain FKs +
+    // the authorized PaymentIntent + Commission snapshot (15% of $150 = $22.50).
     const bookingIns = captures.inserts.find((i) => i.table === 'bookings');
     const rows = bookingIns?.values as Record<string, unknown>[];
     expect(Array.isArray(rows)).toBe(true);
@@ -343,11 +382,18 @@ describe('POST /v1/applications/{applicationId}/award', () => {
       parent_uid: 'uid-par',
       series_id: null,
       agreed_rate_cents: 5000,
-      scheduled_date: '2026-08-01',
+      scheduled_date: NEAR,
       // JOB child detail + service address carried onto the Booking.
       child_count: 1,
       service_address_line1: '12 Oak St',
+      // OH-211 payment columns.
+      payment_intent_id: 'pi_award',
+      payment_status: 'authorized',
+      authorized_amount_cents: 15000,
+      commission_bp: 1500,
+      commission_cents: 2250,
     });
+    expect(rows[0]!.request_expires_at).toBeInstanceOf(Date);
     expect(captures.inserts.find((i) => i.table === 'booking_series')).toBeUndefined();
 
     // Offer → accepted; Application → awarded; Job → awarded.
@@ -366,25 +412,96 @@ describe('POST /v1/applications/{applicationId}/award', () => {
     expect(outbox?.values).toMatchObject({ recipient_uid: 'uid-cg', event_type: 'job_awarded' });
   });
 
-  it('200 awards a recurring Job → a Booking Series + one Booking per occurrence', async () => {
+  it('200 awards a recurring Job → a Series + one `scheduled` Booking per occurrence (lazy authorize)', async () => {
     const rule = { startDate: '2026-08-01', endDate: '2026-08-15', weekdays: [6], startMin: 1080, endMin: 1260 };
     const { db, captures } = makeDb(
       awardable({ jobs: [jobRow({ schedule_kind: 'recurring', slots: [], recurrence: rule })] }),
     );
-    const app = buildApp(makeDeps(db));
+    // A spy proves recurring occurrences are NOT authorized at Award (deferred to the sweep).
+    const createPi = vi.fn(async () => ({ id: 'pi_x', client_secret: 's', status: 'requires_capture' }));
+    const app = buildApp(makeDeps(db, makeAwardStripe({ createBookingPaymentIntent: createPi })));
     const res = await app.request(path, post(await parentToken(), {}));
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, any>;
     expect(body.seriesId).toEqual(expect.any(String));
     // 2026-08-01, 08 and 15 are Saturdays (weekday 6) → 3 occurrences.
     expect(body.bookingIds).toHaveLength(3);
+    expect(createPi).not.toHaveBeenCalled();
+    expect(body.payments.every((p: Record<string, unknown>) => p.status === 'scheduled')).toBe(true);
     const series = captures.inserts.find((i) => i.table === 'booking_series');
     const seriesId = (series?.values as Record<string, unknown>).id;
     expect(series?.values).toMatchObject({ job_id: JID, provider_id: PID, agreed_rate_cents: 5000 });
     const rows = captures.inserts.find((i) => i.table === 'bookings')?.values as Record<string, unknown>[];
     expect(rows).toHaveLength(3);
-    // Every occurrence is `requested` and grouped under the same Series.
-    expect(rows.every((b) => b.state === 'requested' && b.series_id === seriesId)).toBe(true);
+    // Every occurrence is `requested`, `scheduled` for payment, grouped under the Series.
+    expect(
+      rows.every(
+        (b) => b.state === 'requested' && b.series_id === seriesId && b.payment_status === 'scheduled',
+      ),
+    ).toBe(true);
+    expect(rows.every((b) => b.authorize_at instanceof Date)).toBe(true);
+  });
+
+  it('defers a far-future one-off to the authorize-due sweep (scheduled, no hold)', async () => {
+    const createPi = vi.fn(async () => ({ id: 'pi_x', client_secret: 's', status: 'requires_capture' }));
+    const { db, captures } = makeDb(awardable({ jobs: [jobRow({ slots: [slot(FAR)] })] }));
+    const app = buildApp(makeDeps(db, makeAwardStripe({ createBookingPaymentIntent: createPi })));
+    const res = await app.request(path, post(await parentToken(), {}));
+    expect(res.status).toBe(200);
+    expect(createPi).not.toHaveBeenCalled();
+    const body = (await res.json()) as Record<string, any>;
+    expect(body.payments[0]).toMatchObject({ paymentIntentId: null, status: 'scheduled' });
+    const rows = captures.inserts.find((i) => i.table === 'bookings')?.values as Record<string, unknown>[];
+    expect(rows[0]).toMatchObject({ payment_status: 'scheduled', authorized_amount_cents: 15000 });
+  });
+
+  it('surfaces a requires_action (3DS) authorize in the payments response', async () => {
+    const { db, captures } = makeDb(awardable());
+    const stripe = makeAwardStripe({
+      createBookingPaymentIntent: async () => ({
+        id: 'pi_3ds',
+        client_secret: 'pi_3ds_secret',
+        status: 'requires_action',
+      }),
+    });
+    const app = buildApp(makeDeps(db, stripe));
+    const res = await app.request(path, post(await parentToken(), {}));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, any>;
+    expect(body.payments[0]).toMatchObject({ status: 'requires_action', clientSecret: 'pi_3ds_secret' });
+    const rows = captures.inserts.find((i) => i.table === 'bookings')?.values as Record<string, unknown>[];
+    expect(rows[0]!.payment_status).toBe('requires_action');
+  });
+
+  it('409 when the Caregiver has not finished payout setup', async () => {
+    const app = buildApp(makeDeps(makeDb(awardable({ provider_connect_accounts: [] })).db));
+    const res = await app.request(path, post(await parentToken(), {}));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: 'caregiver_payout_unavailable' });
+  });
+
+  it('409 when the Parent has no saved card', async () => {
+    const { db } = makeDb(awardable());
+    const stripe = makeAwardStripe({ retrieveCustomerDefaultPaymentMethod: async () => null });
+    const app = buildApp(makeDeps(db, stripe));
+    const res = await app.request(path, post(await parentToken(), {}));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: 'payment_method_required' });
+  });
+
+  it('402 + releases the hold when the card is declined', async () => {
+    const cancel = vi.fn(async () => ({ id: 'pi_x', status: 'canceled', amount: 0 }));
+    const { db } = makeDb(awardable());
+    const stripe = makeAwardStripe({
+      createBookingPaymentIntent: async () => {
+        throw new Error('stripe POST /payment_intents failed: 402 card_declined');
+      },
+      cancelPaymentIntent: cancel,
+    });
+    const app = buildApp(makeDeps(db, stripe));
+    const res = await app.request(path, post(await parentToken(), {}));
+    expect(res.status).toBe(402);
+    expect(await res.json()).toMatchObject({ error: 'payment_failed' });
   });
 
   it('409 when the Job is no longer open', async () => {

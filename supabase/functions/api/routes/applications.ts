@@ -40,6 +40,8 @@ import {
 } from '../../../../packages/domain/src/parent-subscription/index.ts';
 import { calculatePricing } from '../../../../packages/domain/src/pricing/index.ts';
 import { scanScopeNote } from '../../../../packages/domain/src/disintermediation/index.ts';
+import type { StripeAdapter } from '../vendors/stripe.ts';
+import { authorizeBooking, priceBooking } from '../services/booking-payments.ts';
 
 /**
  * Applications review + Award (OH-210) — CONTEXT.md § Application / § Job /
@@ -165,13 +167,31 @@ const ApplicationListResponse = z
   .object({ applications: z.array(ApplicationSchema) })
   .openapi('ApplicationList');
 
-/** MOCK payment confirmation (OH-210 Phase 0) — no real charge/authorize. */
+/**
+ * Award authorizes the Booking against the Parent's saved subscription card
+ * (OH-211) — there is no request body (the card is resolved server-side from
+ * `parent_subscriptions.stripe_customer_id`). `paymentMethodId` is accepted but
+ * ignored, kept for backward compat with the OH-210 mock client.
+ */
 const AwardRequest = z
   .object({
-    /** An optional (mock) saved payment-method id the Parent confirmed at Award. */
     paymentMethodId: z.string().optional(),
   })
   .openapi('AwardRequest');
+
+/** Per-Booking payment outcome the client uses to drive opportunistic 3DS. */
+const AwardPaymentSchema = z
+  .object({
+    bookingId: z.string(),
+    /** The Stripe PaymentIntent (`pi_…`) — null for a `scheduled` occurrence. */
+    paymentIntentId: z.string().nullable(),
+    /** The PI client secret — the client runs 3DS with it when status is
+     *  `requires_action`. Null for `scheduled` occurrences. */
+    clientSecret: z.string().nullable(),
+    /** authorized | requires_action | scheduled | failed. */
+    status: z.string(),
+  })
+  .openapi('AwardPayment');
 
 const AwardResponse = z
   .object({
@@ -182,6 +202,8 @@ const AwardResponse = z
     bookingIds: z.array(z.string()),
     /** The Booking Series id for a recurring award, else null. */
     seriesId: z.string().nullable(),
+    /** Per-Booking authorize outcome (drives the client 3DS step). */
+    payments: z.array(AwardPaymentSchema),
   })
   .openapi('AwardResult');
 
@@ -344,6 +366,54 @@ const OFFER_COLUMNS = [
 
 function toIso(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
+/* ── OH-211 authorize-at-booking timing + payment-source gates ──────────────── */
+
+// A card authorization holds for ~7 days; authorize a single near-term one-off
+// interactively at Award (Parent present → 3DS), but defer far-future one-offs
+// and every Series/multi-day occurrence to the lazy authorize-due sweep, which
+// authorizes ~48h before each start (avoids auth expiry + huge multi-holds).
+const AUTH_WINDOW_MS = 6 * 24 * 60 * 60 * 1000;
+const AUTHORIZE_LEAD_MS = 48 * 60 * 60 * 1000;
+/** Posted-Job Bookings are born `requested`; the Caregiver has 24h to accept. */
+const REQUEST_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** A slot's wall-clock start as a UTC instant (v1 tz-agnostic — see consultation-bookings). */
+function slotStartAtUtc(date: string, startMin: number): Date {
+  const [y, m, d] = date.split('-').map(Number);
+  return new Date(Date.UTC(y!, (m ?? 1) - 1, d ?? 1, 0, startMin, 0, 0));
+}
+
+/** The awarded Caregiver's ready Connect account (`acct_…`), or null if not payable. */
+async function resolveCaregiverConnectAccount(db: Db, providerId: string): Promise<string | null> {
+  const row = (await db
+    .selectFrom('provider_connect_accounts')
+    .select(['stripe_account_id', 'charges_enabled', 'payouts_enabled'])
+    .where('provider_id', '=', providerId)
+    .executeTakeFirst()) as
+    | { stripe_account_id: string | null; charges_enabled: boolean; payouts_enabled: boolean }
+    | undefined;
+  if (!row?.stripe_account_id || !row.charges_enabled || !row.payouts_enabled) return null;
+  return row.stripe_account_id;
+}
+
+/** The Parent's Stripe Customer + saved default card, or null if either is missing. */
+async function resolveParentPaymentSource(
+  db: Db,
+  stripe: StripeAdapter,
+  uid: string,
+): Promise<{ customerId: string; paymentMethodId: string } | null> {
+  const sub = (await db
+    .selectFrom('parent_subscriptions')
+    .select(['stripe_customer_id'])
+    .where('uid', '=', uid)
+    .executeTakeFirst()) as { stripe_customer_id: string | null } | undefined;
+  const customerId = sub?.stripe_customer_id;
+  if (!customerId) return null;
+  const paymentMethodId = await stripe.retrieveCustomerDefaultPaymentMethod(customerId);
+  if (!paymentMethodId) return null;
+  return { customerId, paymentMethodId };
 }
 
 /** The same Subscription gate the paywall reads (OH-193): entitled iff active|trialing. */
@@ -520,11 +590,23 @@ function rowToDomainOffer(row: OfferRow): Offer {
   };
 }
 
-/* ── OH-210: Award → Booking(s) `requested` / Booking Series plan ─────────────── */
+/* ── OH-210/211: Award → Booking(s) `requested` / Booking Series plan ──────────── */
 
+/** A priced Booking-to-be — the schedule leaf + its Agreed-Rate pricing split. */
+interface AwardOccurrence {
+  id: string;
+  slot: BookingSlot;
+  seriesId: string | null;
+  durationHours: number;
+  /** Wall-clock start as a UTC instant — drives the authorize-now-vs-schedule split. */
+  startAt: Date;
+  /** Parent charge (authorize amount) + Commission at the ticket's commission rate. */
+  parentChargeCents: number;
+  commissionCents: number;
+}
 interface AwardPlan {
   series: Insertable<BookingSeriesTable> | null;
-  bookings: Insertable<BookingsTable>[];
+  occurrences: AwardOccurrence[];
 }
 type AwardOutcome = { ok: true; plan: AwardPlan } | { ok: false; reason: string };
 
@@ -534,10 +616,16 @@ type AwardOutcome = { ok: true; plan: AwardPlan } | { ok: false; reason: string 
  * Agreed Rate + the JOB's child detail / service address. Bookings are born
  * `requested` (posted-Job birth state; the Caregiver has 24h to accept). A
  * recurring Job yields a stateless Series + one occurrence per date; a one-off Job
- * yields exactly one Booking (no Series). Any validation failure returns
- * `{ ok: false }` with NO partial plan.
+ * yields exactly one Booking (no Series). Each occurrence carries its own priced
+ * charge/commission (OH-211) so the handler can authorize it. Any validation
+ * failure returns `{ ok: false }` with NO partial plan.
  */
-function buildAward(job: JobRow, application: ApplicationRow, offer: OfferRow, now: Date): AwardOutcome {
+function buildAward(
+  job: JobRow,
+  application: ApplicationRow,
+  offer: OfferRow,
+  commissionBp: number,
+): AwardOutcome {
   const parentUid = job.parent_uid;
   const caregiverId = application.provider_id;
   const category = job.category;
@@ -546,9 +634,6 @@ function buildAward(job: JobRow, application: ApplicationRow, offer: OfferRow, n
   // Child detail + address are the JOB's (compose captured them; v1.6 moved child
   // entry off Award). A posted Job always carries child_count (completeness CHECK).
   const childCount = job.child_count ?? 1;
-  const childAges = job.child_ages ?? [];
-  // Posted-Job birth state — `requested` (the Caregiver must accept within 24h).
-  const bookingState = initialBookingState({ kind: 'caregiver', origin: 'posted-job' });
 
   interface Occurrence {
     id: string;
@@ -617,52 +702,80 @@ function buildAward(job: JobRow, application: ApplicationRow, offer: OfferRow, n
     }));
   }
 
-  let bookings: Insertable<BookingsTable>[];
+  let priced: AwardOccurrence[];
   try {
-    bookings = occurrences.map((o) => ({
-      id: o.id,
-      kind: 'caregiver',
-      state: bookingState, // 'requested'
-      parent_uid: parentUid,
-      provider_id: caregiverId,
-      slot_id: null,
-      rate_cents: null,
-      auto_complete_at: null,
-      scheduled_date: o.slot.date,
-      start_min: o.slot.startMin,
-      end_min: o.slot.endMin,
-      origin: 'posted-job',
-      job_id: job.id,
-      application_id: application.id,
-      offer_id: offer.id,
-      series_id: o.seriesId,
-      agreed_rate_cents: agreedRate,
-      computed_total_cents: calculatePricing({
+    priced = occurrences.map((o) => {
+      const price = priceBooking({
         agreedRateCents: agreedRate,
         hours: o.durationHours,
         childCount,
         perChildSurchargeCents: perChildSurcharge,
-        commissionBp: 0,
+        commissionBp,
         category,
-      }).parentChargeCents,
-      category,
-      child_count: childCount,
-      child_ages: childAges,
-      service_address_line1: job.service_address_line1,
-      service_address_line2: job.service_address_line2,
-      service_city: job.service_city,
-      service_state: job.service_state,
-      service_postal_code: job.service_postal_code,
-      // `requested`, not yet accepted — the reveal-at-accept address is snapshotted
-      // now but `accepted_at` stays null until the Caregiver accepts.
-      accepted_at: null,
-      updated_at: now,
-    }));
+      });
+      return {
+        id: o.id,
+        slot: o.slot,
+        seriesId: o.seriesId,
+        durationHours: o.durationHours,
+        startAt: slotStartAtUtc(o.slot.date, o.slot.startMin),
+        parentChargeCents: price.parentChargeCents,
+        commissionCents: price.commissionCents,
+      };
+    });
   } catch (e) {
     return { ok: false, reason: `invalid award pricing: ${(e as Error).message}` };
   }
 
-  return { ok: true, plan: { series: seriesRow, bookings } };
+  return { ok: true, plan: { series: seriesRow, occurrences: priced } };
+}
+
+/**
+ * The non-payment columns of a `requested` caregiver Booking (the payment patch +
+ * authorize_at / request_expires_at are merged in by the handler after it decides
+ * to authorize now or schedule).
+ */
+function buildBookingBase(
+  job: JobRow,
+  application: ApplicationRow,
+  offer: OfferRow,
+  occ: AwardOccurrence,
+  now: Date,
+): Insertable<BookingsTable> {
+  return {
+    id: occ.id,
+    kind: 'caregiver',
+    state: initialBookingState({ kind: 'caregiver', origin: 'posted-job' }), // 'requested'
+    parent_uid: job.parent_uid,
+    provider_id: application.provider_id,
+    slot_id: null,
+    rate_cents: null,
+    auto_complete_at: null,
+    scheduled_date: occ.slot.date,
+    start_min: occ.slot.startMin,
+    end_min: occ.slot.endMin,
+    origin: 'posted-job',
+    job_id: job.id,
+    application_id: application.id,
+    offer_id: offer.id,
+    series_id: occ.seriesId,
+    agreed_rate_cents: offer.proposed_rate_cents,
+    computed_total_cents: occ.parentChargeCents,
+    category: job.category,
+    child_count: job.child_count ?? 1,
+    child_ages: job.child_ages ?? [],
+    service_address_line1: job.service_address_line1,
+    service_address_line2: job.service_address_line2,
+    service_city: job.service_city,
+    service_state: job.service_state,
+    service_postal_code: job.service_postal_code,
+    // `requested`, not yet accepted — the reveal-at-accept address is snapshotted
+    // now but `accepted_at` stays null until the Caregiver accepts.
+    accepted_at: null,
+    // Posted-Job 24h accept window — the request-expiry sweep releases the hold.
+    request_expires_at: new Date(now.getTime() + REQUEST_TTL_MS),
+    updated_at: now,
+  };
 }
 
 /* ── route definitions ──────────────────────────────────────────────────────── */
@@ -885,7 +998,7 @@ export function registerApplicationRoutes(app: OpenAPIHono<AppEnv>): void {
 
   // ── POST /v1/applications/{applicationId}/award ─────────────────────────────
   app.openapi(awardRoute, async (c) => {
-    const { db } = c.var.deps;
+    const { db, stripe, env } = c.var.deps;
     const principal = c.get('principal')!;
     const { applicationId } = c.req.valid('param');
 
@@ -920,11 +1033,30 @@ export function registerApplicationRoutes(app: OpenAPIHono<AppEnv>): void {
     const offerRes = transitionOffer(rowToDomainOffer(offer), { type: 'counterparty-accept', now });
     if (!offerRes.ok) return c.json({ error: 'offer_not_acceptable', reason: offerRes.reason }, 409);
 
-    // Materialise the Booking(s) from the JOB schedule + OFFER rate (refuse before
-    // opening any transaction on an invalid plan — e.g. a bad recurrence rule).
-    const award = buildAward(job, application, offer, now);
+    // Materialise the priced Booking(s) from the JOB schedule + OFFER rate (refuse
+    // before any Stripe/DB write on an invalid plan — e.g. a bad recurrence rule).
+    const commissionBp = env.BOOKING_COMMISSION_BP;
+    const award = buildAward(job, application, offer, commissionBp);
     if (!award.ok) return c.json({ error: 'award_failed', reason: award.reason }, 409);
     const { plan } = award;
+
+    // PAYMENT GATES (OH-211): the Caregiver must be able to receive a payout and the
+    // Parent must have a card on file (their subscription card). Both fail *before*
+    // any authorization so a rejected award places no holds.
+    const connectAccountId = await resolveCaregiverConnectAccount(db, application.provider_id);
+    if (!connectAccountId) {
+      return c.json(
+        { error: 'caregiver_payout_unavailable', reason: 'the caregiver has not finished payout setup' },
+        409,
+      );
+    }
+    const paySource = await resolveParentPaymentSource(db, stripe, principal.uid);
+    if (!paySource) {
+      return c.json(
+        { error: 'payment_method_required', reason: 'add a payment method to award a Job' },
+        409,
+      );
+    }
 
     // Resolve the awarded caregiver's uid for the `job_awarded` notification.
     const caregiver = (await db
@@ -933,67 +1065,139 @@ export function registerApplicationRoutes(app: OpenAPIHono<AppEnv>): void {
       .where('id', '=', application.provider_id)
       .executeTakeFirst()) as { uid: string } | undefined;
 
-    await db.transaction().execute(async (trx) => {
-      if (plan.series) await trx.insertInto('booking_series').values(plan.series).execute();
-      if (plan.bookings.length > 0) await trx.insertInto('bookings').values(plan.bookings).execute();
+    // Authorize-at-booking. A single near-term one-off is authorized interactively
+    // now (Parent present → 3DS via the client); Series / multi-day / far-future
+    // occurrences are born `scheduled` and authorized ~48h before start by the
+    // authorize-due sweep (avoids card-auth expiry + large multi-holds).
+    const interactiveEligible = plan.series === null && plan.occurrences.length === 1;
+    const rows: Insertable<BookingsTable>[] = [];
+    const payments: Array<{
+      bookingId: string;
+      paymentIntentId: string | null;
+      clientSecret: string | null;
+      status: string;
+    }> = [];
+    const authorizedPis: Array<{ bookingId: string; piId: string }> = [];
+    const releaseHolds = () =>
+      Promise.allSettled(
+        authorizedPis.map((p) =>
+          stripe.cancelPaymentIntent(p.piId, `booking:award-rollback:${p.bookingId}`),
+        ),
+      );
 
-      // Offer → accepted (the Parent accepted the caregiver's proposal).
-      await trx
-        .updateTable('offers')
-        .set({ status: 'accepted', updated_at: now })
-        .where('id', '=', offer.id)
-        .execute();
-
-      // Application → awarded, on the accepted Offer.
-      await trx
-        .updateTable('applications')
-        .set({ state: 'awarded', accepted_offer_id: offer.id, awarded_at: now, updated_at: now })
-        .where('id', '=', application.id)
-        .execute();
-
-      // Job → awarded (provider_id stamped to the winning Caregiver).
-      await trx
-        .updateTable('jobs')
-        .set({ state: jobRes.next, provider_id: application.provider_id, awarded_at: now, updated_at: now })
-        .where('id', '=', job.id)
-        .execute();
-
-      // Auto-decline every OTHER still-open Application on the Job (story 91).
-      await trx
-        .updateTable('applications')
-        .set({ state: 'declined', updated_at: now })
-        .where('job_id', '=', job.id)
-        .where('id', '!=', application.id)
-        .where('state', 'in', ['submitted', 'countered'])
-        .execute();
-
-      // Notify the awarded Caregiver (`job_awarded`, SMS-mandatory). The losing
-      // caregivers are auto-declined above but not yet notified (no catalog kind).
-      if (caregiver?.uid && plan.bookings[0]) {
-        await trx
-          .insertInto('notification_outbox')
-          .values({
-            recipient_uid: caregiver.uid,
-            event_type: 'job_awarded',
-            payload: {
-              bookingId: plan.bookings[0].id as string,
-              jobId: job.id,
-              jobTitle: job.description.slice(0, 80),
-            },
-            dedupe_key: `job_awarded:${application.id}`,
-          })
-          .onConflict((oc) => oc.column('dedupe_key').doNothing())
-          .execute();
+    try {
+      for (const occ of plan.occurrences) {
+        const base = buildBookingBase(job, application, offer, occ, now);
+        const authorizeNow =
+          interactiveEligible && occ.startAt.getTime() - now.getTime() <= AUTH_WINDOW_MS;
+        if (authorizeNow) {
+          const { patch, clientSecret } = await authorizeBooking(stripe, {
+            bookingId: occ.id,
+            amountCents: occ.parentChargeCents,
+            commissionCents: occ.commissionCents,
+            commissionBp,
+            connectAccountId,
+            customerId: paySource.customerId,
+            paymentMethodId: paySource.paymentMethodId,
+            description: `Our Haven booking ${occ.id}`,
+            offSession: false,
+          });
+          if (patch.payment_intent_id) {
+            authorizedPis.push({ bookingId: occ.id, piId: patch.payment_intent_id });
+          }
+          rows.push({ ...base, ...patch });
+          payments.push({
+            bookingId: occ.id,
+            paymentIntentId: patch.payment_intent_id ?? null,
+            clientSecret,
+            status: patch.payment_status ?? 'failed',
+          });
+        } else {
+          rows.push({
+            ...base,
+            payment_status: 'scheduled',
+            authorized_amount_cents: occ.parentChargeCents,
+            commission_bp: commissionBp,
+            commission_cents: occ.commissionCents,
+            authorize_at: new Date(occ.startAt.getTime() - AUTHORIZE_LEAD_MS),
+          });
+          payments.push({ bookingId: occ.id, paymentIntentId: null, clientSecret: null, status: 'scheduled' });
+        }
       }
-    });
+    } catch (e) {
+      // A hard decline aborts the whole award — release any holds already placed.
+      await releaseHolds();
+      return c.json({ error: 'payment_failed', reason: (e as Error).message }, 402);
+    }
+
+    try {
+      await db.transaction().execute(async (trx) => {
+        if (plan.series) await trx.insertInto('booking_series').values(plan.series).execute();
+        if (rows.length > 0) await trx.insertInto('bookings').values(rows).execute();
+
+        // Offer → accepted (the Parent accepted the caregiver's proposal).
+        await trx
+          .updateTable('offers')
+          .set({ status: 'accepted', updated_at: now })
+          .where('id', '=', offer.id)
+          .execute();
+
+        // Application → awarded, on the accepted Offer.
+        await trx
+          .updateTable('applications')
+          .set({ state: 'awarded', accepted_offer_id: offer.id, awarded_at: now, updated_at: now })
+          .where('id', '=', application.id)
+          .execute();
+
+        // Job → awarded (provider_id stamped to the winning Caregiver).
+        await trx
+          .updateTable('jobs')
+          .set({ state: jobRes.next, provider_id: application.provider_id, awarded_at: now, updated_at: now })
+          .where('id', '=', job.id)
+          .execute();
+
+        // Auto-decline every OTHER still-open Application on the Job (story 91).
+        await trx
+          .updateTable('applications')
+          .set({ state: 'declined', updated_at: now })
+          .where('job_id', '=', job.id)
+          .where('id', '!=', application.id)
+          .where('state', 'in', ['submitted', 'countered'])
+          .execute();
+
+        // Notify the awarded Caregiver (`job_awarded`, SMS-mandatory). The losing
+        // caregivers are auto-declined above but not yet notified (no catalog kind).
+        if (caregiver?.uid && rows[0]) {
+          await trx
+            .insertInto('notification_outbox')
+            .values({
+              recipient_uid: caregiver.uid,
+              event_type: 'job_awarded',
+              payload: {
+                bookingId: rows[0].id as string,
+                jobId: job.id,
+                jobTitle: job.description.slice(0, 80),
+              },
+              dedupe_key: `job_awarded:${application.id}`,
+            })
+            .onConflict((oc) => oc.column('dedupe_key').doNothing())
+            .execute();
+        }
+      });
+    } catch (e) {
+      // The write failed after authorizing — never leave orphan holds on the Parent's card.
+      await releaseHolds();
+      throw e;
+    }
 
     return c.json(
       {
         applicationId: application.id,
         jobId: job.id,
         state: 'awarded' as const,
-        bookingIds: plan.bookings.map((b) => b.id as string),
+        bookingIds: rows.map((b) => b.id as string),
         seriesId: plan.series ? (plan.series.id as string) : null,
+        payments,
       },
       200,
     );

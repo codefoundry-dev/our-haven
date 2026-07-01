@@ -1,13 +1,15 @@
 /**
- * AwardSheet (OH-210) — the Award confirmation step (PRD story 90). Awarding a
- * Job to a Caregiver reviews the standing Offer + the child detail / address the
- * Parent set at compose (v1.6 moved child capture off Award), confirms a payment
- * method, and creates the Booking `requested` (or a Booking Series for a recurring
- * Job) — auto-declining the other Applications.
+ * AwardSheet (OH-210 / OH-211) — the Award confirmation step (PRD story 90).
+ * Awarding a Job to a Caregiver reviews the standing Offer + the child detail /
+ * address the Parent set at compose (v1.6 moved child capture off Award) and
+ * creates the Booking `requested` (or a Booking Series for a recurring Job) —
+ * auto-declining the other Applications.
  *
- * Payment is a MOCK confirmation (Phase 0) — no real Stripe charge/authorize
- * (matching the OH-203 consultation NULL-payment posture); the real
- * authorize-at-booking (ADR-0001) is a flagged follow-up.
+ * Payment (OH-211): the card is the Parent's saved subscription card, resolved
+ * server-side. A near-term one-off is **authorized** at Award; if Stripe raises an
+ * opportunistic 3DS challenge (`requires_action`), the client completes it via the
+ * Stripe SDK before surfacing success. Series / far-future occurrences are
+ * authorized ~48h before each session (no hold placed now).
  *
  * Shared by the native applicant-review screen + the web two-pane (RN Modal works
  * on RN-web). `onAwarded` fires with the created Booking id(s) so the caller can
@@ -21,6 +23,7 @@ import { Icon } from '@/components/Icon';
 import { ApiError, awardApplication, type AwardResult, type JobApplication, type MyJob } from '@/api/client';
 import { formatMoney } from '@/lib/offerCopy';
 import { jobScheduleLabel } from '@/lib/jobsHub';
+import { usePaymentAuthenticator } from '@/lib/stripeClient';
 import { colors, fonts, radii, shadow } from '@/theme/tokens';
 
 export interface AwardSheetProps {
@@ -34,6 +37,7 @@ export interface AwardSheetProps {
 export function AwardSheet({ visible, job, application, onClose, onAwarded }: AwardSheetProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { authenticate } = usePaymentAuthenticator();
 
   const offer = application?.offer ?? null;
   const caregiverName = application?.caregiver.name ?? 'this caregiver';
@@ -54,13 +58,35 @@ export function AwardSheet({ visible, job, application, onClose, onAwarded }: Aw
     setSubmitting(true);
     setError(null);
     try {
-      const result = await awardApplication(application.id, 'pm_mock');
+      const result = await awardApplication(application.id);
+      // Opportunistic 3DS (story 33): complete any authorization that needs a
+      // step-up before surfacing success. The Booking(s) already exist; a failed
+      // challenge leaves them `requested` with the hold pending (retryable).
+      const needsAction = result.payments.filter(
+        (p) => p.status === 'requires_action' && p.clientSecret,
+      );
+      for (const p of needsAction) {
+        const auth = await authenticate(p.clientSecret as string);
+        if (!auth.ok) {
+          setError(auth.error ?? 'We couldn’t confirm your card. Please try again.');
+          setSubmitting(false);
+          return;
+        }
+      }
       onAwarded(result);
     } catch (e) {
-      if (e instanceof ApiError && e.status === 409) {
+      if (e instanceof ApiError && e.status === 409 && e.code === 'caregiver_payout_unavailable') {
+        setError('This caregiver hasn’t finished setting up payouts yet, so they can’t be awarded.');
+      } else if (e instanceof ApiError && e.status === 409 && e.code === 'payment_method_required') {
+        setError('Add a payment method to your account before awarding a Job.');
+      } else if (e instanceof ApiError && e.status === 409) {
         setError('This Job can no longer be awarded — it may already be awarded or closed.');
       } else if (e instanceof ApiError && e.status === 402) {
-        setError('An active membership is required to award a Job.');
+        setError(
+          e.code === 'payment_failed'
+            ? 'Your card was declined. Update your payment method and try again.'
+            : 'An active membership is required to award a Job.',
+        );
       } else {
         setError(e instanceof ApiError ? e.message : 'Could not complete the award.');
       }
@@ -107,16 +133,18 @@ export function AwardSheet({ visible, job, application, onClose, onAwarded }: Aw
             {addressLine ? <ReviewRow icon="pin" text={addressLine} /> : null}
           </View>
 
-          {/* Mock payment method (Phase 0) */}
+          {/* Payment — the saved subscription card is authorized (held), not charged */}
           <Text style={styles.sectionLabel}>Payment method</Text>
           <View style={styles.payRow}>
             <View style={styles.payIcon}>
               <Icon name="dollar" size={16} color={colors.ink} />
             </View>
             <View style={styles.flexMin}>
-              <Text style={styles.payName}>Card on file · •••• 4242</Text>
+              <Text style={styles.payName}>Your card on file</Text>
               <Text style={styles.payNote}>
-                Preview — no charge is made. Each session is charged when it completes.
+                {recurring
+                  ? 'Each session is authorized shortly before it starts, and charged only after it completes.'
+                  : 'We place a hold now and only charge after the session completes.'}
               </Text>
             </View>
             <Icon name="check-circle" size={20} color={colors.success} />

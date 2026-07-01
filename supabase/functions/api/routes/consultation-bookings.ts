@@ -15,7 +15,6 @@ import { isListable, type ProviderSubRow, type VerificationRow } from './search.
 import {
   initialBookingState,
   transitionBooking,
-  type Booking,
   type BookingState,
 } from '../../../../packages/domain/src/booking-lifecycle/index.ts';
 import {
@@ -28,6 +27,8 @@ import {
   deriveAccessDecision,
   type StripeSubscriptionStatus,
 } from '../../../../packages/domain/src/parent-subscription/index.ts';
+import { calculateCancellation } from '../../../../packages/domain/src/cancellation/index.ts';
+import { applyCancellationCharge } from '../services/booking-payments.ts';
 
 /**
  * Provider consultation booking (OH-203) — CONTEXT.md § Booking (slot-pick,
@@ -115,8 +116,15 @@ const BookingListResponse = z
   .openapi('ConsultationBookingList');
 
 const CancelResponse = z
-  .object({ id: z.string(), state: BookingStateEnum })
-  .openapi('ConsultationBookingCancel');
+  .object({
+    id: z.string(),
+    state: BookingStateEnum,
+    /** Caregiver cancellations: the applied M2.5 tier + charge/refund split. */
+    tier: z.enum(['free', 'half', 'full']).optional(),
+    chargeCents: z.number().int().optional(),
+    refundCents: z.number().int().optional(),
+  })
+  .openapi('BookingCancel');
 
 const ProviderIdParam = z.object({
   providerId: z.string().uuid().openapi({ param: { name: 'providerId', in: 'path' } }),
@@ -156,6 +164,16 @@ interface BookingRow {
   auto_complete_at: Date | string | null;
 }
 
+/** The cancel handler additionally reads the caregiver payment columns (OH-211). */
+interface CancelBookingRow extends BookingRow {
+  origin: 'posted-job' | 'direct-message' | null;
+  payment_intent_id: string | null;
+  payment_status: string | null;
+  authorized_amount_cents: number | null;
+  computed_total_cents: number | null;
+  commission_bp: number | null;
+}
+
 /** Thrown inside the booking transaction when the slot was concurrently taken. */
 class SlotUnavailableError extends Error {}
 
@@ -179,6 +197,12 @@ function slotEndAtUtc(date: string, endMin: number): Date {
   const m = Number(parts[1]);
   const d = Number(parts[2]);
   return new Date(Date.UTC(y, m - 1, d, 0, endMin, 0, 0));
+}
+
+/** A slot's wall-clock START as a UTC instant (mirror of slotEndAtUtc). */
+function slotStartAtUtc(date: string, startMin: number): Date {
+  const [y, m, d] = date.split('-').map(Number);
+  return new Date(Date.UTC(y!, (m ?? 1) - 1, d ?? 1, 0, startMin, 0, 0));
 }
 
 function toSlot(row: SlotRow): ConsultationSlot {
@@ -508,60 +532,100 @@ export function registerConsultationBookingRoutes(app: OpenAPIHono<AppEnv>): voi
   });
 
   app.openapi(cancelRoute, async (c) => {
-    const { db } = c.var.deps;
+    const { db, stripe } = c.var.deps;
     const principal = c.get('principal')!;
     const { bookingId } = c.req.valid('param');
 
     const row = (await db
       .selectFrom('bookings')
-      .select(BOOKING_COLUMNS)
+      .select([
+        ...BOOKING_COLUMNS,
+        'origin',
+        'payment_intent_id',
+        'payment_status',
+        'authorized_amount_cents',
+        'computed_total_cents',
+        'commission_bp',
+      ])
       .where('id', '=', bookingId)
-      .executeTakeFirst()) as BookingRow | undefined;
+      .executeTakeFirst()) as CancelBookingRow | undefined;
     // 404 (not 403) when it is not the caller's — never reveal another's booking.
     if (!row) return c.json({ error: 'booking_not_found' }, 404);
 
-    // v1 only persists Provider consultations; the Caregiver cancel surface (with
-    // its refund machinery) is OH-179.
-    if (row.kind !== 'provider') return c.json({ error: 'booking_not_found' }, 404);
-
-    let event: 'parent-cancel' | 'provider-cancel';
-    if (principal.role === 'parent') {
-      if (row.parent_uid !== principal.uid) return c.json({ error: 'booking_not_found' }, 404);
-      event = 'parent-cancel';
-    } else {
-      const provider = await loadProviderByUid(db, principal.uid);
-      if (!provider || row.provider_id !== provider.id) {
-        return c.json({ error: 'booking_not_found' }, 404);
-      }
-      event = 'provider-cancel';
-    }
-
-    const booking: Booking = { kind: 'provider', state: row.state };
-    const result = transitionBooking(booking, { type: event });
-    if (!result.ok) return c.json({ error: 'cannot_cancel', reason: result.reason }, 409);
-
-    const next = result.next;
-    const releasesSlot = result.sideEffects.some((s) => s.type === 'release-consultation-slot');
     const now = new Date();
 
-    await db.transaction().execute(async (trx) => {
-      await trx
-        .updateTable('bookings')
-        .set({ state: next, updated_at: now })
-        .where('id', '=', bookingId)
-        .execute();
-      // The `release-consultation-slot` side effect: free the held slot back to
-      // `released` (the Provider re-lists it with `reopenSlot` if they want).
-      if (releasesSlot && row.slot_id) {
-        await trx
-          .updateTable('provider_slots')
-          .set({ state: 'released', held_by_booking_id: null, updated_at: now })
-          .where('id', '=', row.slot_id)
-          .where('state', '=', 'held')
-          .execute();
+    // ── Provider consultation — NULL payment; cancel just releases the slot. ────
+    if (row.kind === 'provider') {
+      let event: 'parent-cancel' | 'provider-cancel';
+      if (principal.role === 'parent') {
+        if (row.parent_uid !== principal.uid) return c.json({ error: 'booking_not_found' }, 404);
+        event = 'parent-cancel';
+      } else {
+        const provider = await loadProviderByUid(db, principal.uid);
+        if (!provider || row.provider_id !== provider.id) {
+          return c.json({ error: 'booking_not_found' }, 404);
+        }
+        event = 'provider-cancel';
       }
-    });
 
-    return c.json({ id: bookingId, state: next }, 200);
+      const result = transitionBooking({ kind: 'provider', state: row.state }, { type: event });
+      if (!result.ok) return c.json({ error: 'cannot_cancel', reason: result.reason }, 409);
+      const next = result.next;
+      const releasesSlot = result.sideEffects.some((s) => s.type === 'release-consultation-slot');
+
+      await db.transaction().execute(async (trx) => {
+        await trx.updateTable('bookings').set({ state: next, updated_at: now }).where('id', '=', bookingId).execute();
+        if (releasesSlot && row.slot_id) {
+          await trx
+            .updateTable('provider_slots')
+            .set({ state: 'released', held_by_booking_id: null, updated_at: now })
+            .where('id', '=', row.slot_id)
+            .where('state', '=', 'held')
+            .execute();
+        }
+      });
+
+      return c.json({ id: bookingId, state: next }, 200);
+    }
+
+    // ── Caregiver Booking — parent-initiated cancel with the M2.5 charge (OH-211). ─
+    // Only the Parent cancels via this route (the caregiver-cancel surface is OH-218/219).
+    if (principal.role !== 'parent' || row.parent_uid !== principal.uid) {
+      return c.json({ error: 'booking_not_found' }, 404);
+    }
+    const cancelRes = transitionBooking(
+      { kind: 'caregiver', origin: row.origin ?? 'posted-job', state: row.state },
+      { type: 'parent-cancel' },
+    );
+    if (!cancelRes.ok) return c.json({ error: 'cannot_cancel', reason: cancelRes.reason }, 409);
+
+    const cancellation = calculateCancellation({
+      originalAuthorizedCents: row.authorized_amount_cents ?? row.computed_total_cents ?? 0,
+      bookingStartAt: slotStartAtUtc(toDateStr(row.scheduled_date), row.start_min),
+      cancellationAt: now,
+      cancelledBy: 'parent',
+    });
+    const { patch } = await applyCancellationCharge(stripe, {
+      bookingId: row.id,
+      paymentIntentId: row.payment_intent_id,
+      cancellation,
+      commissionBp: row.commission_bp ?? 0,
+    });
+    await db
+      .updateTable('bookings')
+      .set({ state: 'cancelled', cancelled_at: now, ...patch, updated_at: now })
+      .where('id', '=', row.id)
+      .execute();
+
+    return c.json(
+      {
+        id: row.id,
+        state: 'cancelled' as const,
+        tier: cancellation.tier,
+        chargeCents: cancellation.chargeCents,
+        refundCents: cancellation.refundCents,
+      },
+      200,
+    );
   });
 }
