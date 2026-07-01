@@ -6231,11 +6231,12 @@ paths:
     post:
       tags:
         - offers
-      summary: Accept an Offer (status → accepted) — OH-206
+      summary: Accept an Offer (status → accepted) — OH-207
       description: The counterparty accepts a pending Offer. A Parent accept is
-        Parent-Subscription-gated. (The atomic Booking materialisation + thread
-        rebind on accept is OH-207.) 409 if the Offer is not pending or has
-        expired.
+        Parent-Subscription-gated. Accepting a Direct-Message Book-request
+        atomically materialises the Job + Application + Booking(s) (born
+        accepted) and rebinds the thread to the new Job. 409 if the Offer is not
+        pending or has expired.
       security:
         - supabaseAccessToken: []
       parameters:
@@ -6351,10 +6352,11 @@ paths:
     post:
       tags:
         - offers
-      summary: Withdraw an Offer — OH-206
+      summary: Withdraw an Offer — OH-207
       description: The sender withdraws their own Offer (status → withdrawn) from
-        pending or accepted. (Cascade-cancelling Bookings a withdrawn-accepted
-        Offer materialised is OH-207 — no Bookings exist yet.) Never gated.
+        pending or accepted. Withdrawing an already-accepted Offer
+        cascade-cancels every Booking it materialised (resolved by offer_id).
+        Never gated.
       security:
         - supabaseAccessToken: []
       parameters:

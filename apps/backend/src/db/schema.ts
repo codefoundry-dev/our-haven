@@ -182,11 +182,16 @@ export interface ProviderSlotsTable {
  * (`provider_id`).
  *
  * Shaped for the full caregiver|provider model (the `kind` fork + the nine
- * lifecycle states), but only the provider path writes today; Caregiver
- * hourly/payment columns land with OH-179's persistence. `parent_uid` is the
- * auth user uuid (no `parents` table — matches `parent_subscriptions.uid`).
- * `rate_cents` is a display-only per-session snapshot. `auto_complete_at`
- * interprets the slot's wall-clock end as UTC (the tz-agnostic slot simplification).
+ * lifecycle states). The provider consultation path writes the slot columns; a
+ * **caregiver** Booking (OH-207, materialised at Direct-Message Book-request
+ * accept) writes the Job-chain columns instead (`origin` + `job_id` /
+ * `application_id` / `offer_id` / `series_id`, the Agreed-Rate + computed-total
+ * snapshot, the reveal-at-accept service address, ad-hoc child detail). All the
+ * caregiver columns are NULLable so the provider path is untouched. `parent_uid`
+ * is the auth user uuid (no `parents` table — matches `parent_subscriptions.uid`);
+ * `provider_id → providers.id` is the supply member (a Caregiver is a providers
+ * row — ADR-0011). `rate_cents` is the provider display-only per-session snapshot;
+ * `auto_complete_at` interprets the slot's wall-clock end as UTC.
  */
 export interface BookingsTable {
   id: Generated<string>;
@@ -209,6 +214,23 @@ export interface BookingsTable {
   end_min: number;
   rate_cents: number | null;
   auto_complete_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  // ── caregiver Job-chain columns (OH-207; NULL on a provider consultation) ────
+  origin: 'posted-job' | 'direct-message' | null;
+  job_id: string | null;
+  application_id: string | null;
+  offer_id: string | null;
+  series_id: string | null;
+  agreed_rate_cents: number | null;
+  computed_total_cents: number | null;
+  category: 'babysitter' | 'tutor' | 'nanny' | null;
+  child_count: number | null;
+  child_ages: number[] | null;
+  service_address_line1: string | null;
+  service_address_line2: string | null;
+  service_city: string | null;
+  service_state: string | null;
+  service_postal_code: string | null;
+  accepted_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
   created_at: Generated<Date>;
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
 }
@@ -600,6 +622,65 @@ export interface NotificationWebPushSubscriptionsTable {
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
 }
 
+/**
+ * Jobs (OH-207; CONTEXT § Job) — the canonical anchor for every Caregiver
+ * Booking (ADR-0006, narrowed by ADR-0011). A **Direct-Message** Job is
+ * materialised at Book-request accept, born `awarded` (skips draft/open); a
+ * **posted** Job (a later ticket) starts `draft`. `provider_id → providers.id`
+ * is the awarded Caregiver (NULL until award for a posted Job); `parent_uid` is
+ * the owning Parent (auth uid, no FK). Service-role-only (read through the Edge).
+ */
+export interface JobsTable {
+  id: Generated<string>;
+  origin: 'posted' | 'direct-message';
+  state: 'draft' | 'open' | 'awarded' | 'expired' | 'cancelled' | 'closed';
+  parent_uid: string;
+  provider_id: string | null;
+  category: 'babysitter' | 'tutor' | 'nanny';
+  description: string;
+  awarded_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  created_at: Generated<Date>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
+/**
+ * Applications (OH-207; CONTEXT § Application) — a Caregiver's response to a Job.
+ * A Direct-Message Job materialises exactly one Application, born `awarded`, with
+ * `accepted_offer_id` set to the accepted Book-request. One Application per
+ * Caregiver per Job (unique `job_id`+`provider_id`). Service-role-only.
+ */
+export interface ApplicationsTable {
+  id: Generated<string>;
+  job_id: string;
+  provider_id: string;
+  origin: 'posted' | 'direct-message';
+  state: 'submitted' | 'countered' | 'awarded' | 'declined' | 'withdrawn' | 'expired';
+  accepted_offer_id: string | null;
+  proposal: string | null;
+  awarded_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  created_at: Generated<Date>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
+/**
+ * Booking Series (OH-207; CONTEXT § Booking Series, ADR-0014 §5) — a stateless
+ * grouping row for a **recurring** Caregiver arrangement. Holds NO lifecycle
+ * state; each occurrence Booking (`bookings.series_id`) runs the graph on its
+ * own. `rule` is the booking-lifecycle `RecurrenceRule` shape; `offer_id`
+ * back-links the Book-request that materialised the Series (withdraw-cascade).
+ */
+export interface BookingSeriesTable {
+  id: Generated<string>;
+  job_id: string;
+  parent_uid: string;
+  provider_id: string;
+  category: 'babysitter' | 'tutor' | 'nanny';
+  rule: ColumnType<OfferRecurrenceRow, OfferRecurrenceRow, OfferRecurrenceRow>;
+  agreed_rate_cents: number;
+  offer_id: string | null;
+  created_at: Generated<Date>;
+}
+
 export interface Database {
   auth_email_otps: AuthEmailOtpsTable;
   auth_step_up_grants: AuthStepUpGrantsTable;
@@ -624,6 +705,9 @@ export interface Database {
   messages: MessagesTable;
   message_flags: MessageFlagsTable;
   offers: OffersTable;
+  jobs: JobsTable;
+  applications: ApplicationsTable;
+  booking_series: BookingSeriesTable;
   notification_outbox: NotificationOutboxTable;
   notification_push_tokens: NotificationPushTokensTable;
   notification_web_push_subscriptions: NotificationWebPushSubscriptionsTable;
