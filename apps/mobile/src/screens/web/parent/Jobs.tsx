@@ -18,7 +18,6 @@ import { Avatar, AvatarGroup } from '@/components/ui/Avatar';
 import { Badge, type BadgeKind } from '@/components/ui/Badge';
 import { CategoryChip, type Category } from '@/components/ui/CategoryChip';
 import { RatingValue } from '@/components/ui/StarRating';
-import { useParentGate } from '@/lib/paywallGate';
 import { colors, fonts, radii, shadow, type ColorToken } from '@/theme/tokens';
 
 interface Applicant {
@@ -61,8 +60,8 @@ const APP_TONES: ColorToken[] = ['catTutor', 'catBaby', 'catNanny'];
 export function ParentJobsWeb() {
   const router = useRouter();
   const go = (route: string) => router.push(route as never);
-  const { gate } = useParentGate();
-  const postJob = () => gate({ kind: 'post-job' }, () => go('/post-job'));
+  // Composing is open; the Subscription gate fires on PUBLISH in the composer (OH-209).
+  const postJob = () => go('/post-job');
   const [selected, setSelected] = useState<string>('tutor');
   const active = JOBS.find((j) => j.id === selected) ?? JOBS[0];
 

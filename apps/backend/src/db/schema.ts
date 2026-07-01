@@ -626,9 +626,18 @@ export interface NotificationWebPushSubscriptionsTable {
  * Jobs (OH-207; CONTEXT § Job) — the canonical anchor for every Caregiver
  * Booking (ADR-0006, narrowed by ADR-0011). A **Direct-Message** Job is
  * materialised at Book-request accept, born `awarded` (skips draft/open); a
- * **posted** Job (a later ticket) starts `draft`. `provider_id → providers.id`
- * is the awarded Caregiver (NULL until award for a posted Job); `parent_uid` is
- * the owning Parent (auth uid, no FK). Service-role-only (read through the Edge).
+ * **posted** Job (OH-209) starts `draft` and is published to `open`.
+ * `provider_id → providers.id` is the awarded Caregiver (NULL until award for a
+ * posted Job); `parent_uid` is the owning Parent (auth uid, no FK).
+ * Service-role-only (read through the Edge).
+ *
+ * The compose columns (OH-209; `schedule_kind` … `budget_hint_cents`) are the
+ * bundle a **posted** Job carries directly (schedule + child detail + disclosed
+ * Safety-Behaviors subset + service address + timestamped disclosure consent;
+ * ADR-0014/0016). They are all NULLable/defaulted — a Direct-Message Job leaves
+ * them unset (its schedule + child detail live on the Offer + Bookings). A
+ * posted Job's schedule is `one-off` (single-slot `slots`) or `recurring`
+ * (`recurrence` rule) — a multi-day one-off is fanned out into one Job per date.
  */
 export interface JobsTable {
   id: Generated<string>;
@@ -639,6 +648,20 @@ export interface JobsTable {
   category: 'babysitter' | 'tutor' | 'nanny';
   description: string;
   awarded_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  // ── posted-Job compose bundle (OH-209; NULL for Direct-Message Jobs) ────────
+  schedule_kind: 'one-off' | 'recurring' | null;
+  slots: ColumnType<OfferSlotRow[], OfferSlotRow[] | undefined, OfferSlotRow[]>;
+  recurrence: ColumnType<OfferRecurrenceRow | null, OfferRecurrenceRow | null | undefined, OfferRecurrenceRow | null>;
+  child_count: number | null;
+  child_ages: number[] | null;
+  safety_behaviors: ColumnType<string[], string[] | undefined, string[]>;
+  disclosure_consent_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  service_address_line1: string | null;
+  service_address_line2: string | null;
+  service_city: string | null;
+  service_state: string | null;
+  service_postal_code: string | null;
+  budget_hint_cents: number | null;
   created_at: Generated<Date>;
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
 }

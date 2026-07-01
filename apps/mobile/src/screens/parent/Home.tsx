@@ -18,7 +18,6 @@ import { Chip } from '@/components/ui/Chip';
 import { IconButton } from '@/components/ui/IconButton';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { SectionHeader } from '@/components/ui/SectionHeader';
-import { useParentGate } from '@/lib/paywallGate';
 import { usePreview } from '@/preview/PreviewProvider';
 import { shapeBrowse, summarizeAnswers } from '@/preview/questionnaire';
 import { colors, fonts, radii, shadow, type ColorToken } from '@/theme/tokens';
@@ -58,11 +57,11 @@ const APP_TONES: ColorToken[] = ['catTutor', 'catBaby', 'catNanny'];
 export function ParentHome() {
   const router = useRouter();
   const { answers } = usePreview();
-  const { gate } = useParentGate();
 
-  // Posting a Job is Parent-Subscription-gated (OH-204): a not-entitled Parent is
-  // routed to the paywall, which resumes the post-Job flow once subscribed.
-  const postJob = () => gate({ kind: 'post-job' }, () => router.push('/post-job'));
+  // Composing a Job is open to everyone; the Subscription gate fires on PUBLISH
+  // inside the composer (OH-209 / CONTEXT § Subscription), so an unsubscribed
+  // Parent can compose + autosave a draft and only hit the paywall at publish.
+  const postJob = () => router.push('/post-job');
 
   // The ephemeral preview answers re-order the category grid so the most relevant
   // care leads the first browse (story 111). No answers → the default order.

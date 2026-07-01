@@ -20,7 +20,6 @@ import { useRouter } from 'expo-router';
 import { Icon } from '@/components/Icon';
 import { Card } from '@/components/ui/Card';
 import { WebPageHeader } from '@/components/web/ParentWebShell';
-import { useParentGate } from '@/lib/paywallGate';
 import { colors, fonts, radii, shadow, type ColorToken } from '@/theme/tokens';
 
 interface Child {
@@ -52,8 +51,8 @@ const BEHAVIOURS: readonly string[] = [
 export function ParentChildrenWeb() {
   const router = useRouter();
   const go = (route: string) => router.push(route as never);
-  const { gate } = useParentGate();
-  const postJob = () => gate({ kind: 'post-job' }, () => go('/post-job'));
+  // Composing is open; the Subscription gate fires on PUBLISH in the composer (OH-209).
+  const postJob = () => go('/post-job');
 
   const [children] = useState<Child[]>(CHILDREN);
   // Safety behaviours stay locked until the Parent explicitly consents.

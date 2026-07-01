@@ -56,6 +56,14 @@ tags:
       delivery, and disintermediation redaction at write time (the unredacted
       original is queued to the service-role-only Trust & Safety flag table).
       Opening a thread + a Parent send are Parent-Subscription-gated.
+  - name: jobs
+    description: Posted Jobs (OH-209) — a Parent composes + publishes a Job open to
+      verified in-category Caregivers (Category + ZIP + scope + concrete
+      schedule + child count/ages + disclosed Safety-Behaviors subset + service
+      address + optional budget hint). Publishing is Parent-Subscription-gated
+      (402); the disclosure consent is timestamped (ADR-0016). A multi-day
+      one-off fans out into one Job per date; a recurring rule posts a single
+      Job (ADR-0014).
   - name: verification
     description: Supply verification — state + email/phone/ID-doc facts (OH-184)
   - name: screening
@@ -3099,6 +3107,295 @@ components:
       required:
         - proposedRateCents
         - schedule
+    CreateJobResult:
+      type: object
+      properties:
+        jobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/Job"
+      required:
+        - jobs
+    Job:
+      type: object
+      properties:
+        id:
+          type: string
+        origin:
+          type: string
+          enum:
+            - posted
+            - direct-message
+        state:
+          type: string
+          enum:
+            - draft
+            - open
+            - awarded
+            - expired
+            - cancelled
+            - closed
+        category:
+          type: string
+          enum:
+            - babysitter
+            - tutor
+            - nanny
+        description:
+          type: string
+        childCount:
+          type: integer
+          nullable: true
+        childAges:
+          type: array
+          items:
+            type: integer
+        safetyBehaviors:
+          type: array
+          items:
+            type: string
+        scheduleKind:
+          type: string
+          nullable: true
+          enum:
+            - one-off
+            - recurring
+            - null
+        slots:
+          type: array
+          items:
+            $ref: "#/components/schemas/JobSlot"
+        recurrence:
+          $ref: "#/components/schemas/JobRecurrence"
+        serviceAddress:
+          type: object
+          nullable: true
+          properties:
+            line1:
+              type: string
+              nullable: true
+            line2:
+              type: string
+              nullable: true
+            city:
+              type: string
+              nullable: true
+            state:
+              type: string
+              nullable: true
+            postalCode:
+              type: string
+              nullable: true
+          required:
+            - line1
+            - line2
+            - city
+            - state
+            - postalCode
+        budgetHintCents:
+          type: integer
+          nullable: true
+        disclosureConsentAt:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+      required:
+        - id
+        - origin
+        - state
+        - category
+        - description
+        - childCount
+        - childAges
+        - safetyBehaviors
+        - scheduleKind
+        - slots
+        - recurrence
+        - serviceAddress
+        - budgetHintCents
+        - disclosureConsentAt
+        - createdAt
+    JobSlot:
+      type: object
+      properties:
+        date:
+          type: string
+          pattern: ^\d{4}-\d{2}-\d{2}$
+        startMin:
+          type: integer
+          minimum: 0
+          maximum: 1440
+        endMin:
+          type: integer
+          minimum: 0
+          maximum: 1440
+      required:
+        - date
+        - startMin
+        - endMin
+    JobRecurrence:
+      type: object
+      nullable: true
+      properties:
+        startDate:
+          type: string
+          pattern: ^\d{4}-\d{2}-\d{2}$
+        endDate:
+          type: string
+          pattern: ^\d{4}-\d{2}-\d{2}$
+        weekdays:
+          type: array
+          items:
+            type: integer
+            minimum: 0
+            maximum: 6
+          minItems: 1
+          maxItems: 7
+        startMin:
+          type: integer
+          minimum: 0
+          maximum: 1440
+        endMin:
+          type: integer
+          minimum: 0
+          maximum: 1440
+      required:
+        - startDate
+        - endDate
+        - weekdays
+        - startMin
+        - endMin
+    JobError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
+    CreateJobRequest:
+      type: object
+      properties:
+        category:
+          type: string
+          enum:
+            - babysitter
+            - tutor
+            - nanny
+        description:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        childCount:
+          type: integer
+          minimum: 1
+          maximum: 12
+        childAges:
+          type: array
+          items:
+            type: integer
+            minimum: 0
+            maximum: 17
+          maxItems: 12
+        safetyBehaviors:
+          type: array
+          items:
+            type: string
+            enum:
+              - aggression
+              - self-injury
+              - wandering
+              - meltdowns
+              - property-destruction
+              - pica
+              - sensory-sensitivity
+              - communication-support
+              - transition-difficulty
+              - sleep-disturbance
+        serviceAddress:
+          $ref: "#/components/schemas/JobServiceAddress"
+        budgetHintCents:
+          type: integer
+          nullable: true
+          minimum: 0
+        disclosureConsent:
+          type: boolean
+        schedule:
+          $ref: "#/components/schemas/JobSchedule"
+      required:
+        - category
+        - description
+        - childCount
+        - childAges
+        - safetyBehaviors
+        - serviceAddress
+        - disclosureConsent
+        - schedule
+    JobServiceAddress:
+      type: object
+      properties:
+        line1:
+          type: string
+          nullable: true
+          maxLength: 120
+        line2:
+          type: string
+          nullable: true
+          maxLength: 120
+        city:
+          type: string
+          nullable: true
+          maxLength: 80
+        state:
+          type: string
+          nullable: true
+          pattern: ^[A-Z]{2}$
+        postalCode:
+          type: string
+          pattern: ^\d{5}$
+      required:
+        - postalCode
+    JobSchedule:
+      oneOf:
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - one-off
+            slot:
+              $ref: "#/components/schemas/JobSlot"
+          required:
+            - kind
+            - slot
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - multi-day
+            slots:
+              type: array
+              items:
+                $ref: "#/components/schemas/JobSlot"
+              minItems: 1
+              maxItems: 31
+          required:
+            - kind
+            - slots
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - recurring
+            rule:
+              $ref: "#/components/schemas/JobRecurrence"
+          required:
+            - kind
+            - rule
     ContactUsResponse:
       type: object
       properties:
@@ -6476,6 +6773,57 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OfferError"
+  /v1/jobs:
+    post:
+      tags:
+        - jobs
+      summary: Compose + publish a posted Job — OH-209
+      description: A Parent publishes a posted Job open to verified in-category
+        Caregivers. Publishing is Parent-Subscription-gated (402). The
+        Safety-Behaviors disclosure is REQUIRED (disclose a subset or explicitly
+        none) and the compose disclosure consent must be acknowledged
+        (ADR-0016). A multi-day one-off fans out into one one-off Job per date;
+        a recurring rule posts a single Job (ADR-0014). 400 on an invalid
+        schedule / child detail / a recurrence that generates no dates.
+      security:
+        - supabaseAccessToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateJobRequest"
+      responses:
+        "201":
+          description: The published Job(s)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateJobResult"
+        "400":
+          description: Invalid Job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobError"
+        "402":
+          description: No active Parent Subscription
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobError"
   /v1/providers/contact-us:
     post:
       tags:

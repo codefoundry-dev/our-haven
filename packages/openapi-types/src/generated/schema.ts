@@ -3880,8 +3880,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Accept an Offer (status → accepted) — OH-206
-         * @description The counterparty accepts a pending Offer. A Parent accept is Parent-Subscription-gated. (The atomic Booking materialisation + thread rebind on accept is OH-207.) 409 if the Offer is not pending or has expired.
+         * Accept an Offer (status → accepted) — OH-207
+         * @description The counterparty accepts a pending Offer. A Parent accept is Parent-Subscription-gated. Accepting a Direct-Message Book-request atomically materialises the Job + Application + Booking(s) (born accepted) and rebinds the thread to the new Job. 409 if the Offer is not pending or has expired.
          */
         post: {
             parameters: {
@@ -4070,8 +4070,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Withdraw an Offer — OH-206
-         * @description The sender withdraws their own Offer (status → withdrawn) from pending or accepted. (Cascade-cancelling Bookings a withdrawn-accepted Offer materialised is OH-207 — no Bookings exist yet.) Never gated.
+         * Withdraw an Offer — OH-207
+         * @description The sender withdraws their own Offer (status → withdrawn) from pending or accepted. Withdrawing an already-accepted Offer cascade-cancels every Booking it materialised (resolved by offer_id). Never gated.
          */
         post: {
             parameters: {
@@ -4244,6 +4244,85 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["OfferError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Compose + publish a posted Job — OH-209
+         * @description A Parent publishes a posted Job open to verified in-category Caregivers. Publishing is Parent-Subscription-gated (402). The Safety-Behaviors disclosure is REQUIRED (disclose a subset or explicitly none) and the compose disclosure consent must be acknowledged (ADR-0016). A multi-day one-off fans out into one one-off Job per date; a recurring rule posts a single Job (ADR-0014). 400 on an invalid schedule / child detail / a recurrence that generates no dates.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateJobRequest"];
+                };
+            };
+            responses: {
+                /** @description The published Job(s) */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CreateJobResult"];
+                    };
+                };
+                /** @description Invalid Job */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobError"];
+                    };
+                };
+                /** @description No active Parent Subscription */
+                402: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobError"];
                     };
                 };
             };
@@ -5692,6 +5771,84 @@ export interface components {
             proposedRateCents: number;
             scopeNote?: string;
             schedule: components["schemas"]["OfferSchedule"];
+        };
+        CreateJobResult: {
+            jobs: components["schemas"]["Job"][];
+        };
+        Job: {
+            id: string;
+            /** @enum {string} */
+            origin: "posted" | "direct-message";
+            /** @enum {string} */
+            state: "draft" | "open" | "awarded" | "expired" | "cancelled" | "closed";
+            /** @enum {string} */
+            category: "babysitter" | "tutor" | "nanny";
+            description: string;
+            childCount: number | null;
+            childAges: number[];
+            safetyBehaviors: string[];
+            /** @enum {string|null} */
+            scheduleKind: "one-off" | "recurring" | null;
+            slots: components["schemas"]["JobSlot"][];
+            recurrence: components["schemas"]["JobRecurrence"];
+            serviceAddress: {
+                line1: string | null;
+                line2: string | null;
+                city: string | null;
+                state: string | null;
+                postalCode: string | null;
+            } | null;
+            budgetHintCents: number | null;
+            disclosureConsentAt: string | null;
+            createdAt: string;
+        };
+        JobSlot: {
+            date: string;
+            startMin: number;
+            endMin: number;
+        };
+        JobRecurrence: {
+            startDate: string;
+            endDate: string;
+            weekdays: number[];
+            startMin: number;
+            endMin: number;
+        } | null;
+        JobError: {
+            error: string;
+            reason?: string;
+        };
+        CreateJobRequest: {
+            /** @enum {string} */
+            category: "babysitter" | "tutor" | "nanny";
+            description: string;
+            childCount: number;
+            childAges: number[];
+            safetyBehaviors: ("aggression" | "self-injury" | "wandering" | "meltdowns" | "property-destruction" | "pica" | "sensory-sensitivity" | "communication-support" | "transition-difficulty" | "sleep-disturbance")[];
+            serviceAddress: components["schemas"]["JobServiceAddress"];
+            budgetHintCents?: number | null;
+            disclosureConsent: boolean;
+            schedule: components["schemas"]["JobSchedule"];
+        };
+        JobServiceAddress: {
+            line1?: string | null;
+            line2?: string | null;
+            city?: string | null;
+            state?: string | null;
+            postalCode: string;
+        };
+        JobSchedule: {
+            /** @enum {string} */
+            kind: "one-off";
+            slot: components["schemas"]["JobSlot"];
+        } | {
+            /** @enum {string} */
+            kind: "multi-day";
+            slots: components["schemas"]["JobSlot"][];
+        } | {
+            /** @enum {string} */
+            kind: "recurring";
+            rule: components["schemas"]["JobRecurrence"];
         };
         ContactUsResponse: {
             id: string;
