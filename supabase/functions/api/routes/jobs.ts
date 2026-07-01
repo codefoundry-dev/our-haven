@@ -13,6 +13,10 @@ import type { JobsTable } from '../../../../apps/backend/src/db/schema.ts';
 import { expandRecurrence } from '../../../../packages/domain/src/booking-lifecycle/index.ts';
 import { transitionJob, type Job } from '../../../../packages/domain/src/job-lifecycle/index.ts';
 import {
+  countsAgainstJobCap,
+  type ApplicationState,
+} from '../../../../packages/domain/src/application-lifecycle/index.ts';
+import {
   planJobPosts,
   type JobComposeInput,
 } from '../../../../packages/domain/src/job-compose/index.ts';
@@ -23,10 +27,20 @@ import {
 import { SAFETY_BEHAVIORS } from '../../../../packages/shared/src/safety-behaviors.ts';
 
 /**
- * Posted Jobs (OH-209) — CONTEXT.md § Job; PRD-0001 v1.7 stories 84–87, 90, 128;
- * ADR-0014 (concrete schedule), ADR-0016 (disclose-or-none + timestamped consent).
+ * Posted Jobs (OH-209 + OH-210) — CONTEXT.md § Job; PRD-0001 v1.7 stories 84–92,
+ * 128; ADR-0014 (concrete schedule), ADR-0016 (disclose-or-none + timestamped consent).
  *
- *   POST /v1/jobs   compose + PUBLISH a posted Job (multi-day → one Job per date)
+ *   POST  /v1/jobs             compose + PUBLISH a posted Job (multi-day → one Job per date)
+ *   GET   /v1/jobs             the Parent's own posted Jobs + actionable Application count (OH-210)
+ *   GET   /v1/jobs/{jobId}     one of the Parent's Jobs (OH-210)
+ *   PATCH /v1/jobs/{jobId}     edit a still-`open` Job in place (OH-210)
+ *   POST  /v1/jobs/{jobId}/close  close a `draft`/`open` Job — withdraws its open Applications (OH-210)
+ *
+ * The read/edit/close surface (OH-210) powers the Parent's **My Jobs hub** (Open /
+ * Awarded / Past / Drafts) + Job detail. Only `posted`-origin Jobs surface here;
+ * Direct-Message Jobs are plumbing (neither party sees a Job UI). Awarding a Job
+ * lives on the Application (routes/applications.ts) — awarding is accepting a
+ * caregiver's Application Offer, which is richer than a plain Job transition.
  *
  * A Parent composes a Job (Category + ZIP + scope + concrete schedule + child
  * count/ages + disclosed Safety-Behaviors subset + service address + optional
@@ -156,6 +170,21 @@ const JobSchema = z
 /** A publish fans out into one or more Jobs (multi-day → one per date). */
 const CreateJobResponse = z.object({ jobs: z.array(JobSchema) }).openapi('CreateJobResult');
 
+/**
+ * A Job in the Parent's My Jobs hub / detail (OH-210) — the full Job DTO plus the
+ * actionable Application count (`submitted` + `countered`) that drives the "N/15"
+ * pill (only these two states count against the 15-cap; ADR-0006 §7).
+ */
+const JobListItemSchema = JobSchema.extend({
+  applicationCount: z.number().int(),
+}).openapi('JobListItem');
+
+const JobListResponse = z.object({ jobs: z.array(JobListItemSchema) }).openapi('JobList');
+
+const JobIdParam = z.object({
+  jobId: z.string().uuid().openapi({ param: { name: 'jobId', in: 'path' } }),
+});
+
 /* ── row shape + helpers ─────────────────────────────────────────────────────── */
 
 interface JobRow {
@@ -250,6 +279,39 @@ async function parentEntitled(db: Db, uid: string): Promise<boolean> {
   return deriveAccessDecision({ status: sub?.status ?? null }).entitled;
 }
 
+/**
+ * The actionable Application count per Job (OH-210) — only `submitted` +
+ * `countered` count against the 15-cap and drive the Parent's "N/15" pill
+ * (`countsAgainstJobCap`; the storage layer owns the count). One query for the
+ * whole hub; grouped in-memory.
+ */
+async function actionableCounts(db: Db, jobIds: readonly string[]): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  if (jobIds.length === 0) return counts;
+  const rows = (await db
+    .selectFrom('applications')
+    .select(['job_id', 'state'])
+    .where('job_id', 'in', jobIds as string[])
+    .execute()) as { job_id: string; state: ApplicationState }[];
+  for (const r of rows) {
+    if (countsAgainstJobCap(r.state)) counts.set(r.job_id, (counts.get(r.job_id) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/** Load one of the caller's Jobs by id (owner + posted-origin only). 404 → null. */
+async function loadOwnedJob(db: Db, jobId: string, uid: string): Promise<JobRow | null> {
+  const row = (await db
+    .selectFrom('jobs')
+    .select([...JOB_COLUMNS, 'parent_uid'])
+    .where('id', '=', jobId)
+    .executeTakeFirst()) as (JobRow & { parent_uid: string }) | undefined;
+  // 404 (never 403) when it is not the caller's / not a posted Job — never reveal
+  // another Parent's Job, and Direct-Message Jobs have no Parent Job UI.
+  if (!row || row.parent_uid !== uid || row.origin !== 'posted') return null;
+  return row;
+}
+
 /* ── route definition ─────────────────────────────────────────────────────────── */
 
 const createJobRoute = createRoute({
@@ -268,6 +330,80 @@ const createJobRoute = createRoute({
     401: { description: 'Unauthenticated', content: json(ErrorResponse) },
     402: { description: 'No active Parent Subscription', content: json(ErrorResponse) },
     403: { description: 'Wrong role', content: json(ErrorResponse) },
+  },
+});
+
+const listJobsRoute = createRoute({
+  method: 'get',
+  path: '/jobs',
+  tags: ['jobs'],
+  summary: "The Parent's posted Jobs (My Jobs hub) — OH-210",
+  description:
+    "Returns the caller's own posted Jobs (newest first), each with its actionable Application count (submitted + countered). The client buckets by state into Open / Awarded / Past / Drafts. Direct-Message Jobs are excluded (plumbing).",
+  security: [{ supabaseAccessToken: [] }],
+  middleware: [requireAuth({ roles: ['parent'] })] as const,
+  responses: {
+    200: { description: "The Parent's Jobs", content: json(JobListResponse) },
+    401: { description: 'Unauthenticated', content: json(ErrorResponse) },
+    403: { description: 'Wrong role', content: json(ErrorResponse) },
+  },
+});
+
+const getJobRoute = createRoute({
+  method: 'get',
+  path: '/jobs/{jobId}',
+  tags: ['jobs'],
+  summary: "One of the Parent's Jobs (Job detail) — OH-210",
+  description:
+    "Returns a single posted Job the caller owns, plus its actionable Application count. 404 when the Job is unknown, not the caller's, or a Direct-Message Job.",
+  security: [{ supabaseAccessToken: [] }],
+  middleware: [requireAuth({ roles: ['parent'] })] as const,
+  request: { params: JobIdParam },
+  responses: {
+    200: { description: 'The Job', content: json(JobListItemSchema) },
+    401: { description: 'Unauthenticated', content: json(ErrorResponse) },
+    403: { description: 'Wrong role', content: json(ErrorResponse) },
+    404: { description: "Job not found (or not the caller's)", content: json(ErrorResponse) },
+  },
+});
+
+const editJobRoute = createRoute({
+  method: 'patch',
+  path: '/jobs/{jobId}',
+  tags: ['jobs'],
+  summary: 'Edit a still-open Job in place — OH-210',
+  description:
+    'Revises a Job the caller owns while it is still `open` (before any award), re-running the full compose pipeline (schedule / child detail / disclosure / address). Editing is Parent-Subscription-gated (402) and re-stamps the disclosure consent. A multi-day schedule is rejected (that is a compose-time fan-out, not an edit target). 409 when the Job is not `open`; 404 when it is not the caller\'s.',
+  security: [{ supabaseAccessToken: [] }],
+  middleware: [requireAuth({ roles: ['parent'] })] as const,
+  request: { params: JobIdParam, body: { content: json(CreateJobRequest), required: true } },
+  responses: {
+    200: { description: 'The updated Job', content: json(JobListItemSchema) },
+    400: { description: 'Invalid Job', content: json(ErrorResponse) },
+    401: { description: 'Unauthenticated', content: json(ErrorResponse) },
+    402: { description: 'No active Parent Subscription', content: json(ErrorResponse) },
+    403: { description: 'Wrong role', content: json(ErrorResponse) },
+    404: { description: "Job not found (or not the caller's)", content: json(ErrorResponse) },
+    409: { description: 'Job is no longer editable (not open)', content: json(ErrorResponse) },
+  },
+});
+
+const closeJobRoute = createRoute({
+  method: 'post',
+  path: '/jobs/{jobId}/close',
+  tags: ['jobs'],
+  summary: 'Close a Job — withdraws its open Applications — OH-210',
+  description:
+    'Closes (parent-cancels) a `draft`/`open` Job the caller owns. Closing an `open` Job withdraws every still-open Application on it (they transition to `expired`). Never re-gated. 409 when the Job is already awarded/closed/expired/cancelled; 404 when it is not the caller\'s.',
+  security: [{ supabaseAccessToken: [] }],
+  middleware: [requireAuth({ roles: ['parent'] })] as const,
+  request: { params: JobIdParam },
+  responses: {
+    200: { description: 'The closed Job', content: json(JobListItemSchema) },
+    401: { description: 'Unauthenticated', content: json(ErrorResponse) },
+    403: { description: 'Wrong role', content: json(ErrorResponse) },
+    404: { description: "Job not found (or not the caller's)", content: json(ErrorResponse) },
+    409: { description: 'Job cannot be closed from its current state', content: json(ErrorResponse) },
   },
 });
 
@@ -376,5 +512,174 @@ export function registerJobRoutes(app: OpenAPIHono<AppEnv>): void {
       .execute()) as unknown as JobRow[];
 
     return c.json({ jobs: created.map(toJobDTO) }, 201);
+  });
+
+  // ── GET /v1/jobs — the Parent's My Jobs hub (OH-210) ────────────────────────
+  app.openapi(listJobsRoute, async (c) => {
+    const { db } = c.var.deps;
+    const principal = c.get('principal')!;
+
+    const rows = (await db
+      .selectFrom('jobs')
+      .select(JOB_COLUMNS)
+      .where('parent_uid', '=', principal.uid)
+      .where('origin', '=', 'posted')
+      .orderBy('created_at', 'desc')
+      .execute()) as unknown as JobRow[];
+
+    const counts = await actionableCounts(db, rows.map((r) => r.id));
+    const jobs = rows.map((r) => ({ ...toJobDTO(r), applicationCount: counts.get(r.id) ?? 0 }));
+    return c.json({ jobs }, 200);
+  });
+
+  // ── GET /v1/jobs/{jobId} — Job detail (OH-210) ──────────────────────────────
+  app.openapi(getJobRoute, async (c) => {
+    const { db } = c.var.deps;
+    const principal = c.get('principal')!;
+    const { jobId } = c.req.valid('param');
+
+    const row = await loadOwnedJob(db, jobId, principal.uid);
+    if (!row) return c.json({ error: 'job_not_found' }, 404);
+
+    const counts = await actionableCounts(db, [row.id]);
+    return c.json({ ...toJobDTO(row), applicationCount: counts.get(row.id) ?? 0 }, 200);
+  });
+
+  // ── PATCH /v1/jobs/{jobId} — edit a still-open Job (OH-210) ──────────────────
+  app.openapi(editJobRoute, async (c) => {
+    const { db } = c.var.deps;
+    const principal = c.get('principal')!;
+    const { jobId } = c.req.valid('param');
+    const input = c.req.valid('json');
+
+    const row = await loadOwnedJob(db, jobId, principal.uid);
+    if (!row) return c.json({ error: 'job_not_found' }, 404);
+    // Editable only before any award (CONTEXT § Job — draft/open are pre-award;
+    // drafts live client-side, so a persisted editable Job is `open`).
+    if (row.state !== 'open' && row.state !== 'draft') {
+      return c.json({ error: 'not_editable', reason: `a ${row.state} job cannot be edited` }, 409);
+    }
+    // Editing re-commits the Job → Parent-Subscription-gated (402), like publish.
+    if (!(await parentEntitled(db, principal.uid))) {
+      return c.json(
+        { error: 'subscription_required', reason: 'an active Parent Subscription is required to edit a Job' },
+        402,
+      );
+    }
+    if (input.disclosureConsent !== true) {
+      return c.json(
+        { error: 'consent_required', reason: 'the Safety-Behaviors disclosure consent must be acknowledged' },
+        400,
+      );
+    }
+    // A multi-day schedule fans out into several Jobs (compose only) — it is not a
+    // valid shape for editing ONE existing Job in place (ADR-0014 §A1).
+    if (input.schedule.kind === 'multi-day') {
+      return c.json(
+        { error: 'invalid_schedule', reason: 'a multi-day schedule cannot be applied to a single Job (post separate Jobs)' },
+        400,
+      );
+    }
+    if (input.schedule.kind === 'recurring') {
+      const expanded = expandRecurrence(input.schedule.rule);
+      if (!expanded.ok || expanded.slots.length === 0) {
+        return c.json({ error: 'invalid_schedule', reason: 'the recurrence generates no dates in its range' }, 400);
+      }
+    }
+
+    const now = new Date();
+    const disclosureConsentAt = now.toISOString();
+    const composeInput: JobComposeInput = {
+      category: input.category,
+      description: input.description,
+      childCount: input.childCount,
+      childAges: input.childAges,
+      safetyBehaviors: input.safetyBehaviors,
+      serviceAddress: {
+        line1: input.serviceAddress.line1 ?? null,
+        line2: input.serviceAddress.line2 ?? null,
+        city: input.serviceAddress.city ?? null,
+        state: input.serviceAddress.state ?? null,
+        postalCode: input.serviceAddress.postalCode,
+      },
+      budgetHintCents: input.budgetHintCents ?? null,
+      disclosureConsentAt,
+      schedule: input.schedule,
+    };
+    const plan = planJobPosts(composeInput);
+    // A one-off single date + recurring both yield exactly one post; multi-day was
+    // already rejected above, so `posts[0]` is the (only) revised spec.
+    if (!plan.ok || plan.posts.length !== 1) {
+      return c.json({ error: 'invalid_job', reason: plan.ok ? 'edit must resolve to a single Job' : plan.reason }, 400);
+    }
+    const post = plan.posts[0]!;
+
+    const updated = (await db
+      .updateTable('jobs')
+      .set({
+        category: post.category,
+        description: post.description,
+        schedule_kind: post.scheduleKind,
+        slots: post.slots as { date: string; startMin: number; endMin: number }[],
+        recurrence: post.recurrence
+          ? { ...post.recurrence, weekdays: [...post.recurrence.weekdays] }
+          : null,
+        child_count: post.childCount,
+        child_ages: post.childAges as number[],
+        safety_behaviors: post.safetyBehaviors as string[],
+        disclosure_consent_at: disclosureConsentAt,
+        service_address_line1: post.serviceAddress.line1 ?? null,
+        service_address_line2: post.serviceAddress.line2 ?? null,
+        service_city: post.serviceAddress.city ?? null,
+        service_state: post.serviceAddress.state ?? null,
+        service_postal_code: post.serviceAddress.postalCode,
+        budget_hint_cents: post.budgetHintCents,
+        updated_at: now,
+      })
+      .where('id', '=', row.id)
+      .returning(JOB_COLUMNS)
+      .executeTakeFirstOrThrow()) as unknown as JobRow;
+
+    const counts = await actionableCounts(db, [row.id]);
+    return c.json({ ...toJobDTO(updated), applicationCount: counts.get(row.id) ?? 0 }, 200);
+  });
+
+  // ── POST /v1/jobs/{jobId}/close — close + withdraw Applications (OH-210) ─────
+  app.openapi(closeJobRoute, async (c) => {
+    const { db } = c.var.deps;
+    const principal = c.get('principal')!;
+    const { jobId } = c.req.valid('param');
+
+    const row = await loadOwnedJob(db, jobId, principal.uid);
+    if (!row) return c.json({ error: 'job_not_found' }, 404);
+
+    // The Job state machine owns the legality (parent-cancel valid from draft/open).
+    const res = transitionJob({ origin: 'posted', state: row.state }, { type: 'parent-cancel' });
+    if (!res.ok) return c.json({ error: 'cannot_close', reason: res.reason }, 409);
+
+    const now = new Date();
+    const updated = await db.transaction().execute(async (trx) => {
+      const job = (await trx
+        .updateTable('jobs')
+        .set({ state: res.next, updated_at: now }) // 'cancelled'
+        .where('id', '=', row.id)
+        .returning(JOB_COLUMNS)
+        .executeTakeFirstOrThrow()) as unknown as JobRow;
+
+      // Withdraw every still-open Application (mark-applications-expired side
+      // effect; story 92). Terminal Applications are untouched. Applicant
+      // notifications are a deferred hole (no `application_declined` kind yet).
+      await trx
+        .updateTable('applications')
+        .set({ state: 'expired', updated_at: now })
+        .where('job_id', '=', row.id)
+        .where('state', 'in', ['submitted', 'countered'])
+        .execute();
+
+      return job;
+    });
+
+    // All open Applications were just withdrawn, so the actionable count is 0.
+    return c.json({ ...toJobDTO(updated), applicationCount: 0 }, 200);
   });
 }

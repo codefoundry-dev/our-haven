@@ -3405,6 +3405,258 @@ components:
           required:
             - kind
             - rule
+    JobList:
+      type: object
+      properties:
+        jobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/JobListItem"
+      required:
+        - jobs
+    JobListItem:
+      allOf:
+        - $ref: "#/components/schemas/Job"
+        - type: object
+          properties:
+            applicationCount:
+              type: integer
+          required:
+            - applicationCount
+    ApplicationList:
+      type: object
+      properties:
+        applications:
+          type: array
+          items:
+            $ref: "#/components/schemas/Application"
+      required:
+        - applications
+    Application:
+      type: object
+      properties:
+        id:
+          type: string
+        jobId:
+          type: string
+        category:
+          type: string
+          enum:
+            - babysitter
+            - tutor
+            - nanny
+        state:
+          type: string
+          enum:
+            - submitted
+            - countered
+            - awarded
+            - declined
+            - withdrawn
+            - expired
+        proposal:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+        caregiver:
+          $ref: "#/components/schemas/ApplicationCaregiver"
+        offer:
+          $ref: "#/components/schemas/ApplicationOffer"
+      required:
+        - id
+        - jobId
+        - category
+        - state
+        - proposal
+        - createdAt
+        - caregiver
+        - offer
+    ApplicationCaregiver:
+      type: object
+      properties:
+        providerId:
+          type: string
+        name:
+          type: string
+          nullable: true
+        publishedRateCents:
+          type: integer
+          nullable: true
+        negotiable:
+          type: boolean
+        backgroundChecked:
+          type: boolean
+        ratingAverage:
+          type: number
+          nullable: true
+        ratingCount:
+          type: integer
+      required:
+        - providerId
+        - name
+        - publishedRateCents
+        - negotiable
+        - backgroundChecked
+        - ratingAverage
+        - ratingCount
+    ApplicationOffer:
+      type: object
+      nullable: true
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum:
+            - pending
+            - accepted
+            - countered
+            - declined
+            - expired
+            - withdrawn
+        sender:
+          type: string
+          enum:
+            - parent
+            - caregiver
+        proposedRateCents:
+          type: integer
+        scopeMinutes:
+          type: integer
+        perChildSurchargeCents:
+          type: integer
+        computedTotalCents:
+          type: integer
+        scopeNote:
+          type: string
+        scopeNoteRedacted:
+          type: boolean
+        negotiable:
+          type: boolean
+        scheduleKind:
+          type: string
+          enum:
+            - one-off
+            - multi-day
+            - recurring
+        slots:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApplicationOfferSlot"
+        validUntil:
+          type: string
+        supersedesOfferId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+      required:
+        - id
+        - status
+        - sender
+        - proposedRateCents
+        - scopeMinutes
+        - perChildSurchargeCents
+        - computedTotalCents
+        - scopeNote
+        - scopeNoteRedacted
+        - negotiable
+        - scheduleKind
+        - slots
+        - validUntil
+        - supersedesOfferId
+        - createdAt
+    ApplicationOfferSlot:
+      type: object
+      properties:
+        date:
+          type: string
+        startMin:
+          type: integer
+        endMin:
+          type: integer
+      required:
+        - date
+        - startMin
+        - endMin
+    ApplicationError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
+    AwardResult:
+      type: object
+      properties:
+        applicationId:
+          type: string
+        jobId:
+          type: string
+        state:
+          type: string
+          enum:
+            - awarded
+        bookingIds:
+          type: array
+          items:
+            type: string
+        seriesId:
+          type: string
+          nullable: true
+      required:
+        - applicationId
+        - jobId
+        - state
+        - bookingIds
+        - seriesId
+    AwardRequest:
+      type: object
+      properties:
+        paymentMethodId:
+          type: string
+    DeclineApplicationResult:
+      type: object
+      properties:
+        applicationId:
+          type: string
+        state:
+          type: string
+          enum:
+            - declined
+      required:
+        - applicationId
+        - state
+    CounterApplicationResult:
+      type: object
+      properties:
+        applicationId:
+          type: string
+        state:
+          type: string
+          enum:
+            - countered
+        offer:
+          $ref: "#/components/schemas/ApplicationOffer"
+      required:
+        - applicationId
+        - state
+        - offer
+    CounterApplicationRequest:
+      type: object
+      properties:
+        proposedRateCents:
+          type: integer
+          minimum: 0
+          maximum: 100000000
+        scopeNote:
+          type: string
+          maxLength: 280
+      required:
+        - proposedRateCents
     ContactUsResponse:
       type: object
       properties:
@@ -6953,6 +7205,466 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/JobError"
+    get:
+      tags:
+        - jobs
+      summary: The Parent's posted Jobs (My Jobs hub) — OH-210
+      description: Returns the caller's own posted Jobs (newest first), each with its
+        actionable Application count (submitted + countered). The client buckets
+        by state into Open / Awarded / Past / Drafts. Direct-Message Jobs are
+        excluded (plumbing).
+      security:
+        - supabaseAccessToken: []
+      responses:
+        "200":
+          description: The Parent's Jobs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobList"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobError"
+  /v1/jobs/{jobId}:
+    get:
+      tags:
+        - jobs
+      summary: One of the Parent's Jobs (Job detail) — OH-210
+      description: Returns a single posted Job the caller owns, plus its actionable
+        Application count. 404 when the Job is unknown, not the caller's, or a
+        Direct-Message Job.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: jobId
+          in: path
+      responses:
+        "200":
+          description: The Job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobListItem"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobError"
+        "404":
+          description: Job not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobError"
+    patch:
+      tags:
+        - jobs
+      summary: Edit a still-open Job in place — OH-210
+      description: Revises a Job the caller owns while it is still `open` (before any
+        award), re-running the full compose pipeline (schedule / child detail /
+        disclosure / address). Editing is Parent-Subscription-gated (402) and
+        re-stamps the disclosure consent. A multi-day schedule is rejected (that
+        is a compose-time fan-out, not an edit target). 409 when the Job is not
+        `open`; 404 when it is not the caller's.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: jobId
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateJobRequest"
+      responses:
+        "200":
+          description: The updated Job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobListItem"
+        "400":
+          description: Invalid Job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobError"
+        "402":
+          description: No active Parent Subscription
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobError"
+        "404":
+          description: Job not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobError"
+        "409":
+          description: Job is no longer editable (not open)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobError"
+  /v1/jobs/{jobId}/close:
+    post:
+      tags:
+        - jobs
+      summary: Close a Job — withdraws its open Applications — OH-210
+      description: Closes (parent-cancels) a `draft`/`open` Job the caller owns.
+        Closing an `open` Job withdraws every still-open Application on it (they
+        transition to `expired`). Never re-gated. 409 when the Job is already
+        awarded/closed/expired/cancelled; 404 when it is not the caller's.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: jobId
+          in: path
+      responses:
+        "200":
+          description: The closed Job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobListItem"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobError"
+        "404":
+          description: Job not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobError"
+        "409":
+          description: Job cannot be closed from its current state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobError"
+  /v1/jobs/{jobId}/applications:
+    get:
+      tags:
+        - applications
+      summary: A Job's Applications (Parent review list) — OH-210
+      description: Returns the Applications on one of the caller's posted Jobs (newest
+        first), each with a compact caregiver summary + the caregiver's live
+        Offer + a status pill. The client sorts (recent / rating / price). Bio +
+        Preferences reveal on engagement (an Application is filed). 404 when the
+        Job is not the caller's.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: jobId
+          in: path
+      responses:
+        "200":
+          description: The Job's Applications
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationList"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationError"
+        "404":
+          description: Job not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationError"
+  /v1/applications/{applicationId}:
+    get:
+      tags:
+        - applications
+      summary: One Application (caregiver + live Offer) — OH-210
+      description: "Returns a single Application on one of the caller's Jobs: the
+        caregiver summary, their proposal, and the live Offer with its
+        `negotiable` flag (the client shows Counter only when negotiable). 404
+        when the Application's Job is not the caller's."
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: applicationId
+          in: path
+      responses:
+        "200":
+          description: The Application
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Application"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationError"
+        "404":
+          description: Application not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationError"
+  /v1/applications/{applicationId}/award:
+    post:
+      tags:
+        - applications
+      summary: Award a Job to a Caregiver → Booking `requested` / Series — OH-210
+      description: "Awards the Job to this Application's Caregiver by accepting their
+        live Offer: the Application → `awarded`, the Job → `awarded`, every
+        other open Application auto-declines (story 91), and the Booking(s)
+        materialise `requested` — one per one-off date, or a Booking Series +
+        one occurrence per recurring date. Payment is a MOCK confirmation (Phase
+        0). Parent-Subscription-gated (402). 409 when the Job is not open, the
+        Application is not awardable, or there is no acceptable caregiver Offer;
+        404 when the Application is not the caller's."
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: applicationId
+          in: path
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AwardRequest"
+      responses:
+        "200":
+          description: The award result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AwardResult"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationError"
+        "402":
+          description: No active Parent Subscription
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationError"
+        "404":
+          description: Application not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationError"
+        "409":
+          description: Not awardable from the current state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationError"
+  /v1/applications/{applicationId}/decline:
+    post:
+      tags:
+        - applications
+      summary: Decline an Application — OH-210
+      description: Declines an Application on one of the caller's Jobs (state →
+        declined); the caregiver's live pending Offer is declined with it. Never
+        gated. 409 when the Application is already terminal; 404 when it is not
+        the caller's.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: applicationId
+          in: path
+      responses:
+        "200":
+          description: The declined Application
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeclineApplicationResult"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationError"
+        "404":
+          description: Application not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationError"
+        "409":
+          description: Not declinable from the current state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationError"
+  /v1/applications/{applicationId}/counter:
+    post:
+      tags:
+        - applications
+      summary: Counter a Caregiver's Application Offer — OH-210
+      description: Opens a Parent counter-Offer on an Application (revised rate +
+        optional note; the Parent-set Job schedule is unchanged), moving the
+        Application → `countered` and the caregiver's Offer → `countered`, with
+        a fresh pending successor Offer linked via `supersedes`. Refused (409)
+        when the caregiver is non-negotiable (ADR-0017).
+        Parent-Subscription-gated (402). 404 when the Application is not the
+        caller's.
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: applicationId
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CounterApplicationRequest"
+      responses:
+        "200":
+          description: The successor Offer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CounterApplicationResult"
+        "400":
+          description: Invalid counter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationError"
+        "402":
+          description: No active Parent Subscription
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationError"
+        "404":
+          description: Application not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationError"
+        "409":
+          description: Not counterable (non-negotiable, not pending, or awaiting the
+            caregiver)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationError"
   /v1/providers/contact-us:
     post:
       tags:

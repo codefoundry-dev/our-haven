@@ -69,6 +69,7 @@ export default function AppLayout() {
       <Tabs.Screen name="booking-compose" options={{ href: null }} />
       <Tabs.Screen name="booking-detail" options={{ href: null }} />
       <Tabs.Screen name="post-job" options={{ href: null }} />
+      <Tabs.Screen name="my-jobs" options={{ href: null }} />
       <Tabs.Screen name="job-applicants" options={{ href: null }} />
       <Tabs.Screen name="children" options={{ href: null }} />
       <Tabs.Screen name="parent-profile" options={{ href: null }} />
