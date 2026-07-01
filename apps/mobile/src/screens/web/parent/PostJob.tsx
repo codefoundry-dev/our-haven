@@ -10,9 +10,9 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 
-import { getParentProfile, postJob, ApiError, type ParentProfile } from '@/api/client';
+import { editJob, getJob, getParentProfile, postJob, ApiError, type ParentProfile } from '@/api/client';
 import { Icon } from '@/components/Icon';
 import { WebPageHeader } from '@/components/web/ParentWebShell';
 import { clearJobDraft, readJobDraft, saveJobDraft } from '@/lib/jobDraft';
@@ -53,6 +53,9 @@ function emptyRecurrence(): RecurrenceDraft {
 export function ParentPostJobWeb() {
   const router = useRouter();
   const { entitled, openPaywall } = useParentGate();
+  // Edit mode (OH-210, story 92) — with a `jobId` param, edit an existing open Job.
+  const { jobId } = useLocalSearchParams<{ jobId?: string }>();
+  const editing = Boolean(jobId);
 
   const [hydrating, setHydrating] = useState(true);
   const [profileBehaviors, setProfileBehaviors] = useState<string[]>([]);
@@ -86,6 +89,52 @@ export function ParentPostJobWeb() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      // EDIT mode: hydrate from the existing Job (not the create draft). Consent is
+      // intentionally not pre-set — the Parent re-acknowledges it on save.
+      if (editing && jobId) {
+        try {
+          const job = await getJob(jobId);
+          if (cancelled) return;
+          setCategory(job.category);
+          setMode(job.scheduleKind === 'recurring' ? 'recurring' : 'one-off');
+          setDescription(job.description);
+          if (job.scheduleKind === 'recurring' && job.recurrence) {
+            const r = job.recurrence;
+            setRecurrence({
+              startDate: r.startDate,
+              endDate: r.endDate,
+              weekdays: [...r.weekdays],
+              start: formatMin(r.startMin),
+              end: formatMin(r.endMin),
+            });
+          } else if (job.slots.length > 0) {
+            setSlots(job.slots.map((s) => ({ date: s.date, start: formatMin(s.startMin), end: formatMin(s.endMin) })));
+          }
+          setChildCount(job.childCount ?? 1);
+          setChildAges((job.childAges ?? []).length ? job.childAges.map(String) : ['']);
+          setDisclosed(job.safetyBehaviors ?? []);
+          setDiscloseNone((job.safetyBehaviors ?? []).length === 0);
+          if (job.serviceAddress) {
+            setLine1(job.serviceAddress.line1 ?? '');
+            setLine2(job.serviceAddress.line2 ?? '');
+            setCity(job.serviceAddress.city ?? '');
+            setStateCode(job.serviceAddress.state ?? '');
+            setPostal(job.serviceAddress.postalCode ?? '');
+          }
+          setBudget(job.budgetHintCents != null ? String(job.budgetHintCents / 100) : '');
+        } catch (e) {
+          if (!cancelled) setError(e instanceof ApiError ? e.message : 'Could not load this Job to edit.');
+        }
+        try {
+          const p: ParentProfile = await getParentProfile();
+          if (!cancelled) setProfileBehaviors(p.safetyBehaviors ?? []);
+        } catch {
+          /* disclosure options optional */
+        }
+        if (!cancelled) setHydrating(false);
+        return;
+      }
+
       const draft = await readJobDraft();
       if (cancelled) return;
       if (draft) {
@@ -126,14 +175,14 @@ export function ParentPostJobWeb() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [editing, jobId]);
 
   const hydrated = !hydrating;
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || editing) return; // edit mode never pollutes the create draft
     const t = setTimeout(() => void saveJobDraft(state), 400);
     return () => clearTimeout(t);
-  }, [state, hydrated]);
+  }, [state, hydrated, editing]);
 
   const setCount = (n: number) => {
     const next = Math.max(1, Math.min(category === 'tutor' ? 1 : 12, n));
@@ -201,15 +250,20 @@ export function ParentPostJobWeb() {
     }
     setPublishing(true);
     try {
-      const res = await postJob(built.body);
-      await clearJobDraft();
-      router.replace({ pathname: '/home', params: { posted: String(res.jobs.length) } });
+      if (editing && jobId) {
+        await editJob(jobId, built.body);
+        router.replace({ pathname: '/job-applicants', params: { jobId } });
+      } else {
+        const res = await postJob(built.body);
+        await clearJobDraft();
+        router.replace({ pathname: '/home', params: { posted: String(res.jobs.length) } });
+      }
     } catch (e) {
       if (e instanceof ApiError && e.status === 402) {
         openPaywall({ kind: 'post-job' });
         return;
       }
-      setError(e instanceof Error ? e.message : 'Could not publish your Job. Please try again.');
+      setError(e instanceof Error ? e.message : `Could not ${editing ? 'save' : 'publish'} your Job. Please try again.`);
     } finally {
       setPublishing(false);
     }
@@ -217,7 +271,7 @@ export function ParentPostJobWeb() {
 
   return (
     <View>
-      <WebPageHeader greet="Family · Jobs" title="Post a Job" actions={['bell', 'message']} />
+      <WebPageHeader greet="Family · Jobs" title={editing ? 'Edit Job' : 'Post a Job'} actions={['bell', 'message']} />
       <View style={styles.body}>
         <View style={styles.wizard}>
           {/* left · step rail */}
@@ -447,7 +501,7 @@ export function ParentPostJobWeb() {
               </Pressable>
               <View style={styles.flex} />
               <Pressable onPress={onPrimary} disabled={!stepValid || publishing} accessibilityRole="button" style={[styles.nextBtn, (!stepValid || publishing) && styles.nextBtnOff]}>
-                <Text style={styles.nextText}>{isLast ? (publishing ? 'Publishing…' : 'Publish Job') : `Next · ${STEPS[step + 1]}`}</Text>
+                <Text style={styles.nextText}>{isLast ? (publishing ? (editing ? 'Saving…' : 'Publishing…') : editing ? 'Save changes' : 'Publish Job') : `Next · ${STEPS[step + 1]}`}</Text>
                 {!publishing ? <Icon name="arrow-right" size={16} color={colors.inkInv} /> : null}
               </Pressable>
             </View>

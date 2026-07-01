@@ -426,3 +426,74 @@ export type JobServiceAddress = CreateJobBody['serviceAddress'];
 export function postJob(body: CreateJobBody): Promise<CreateJobResult> {
   return post<CreateJobResult>('/v1/jobs', body);
 }
+
+// ── My Jobs hub + Applications review + Award (OH-210) ────────────────────────
+/**
+ * The Parent-facing read/award surface over posted Jobs. `getJobs` powers the My
+ * Jobs hub (the client buckets by `state` into Open / Awarded / Past / Drafts);
+ * `getJob` + `getJobApplications` power Job detail; `getApplication` powers the
+ * Application detail (caregiver + live Offer). `editJob` / `closeJob` manage a
+ * pre-award Job (both gated / confirm-gated). `awardApplication` awards the Job to
+ * a Caregiver (mock payment → Booking `requested` / Series + auto-declines others);
+ * `declineApplication` / `counterApplication` are the other Offer-card actions
+ * (Counter is negotiable-gated — hidden client-side when `caregiver.negotiable`).
+ */
+export type MyJob = paths['/v1/jobs']['get']['responses'][200]['content']['application/json']['jobs'][number];
+export type JobApplication =
+  paths['/v1/jobs/{jobId}/applications']['get']['responses'][200]['content']['application/json']['applications'][number];
+export type ApplicationOffer = NonNullable<JobApplication['offer']>;
+export type ApplicationCaregiver = JobApplication['caregiver'];
+export type ApplicationState = JobApplication['state'];
+export type AwardResult =
+  paths['/v1/applications/{applicationId}/award']['post']['responses'][200]['content']['application/json'];
+export type CounterApplicationBody =
+  paths['/v1/applications/{applicationId}/counter']['post']['requestBody']['content']['application/json'];
+export type CounterApplicationResult =
+  paths['/v1/applications/{applicationId}/counter']['post']['responses'][200]['content']['application/json'];
+
+/** The Parent's posted Jobs for the My Jobs hub (newest first; client buckets by state). */
+export function getJobs(): Promise<MyJob[]> {
+  return get<{ jobs: MyJob[] }>('/v1/jobs').then((r) => r.jobs);
+}
+
+export function getJob(jobId: string): Promise<MyJob> {
+  return get<MyJob>(`/v1/jobs/${jobId}`);
+}
+
+/** Edit a still-open Job in place (re-runs the compose pipeline; Subscription-gated). */
+export function editJob(jobId: string, body: CreateJobBody): Promise<MyJob> {
+  return patchJson<MyJob>(`/v1/jobs/${jobId}`, body);
+}
+
+/** Close a Job — withdraws its open Applications (surfaces a confirm modal client-side). */
+export function closeJob(jobId: string): Promise<MyJob> {
+  return post<MyJob>(`/v1/jobs/${jobId}/close`, undefined);
+}
+
+export function getJobApplications(jobId: string): Promise<JobApplication[]> {
+  return get<{ applications: JobApplication[] }>(`/v1/jobs/${jobId}/applications`).then((r) => r.applications);
+}
+
+export function getApplication(applicationId: string): Promise<JobApplication> {
+  return get<JobApplication>(`/v1/applications/${applicationId}`);
+}
+
+/** Award the Job to this Application's Caregiver — mock payment (Phase 0). */
+export function awardApplication(applicationId: string, paymentMethodId?: string): Promise<AwardResult> {
+  return post<AwardResult>(
+    `/v1/applications/${applicationId}/award`,
+    paymentMethodId ? { paymentMethodId } : {},
+  );
+}
+
+export function declineApplication(applicationId: string): Promise<{ applicationId: string; state: 'declined' }> {
+  return post<{ applicationId: string; state: 'declined' }>(`/v1/applications/${applicationId}/decline`, undefined);
+}
+
+/** Parent counter-Offer on an Application (revised rate + optional note; gated). */
+export function counterApplication(
+  applicationId: string,
+  body: CounterApplicationBody,
+): Promise<CounterApplicationResult> {
+  return post<CounterApplicationResult>(`/v1/applications/${applicationId}/counter`, body);
+}
