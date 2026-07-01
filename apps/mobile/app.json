@@ -38,7 +38,19 @@
           }
         }
       ],
-      "@stripe/stripe-react-native"
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "cameraPermission": "Our Haven uses your camera for in-chat video calls with caregivers and providers.",
+          "microphonePermission": "Our Haven uses your microphone for in-chat video calls with caregivers and providers."
+        }
+      ],
+      [
+        "@stripe/stripe-react-native",
+        {
+          "enableGooglePay": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

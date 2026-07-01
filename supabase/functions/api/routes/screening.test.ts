@@ -62,6 +62,7 @@ function makeDeps(db: AppDeps['db'], stripe?: Partial<AppDeps['stripe']>): AppDe
     supabase: stub,
     stripe: (stripe ?? stub) as AppDeps['stripe'],
     backgroundCheck: stub,
+    daily: stub,
   };
 }
 

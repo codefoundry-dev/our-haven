@@ -1,67 +1,109 @@
 /**
  * Provider (clinical) Schedule — the licensed-clinician landing tab (ADR-0011).
- * A day selector + that day's CONSULTATION sessions as time cards (parent + child,
- * time, video vs in-person, and a Join / Details action). A small "Set availability"
- * link jumps to the consultation-availability editor.
  *
- * Design reference: Claude design project — screens/provider-schedule.jsx
- * (adapted from the caregiver/tutor day view to the consultation-centric Provider).
+ * A day rail + the selected day's live CONSULTATION bookings (GET /v1/bookings via
+ * `useBookings`), each as a time card with the family, the slot window, and the
+ * lifecycle StatusPill. A consultation happening now shows a Join action into the
+ * consult surface. A "Set availability" link jumps to the slot editor.
+ *
+ * Pre-activation: until the practice is `listed` (active Provider Subscription),
+ * the schedule shows a "Go live" checklist (verify → subscribe → publish slots)
+ * instead of pretending there's a schedule — a Provider can't take bookings yet.
+ *
+ * Design reference: Claude design project — screens/provider-schedule.jsx, adapted
+ * to the consultation-centric Provider (no Jobs feed, no session timer, no payout).
  */
-import { useState } from 'react';
-import { useRouter } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useMemo, useState } from 'react';
+import { useRouter, type Href } from 'expo-router';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { AppBar } from '@/components/AppBar';
 import { Icon, type IconName } from '@/components/Icon';
 import { Screen } from '@/components/Screen';
 import { Card } from '@/components/ui/Card';
 import { SectionHeader } from '@/components/ui/SectionHeader';
+import { StatusPill } from '@/components/ui/StatusPill';
+import { useBookings } from '@/lib/useBookings';
+import { useProviderSubscription } from '@/lib/useProviderSubscription';
+import { minutesToClock, slotTimeRange } from '@/lib/consultation';
+import type { BookingSummary } from '@/api/client';
 import { colors, fonts, radii, shadow } from '@/theme/tokens';
 
-type Mode = 'video' | 'in-person';
+const DOW = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+const WEEKDAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-interface Day {
-  id: string;
+interface DayOption {
+  iso: string;
   dow: string;
-  date: number;
+  dayNum: number;
   label: string;
 }
 
-interface Session {
-  id: string;
-  time: string;
-  meridiem: string;
-  parent: string;
-  child: string;
-  topic: string;
-  mode: Mode;
-  live?: boolean;
+function localISO(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
-const DAYS: readonly Day[] = [
-  { id: 'mon', dow: 'MON', date: 19, label: 'Monday, May 19' },
-  { id: 'tue', dow: 'TUE', date: 20, label: 'Tuesday, May 20' },
-  { id: 'wed', dow: 'WED', date: 21, label: 'Wednesday, May 21' },
-  { id: 'thu', dow: 'THU', date: 22, label: 'Thursday, May 22' },
-  { id: 'fri', dow: 'FRI', date: 23, label: 'Friday, May 23' },
-  { id: 'sat', dow: 'SAT', date: 24, label: 'Saturday, May 24' },
-  { id: 'sun', dow: 'SUN', date: 25, label: 'Sunday, May 25' },
-];
-
-const SESSIONS: readonly Session[] = [
-  { id: '1', time: '9:00', meridiem: 'AM', parent: 'Priya N.', child: 'Amara (6)', topic: 'OT consultation', mode: 'video', live: true },
-  { id: '2', time: '11:30', meridiem: 'AM', parent: 'Marcus T.', child: 'Eli (4)', topic: 'Speech evaluation', mode: 'in-person' },
-  { id: '3', time: '2:00', meridiem: 'PM', parent: 'Sarah K.', child: 'Noah (8)', topic: 'ABA follow-up', mode: 'video' },
-];
+function buildWeek(count: number): DayOption[] {
+  const base = new Date();
+  base.setHours(0, 0, 0, 0);
+  const out: DayOption[] = [];
+  for (let i = 0; i < count; i++) {
+    const d = new Date(base);
+    d.setDate(base.getDate() + i);
+    out.push({
+      iso: localISO(d),
+      dow: DOW[d.getDay()] ?? '',
+      dayNum: d.getDate(),
+      label: `${WEEKDAYS_LONG[d.getDay()] ?? ''}, ${MONTHS[d.getMonth()] ?? ''} ${d.getDate()}`,
+    });
+  }
+  return out;
+}
 
 export function ProviderSchedule() {
   const router = useRouter();
-  const [selected, setSelected] = useState(2); // Wednesday
-  const day = DAYS[selected];
+  const { data: bookings, loading, error, refetch } = useBookings();
+  const sub = useProviderSubscription();
+
+  const days = useMemo(() => buildWeek(7), []);
+  const [selectedIso, setSelectedIso] = useState(() => days[0]?.iso ?? '');
+  const selected = days.find((d) => d.iso === selectedIso) ?? days[0];
+
+  const now = useMemo(() => new Date(), []);
+  const todayIso = localISO(now);
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+
+  const daysWithBookings = useMemo(() => {
+    const set = new Set<string>();
+    for (const b of bookings) if (b.state === 'accepted') set.add(b.scheduledDate);
+    return set;
+  }, [bookings]);
+
+  const dayBookings = useMemo(
+    () =>
+      bookings
+        .filter((b) => b.scheduledDate === selectedIso)
+        .sort((a, b) => a.startMin - b.startMin),
+    [bookings, selectedIso],
+  );
+
+  const isLive = (b: BookingSummary) =>
+    b.scheduledDate === todayIso && b.state === 'accepted' && nowMin >= b.startMin && nowMin < b.endMin;
+
+  const preActivation = !sub.loading && !sub.listed;
 
   return (
     <Screen edges={['top']} scroll contentStyle={styles.content}>
       <AppBar large title="Schedule" actions={[{ icon: 'bell', badge: true, label: 'Notifications' }]} />
+
+      {/* Pre-activation — a Provider can't take bookings until they're listed. */}
+      {preActivation ? (
+        <GoLiveCard router={router} />
+      ) : null}
 
       {/* Day selector — horizontal week rail */}
       <ScrollView
@@ -70,99 +112,168 @@ export function ProviderSchedule() {
         style={styles.rail}
         contentContainerStyle={styles.railContent}
       >
-        {DAYS.map((d, i) => {
-          const active = i === selected;
+        {days.map((d) => {
+          const active = d.iso === selectedIso;
+          const has = daysWithBookings.has(d.iso);
           return (
             <Pressable
-              key={d.id}
-              onPress={() => setSelected(i)}
+              key={d.iso}
+              onPress={() => setSelectedIso(d.iso)}
               accessibilityRole="button"
               accessibilityState={{ selected: active }}
               style={[styles.dayPill, active ? styles.dayPillActive : null]}
             >
               <Text style={[styles.dayDow, active && { color: colors.inkInv }]}>{d.dow}</Text>
-              <Text style={[styles.dayNum, active && { color: colors.inkInv }]}>{d.date}</Text>
+              <Text style={[styles.dayNum, active && { color: colors.inkInv }]}>{d.dayNum}</Text>
+              <View style={[styles.dayDot, { backgroundColor: has ? (active ? colors.highlight : colors.brand) : 'transparent' }]} />
             </Pressable>
           );
         })}
       </ScrollView>
 
       <SectionHeader
-        title={day.label}
+        title={selected?.label ?? 'Schedule'}
         action="Set availability"
         onAction={() => router.push('/availability')}
         size="md"
         style={styles.section}
       />
 
-      <View style={styles.list}>
-        {SESSIONS.map((s) => (
-          <SessionCard key={s.id} session={s} router={router} />
-        ))}
-      </View>
+      {loading ? (
+        <View style={styles.state}>
+          <ActivityIndicator color={colors.brand} />
+        </View>
+      ) : error ? (
+        <View style={styles.state}>
+          <Text style={styles.stateText}>{error}</Text>
+          <Pressable onPress={refetch} style={styles.retry}>
+            <Text style={styles.retryText}>Try again</Text>
+          </Pressable>
+        </View>
+      ) : dayBookings.length === 0 ? (
+        <View style={styles.empty}>
+          <View style={styles.emptyIcon}>
+            <Icon name="calendar" size={22} color={colors.brand} />
+          </View>
+          <Text style={styles.emptyTitle}>No consultations</Text>
+          <Text style={styles.emptySub}>
+            {preActivation
+              ? 'Go live above, then publish open slots for families to book.'
+              : 'When a family books one of your open slots, it appears here.'}
+          </Text>
+        </View>
+      ) : (
+        <View style={styles.list}>
+          {dayBookings.map((b) => (
+            <SessionCard key={b.id} booking={b} live={isLive(b)} onJoin={() => router.push('/consult')} />
+          ))}
+        </View>
+      )}
     </Screen>
   );
 }
 
-function SessionCard({ session, router }: { session: Session; router: ReturnType<typeof useRouter> }) {
-  const modeIcon: IconName = session.mode === 'video' ? 'video' : 'pin';
-  const modeLabel = session.mode === 'video' ? 'Video' : 'In-person';
-  const isVideo = session.mode === 'video';
+function GoLiveCard({ router }: { router: ReturnType<typeof useRouter> }) {
+  const steps: { icon: IconName; title: string; sub: string; href: string }[] = [
+    { icon: 'shield', title: 'Verify your practice', sub: 'License, insurance & ID review.', href: '/verification' },
+    { icon: 'dollar', title: 'Start your subscription', sub: 'List in Search and take bookings.', href: '/subscription' },
+    { icon: 'calendar', title: 'Publish availability', sub: 'Open the slots families can book.', href: '/availability' },
+  ];
+  return (
+    <View style={styles.goLive}>
+      <Text style={styles.goLiveTitle}>Go live</Text>
+      <Text style={styles.goLiveSub}>Finish these to start taking consultation bookings.</Text>
+      <View style={styles.goLiveSteps}>
+        {steps.map((s) => (
+          <Pressable
+            key={s.href}
+            onPress={() => router.push(s.href as Href)}
+            accessibilityRole="button"
+            style={({ pressed }) => [styles.goLiveRow, { opacity: pressed ? 0.85 : 1 }]}
+          >
+            <View style={styles.goLiveIcon}>
+              <Icon name={s.icon} size={16} color={colors.brand} />
+            </View>
+            <View style={styles.goLiveText}>
+              <Text style={styles.goLiveRowTitle}>{s.title}</Text>
+              <Text style={styles.goLiveRowSub}>{s.sub}</Text>
+            </View>
+            <Icon name="chevron-right" size={18} color={colors.ink3} />
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function SessionCard({ booking, live, onJoin }: { booking: BookingSummary; live: boolean; onJoin: () => void }) {
+  const label = minutesToClock(booking.startMin);
+  const [time, mer] = label.split(' ');
+  const name = booking.counterpartyName ?? 'Family';
 
   return (
-    <Card onPress={() => router.push('/booking-detail')} padding={14} radius={radii.lg} style={styles.card}>
+    <Card padding={14} radius={radii.lg} style={styles.card}>
       <View style={styles.timeBlock}>
-        <Text style={styles.timeNum}>{session.time}</Text>
-        <Text style={styles.timeMeridiem}>{session.meridiem}</Text>
+        <Text style={styles.timeNum}>{time}</Text>
+        <Text style={styles.timeMeridiem}>{mer}</Text>
       </View>
 
       <View style={styles.cardBody}>
-        {session.live ? (
+        {live ? (
           <View style={styles.liveRow}>
             <View style={styles.liveDot} />
             <Text style={styles.liveText}>Live now</Text>
           </View>
         ) : null}
         <Text style={styles.cardTitle} numberOfLines={1}>
-          {session.parent} · {session.topic}
+          {name}
         </Text>
         <Text style={styles.cardSub} numberOfLines={1}>
-          for {session.child}
+          Consultation · {slotTimeRange(booking)}
         </Text>
-        <View style={styles.modeRow}>
-          <Icon name={modeIcon} size={13} color={colors.ink2} />
-          <Text style={styles.modeText}>{modeLabel}</Text>
+        <View style={styles.pillRow}>
+          <StatusPill state={booking.state} />
         </View>
       </View>
 
-      {isVideo ? (
+      {live ? (
         <Pressable
-          onPress={() => router.push('/consult')}
+          onPress={onJoin}
           accessibilityRole="button"
           style={({ pressed }) => [styles.joinBtn, { opacity: pressed ? 0.85 : 1 }]}
         >
           <Text style={styles.joinText}>Join</Text>
         </Pressable>
-      ) : (
-        <Pressable
-          onPress={() => router.push('/booking-detail')}
-          accessibilityRole="button"
-          style={({ pressed }) => [styles.detailsBtn, { opacity: pressed ? 0.85 : 1 }]}
-        >
-          <Text style={styles.detailsText}>Details</Text>
-        </Pressable>
-      )}
+      ) : null}
     </Card>
   );
 }
 
 const styles = StyleSheet.create({
   content: { paddingBottom: 120 },
+
+  goLive: { backgroundColor: colors.surface, borderRadius: radii.lg, padding: 18, marginTop: 16, ...shadow.e1 },
+  goLiveTitle: { fontFamily: fonts.bold, fontSize: 18, letterSpacing: -0.4, color: colors.ink },
+  goLiveSub: { fontFamily: fonts.regular, fontSize: 13, lineHeight: 19, color: colors.ink2, marginTop: 4 },
+  goLiveSteps: { marginTop: 14, gap: 10 },
+  goLiveRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  goLiveIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: radii.pill,
+    backgroundColor: colors.brandSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  goLiveText: { flex: 1, minWidth: 0 },
+  goLiveRowTitle: { fontFamily: fonts.semibold, fontSize: 14, color: colors.ink },
+  goLiveRowSub: { fontFamily: fonts.regular, fontSize: 12.5, color: colors.ink2, marginTop: 1 },
+
   rail: { marginHorizontal: -24, marginTop: 14 },
   railContent: { paddingHorizontal: 24, gap: 8 },
   dayPill: {
     width: 52,
-    height: 64,
+    height: 68,
     borderRadius: radii.md,
     backgroundColor: colors.surface,
     alignItems: 'center',
@@ -173,6 +284,8 @@ const styles = StyleSheet.create({
   dayPillActive: { backgroundColor: colors.ink },
   dayDow: { fontFamily: fonts.semibold, fontSize: 10, letterSpacing: 0.4, color: colors.ink3 },
   dayNum: { fontFamily: fonts.bold, fontSize: 17, color: colors.ink, fontVariant: ['tabular-nums'] },
+  dayDot: { width: 6, height: 6, borderRadius: radii.pill },
+
   section: { marginTop: 22, marginBottom: 12 },
   list: { gap: 10 },
   card: { flexDirection: 'row', alignItems: 'center', gap: 12 },
@@ -191,8 +304,7 @@ const styles = StyleSheet.create({
   liveText: { fontFamily: fonts.bold, fontSize: 10, letterSpacing: 0.5, textTransform: 'uppercase', color: colors.info },
   cardTitle: { fontFamily: fonts.semibold, fontSize: 14, color: colors.ink },
   cardSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.ink2, marginTop: 2 },
-  modeRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6 },
-  modeText: { fontFamily: fonts.medium, fontSize: 12, color: colors.ink2 },
+  pillRow: { flexDirection: 'row', marginTop: 8 },
   joinBtn: {
     height: 36,
     paddingHorizontal: 16,
@@ -202,15 +314,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   joinText: { fontFamily: fonts.semibold, fontSize: 13, color: colors.inkInv },
-  detailsBtn: {
-    height: 36,
-    paddingHorizontal: 14,
-    borderRadius: radii.pill,
-    borderWidth: 1.5,
-    borderColor: colors.hairline,
-    backgroundColor: colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  detailsText: { fontFamily: fonts.semibold, fontSize: 13, color: colors.ink },
+
+  state: { alignItems: 'center', gap: 12, paddingVertical: 48 },
+  stateText: { fontFamily: fonts.regular, fontSize: 14, color: colors.ink2, textAlign: 'center' },
+  retry: { height: 40, paddingHorizontal: 18, borderRadius: radii.pill, backgroundColor: colors.brand, alignItems: 'center', justifyContent: 'center' },
+  retryText: { fontFamily: fonts.semibold, fontSize: 13, color: colors.inkInv },
+
+  empty: { alignItems: 'center', gap: 8, paddingTop: 40, paddingHorizontal: 24 },
+  emptyIcon: { width: 56, height: 56, borderRadius: radii.lg, backgroundColor: colors.brandSoft, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+  emptyTitle: { fontFamily: fonts.bold, fontSize: 17, letterSpacing: -0.3, color: colors.ink },
+  emptySub: { fontFamily: fonts.regular, fontSize: 13, color: colors.ink2, textAlign: 'center', maxWidth: 280, lineHeight: 19 },
 });

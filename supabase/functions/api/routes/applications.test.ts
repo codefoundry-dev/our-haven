@@ -146,6 +146,7 @@ function makeDeps(db: AppDeps['db'], stripe?: AppDeps['stripe']): AppDeps {
     supabase: stub,
     stripe: stripe ?? makeAwardStripe(),
     backgroundCheck: stub,
+    daily: stub,
   };
 }
 

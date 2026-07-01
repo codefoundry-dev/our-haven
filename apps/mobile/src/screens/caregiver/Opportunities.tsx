@@ -8,7 +8,7 @@
  */
 import { useState } from 'react';
 import { useRouter } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { AppBar } from '@/components/AppBar';
 import { Icon } from '@/components/Icon';
@@ -17,6 +17,8 @@ import { CategoryChip, type Category } from '@/components/ui/CategoryChip';
 import { Chip, FilterChip } from '@/components/ui/Chip';
 import { SearchBar } from '@/components/ui/SearchBar';
 import { TabStrip } from '@/components/ui/TabStrip';
+import { useSupplyActivation } from '@/lib/SupplyActivationProvider';
+import { CaregiverPreActivation } from '@/screens/caregiver/PreActivation';
 import { colors, fonts, radii, shadow } from '@/theme/tokens';
 
 const TABS = ['Open Jobs', 'My Applications'] as const;
@@ -104,6 +106,24 @@ export function CaregiverOpportunities() {
   const [tab, setTab] = useState<Tab>('Open Jobs');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<string>('All');
+  const { loading, activated, verification, blockingStep } = useSupplyActivation();
+
+  // Pre-activation (PRD story 83): until verification clears, a Caregiver can't
+  // browse Jobs — swap the feed for the empty state that names the blocking step.
+  // Gate on `loading` first so the feed never flashes during the initial fetch.
+  if (loading) {
+    return (
+      <Screen scroll edges={['top']} contentStyle={styles.content}>
+        <AppBar large title="Opportunities" />
+        <View style={styles.loading}>
+          <ActivityIndicator color={colors.brand} />
+        </View>
+      </Screen>
+    );
+  }
+  if (!activated) {
+    return <CaregiverPreActivation verification={verification} blockingStep={blockingStep} />;
+  }
 
   return (
     <Screen scroll edges={['top']} contentStyle={styles.content}>
@@ -206,6 +226,8 @@ export function CaregiverOpportunities() {
 
 const styles = StyleSheet.create({
   content: { paddingBottom: 120 },
+
+  loading: { paddingTop: 96, alignItems: 'center' },
 
   tabStrip: { marginTop: 14 },
   search: { marginTop: 16, backgroundColor: colors.surface },

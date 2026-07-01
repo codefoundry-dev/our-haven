@@ -286,6 +286,24 @@ const EnvSchema = z.object({
     .describe(
       'Supabase auth uid (uuid) the corporate Contact-Us intake is routed to via the notification outbox. Unset → the intake is captured but not enqueued.',
     ),
+
+  // ── Embedded video — Daily.co (OH-216; ADR-0008) ─────────────────────────
+  // Ad-hoc, in-chat video calls. Optional by design (like the vendor secrets
+  // above): the host boots without it, and the video route throws
+  // NotConfiguredError → 503 `not_configured` only when a party tries to start a
+  // call while it is unset. Not SUPABASE_-prefixed (reserved). Server-only.
+  DAILY_API_KEY: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Daily.co server API key. Used to create short-lived private rooms + per-join meeting tokens for ad-hoc in-chat video (OH-216). Server-only; set via `supabase secrets set`.',
+    ),
+  DAILY_API_BASE: z
+    .string()
+    .url()
+    .default('https://api.daily.co/v1')
+    .describe('Daily.co REST API base URL. Overridable for staging; tests inject a fetch stub instead.'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

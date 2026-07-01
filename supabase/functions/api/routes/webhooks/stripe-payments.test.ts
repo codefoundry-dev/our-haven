@@ -92,6 +92,7 @@ function makeDeps(
       fetchImpl: neverFetch,
     }),
     backgroundCheck: stub,
+    daily: stub,
   };
 }
 

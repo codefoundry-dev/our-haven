@@ -54,6 +54,7 @@ function makeDeps(db: AppDeps['db']): AppDeps {
       fetchImpl: neverFetch,
     }),
     backgroundCheck: stub,
+    daily: stub,
   };
 }
 

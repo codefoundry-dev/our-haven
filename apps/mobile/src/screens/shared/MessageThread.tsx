@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -33,7 +34,9 @@ import { OfferComposer } from '@/components/offers/OfferComposer';
 import { OfferCounterSheet } from '@/components/offers/OfferCounterSheet';
 import { Avatar } from '@/components/ui/Avatar';
 import { IconButton } from '@/components/ui/IconButton';
-import type { ChatMessage, Offer } from '@/api/client';
+import { VideoCallBubble } from '@/components/video/VideoCallBubble';
+import { VideoCallModal, type VideoCallSessionState } from '@/components/video/VideoCallModal';
+import { ApiError, joinCall, type ChatMessage, type Offer } from '@/api/client';
 import {
   MESSAGING_DISCLOSURE_BODY,
   MESSAGING_DISCLOSURE_TITLE,
@@ -55,6 +58,7 @@ export default function MessageThreadScreen() {
     error,
     sending,
     send,
+    startCall,
     composeOffer,
     acceptOffer,
     declineOffer,
@@ -80,7 +84,43 @@ export default function MessageThreadScreen() {
   const [editing, setEditing] = useState<Offer | null>(null);
   const [countering, setCountering] = useState<Offer | null>(null);
   const [busyOfferId, setBusyOfferId] = useState<string | null>(null);
+  // Ad-hoc video call (OH-216): the active session drives the full-screen room
+  // modal; `startingCall` / `joiningCallId` gate the app-bar + Join buttons.
+  const [callSession, setCallSession] = useState<VideoCallSessionState | null>(null);
+  const [startingCall, setStartingCall] = useState(false);
+  const [joiningCallId, setJoiningCallId] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
+
+  const onVideoError = (e: unknown, fallback: string) => {
+    const msg = e instanceof ApiError ? e.message : fallback;
+    Alert.alert('Video call', msg);
+  };
+
+  const onStartCall = async () => {
+    if (startingCall) return;
+    setStartingCall(true);
+    try {
+      const res = await startCall();
+      if (res) setCallSession({ callId: res.call.callId, roomUrl: res.call.roomUrl, token: res.call.token });
+    } catch (e) {
+      onVideoError(e, 'Could not start the video call.');
+    } finally {
+      setStartingCall(false);
+    }
+  };
+
+  const onJoinCall = async (callId: string) => {
+    if (joiningCallId) return;
+    setJoiningCallId(callId);
+    try {
+      const session = await joinCall(callId);
+      setCallSession({ callId, roomUrl: session.roomUrl, token: session.token });
+    } catch (e) {
+      onVideoError(e, 'This call is no longer available.');
+    } finally {
+      setJoiningCallId(null);
+    }
+  };
 
   useEffect(() => {
     // Keep the newest item in view as the transcript grows.
@@ -131,6 +171,13 @@ export default function MessageThreadScreen() {
                 </Text>
               ) : null}
             </View>
+            {/* Ad-hoc video call — either party, any thread (ADR-0008). */}
+            <IconButton
+              name="video"
+              accessibilityLabel="Start a video call"
+              onPress={onStartCall}
+              style={loading || error || startingCall ? styles.sendDisabled : undefined}
+            />
           </View>
 
           {/* Collapsible redaction / Trust & Safety banner (no encryption claim) */}
@@ -171,7 +218,16 @@ export default function MessageThreadScreen() {
               ) : (
                 timeline.map((item) =>
                   item.kind === 'message' ? (
-                    <Bubble key={`m-${item.id}`} message={item.message} mine={item.message.senderUid === myUid} />
+                    item.message.kind === 'video_call' ? (
+                      <VideoCallBubble
+                        key={`v-${item.id}`}
+                        mine={item.message.senderUid === myUid}
+                        joining={joiningCallId != null && joiningCallId === item.message.videoCallLinkId}
+                        onJoin={() => item.message.videoCallLinkId && onJoinCall(item.message.videoCallLinkId)}
+                      />
+                    ) : (
+                      <Bubble key={`m-${item.id}`} message={item.message} mine={item.message.senderUid === myUid} />
+                    )
                   ) : (
                     <OfferBubble
                       key={`o-${item.id}`}
@@ -248,6 +304,8 @@ export default function MessageThreadScreen() {
           if (countering) await counterOffer(countering.id, body);
         }}
       />
+
+      <VideoCallModal session={callSession} onClose={() => setCallSession(null)} />
     </SafeAreaView>
   );
 }

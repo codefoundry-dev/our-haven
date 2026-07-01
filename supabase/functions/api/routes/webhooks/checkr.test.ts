@@ -47,6 +47,7 @@ function makeDeps(db: AppDeps['db']): AppDeps {
     supabase: stub,
     stripe: stub,
     backgroundCheck: createCheckrAdapter({ webhookSecret: CHECKR_SECRET, packageSlug: 'tasker_standard' }),
+    daily: stub,
   };
 }
 

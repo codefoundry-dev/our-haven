@@ -5,7 +5,7 @@
  * Role string values are the contract with the backend `/v1/auth/role-claim`
  * API (see @our-haven/openapi-types).
  */
-import { colors, type ColorToken } from '@/theme/tokens';
+import { type ColorToken } from '@/theme/tokens';
 import type { IconName } from '@/components/Icon';
 
 export const ROLES = ['parent', 'caregiver', 'provider'] as const;
@@ -42,11 +42,15 @@ export const ROLE_CARDS: Record<
 
 /**
  * Role-aware bottom-nav destinations (from primitives.jsx → BottomNav).
- * Order matters — it's the on-screen order. Each id maps to a route file
- * under app/(app)/.
+ * Order matters — it's the on-screen order, and index 0 is the landing tab.
+ * Each id maps to a route file under app/(app)/.
  *   parent     : Home · Bookings · Messages · Account
- *   caregiver  : Home · Opportunities · Schedule · Messages · Account
+ *   caregiver  : Opportunities · Schedule · Messages · Account
  *   provider   : Schedule · Bookings · Messages · Account (consultation-centric)
+ *
+ * The Caregiver shell is Opportunities-led with NO Home tab (PRD-0001 story 81 /
+ * ADR-0005) — Opportunities is their day-one surface, so it's also their landing
+ * tab. (The desktop web portal still has a Dashboard at /home; see ROLE_EXTRA_TABS.)
  */
 export type TabId = 'home' | 'opportunities' | 'schedule' | 'bookings' | 'messages' | 'account';
 
@@ -58,7 +62,6 @@ export const ROLE_TABS: Record<Role, { id: TabId; icon: IconName; label: string 
     { id: 'account', icon: 'person', label: 'Account' },
   ],
   caregiver: [
-    { id: 'home', icon: 'house', label: 'Home' },
     { id: 'opportunities', icon: 'briefcase', label: 'Opportunities' },
     { id: 'schedule', icon: 'calendar', label: 'Schedule' },
     { id: 'messages', icon: 'message', label: 'Messages' },
@@ -72,7 +75,25 @@ export const ROLE_TABS: Record<Role, { id: TabId; icon: IconName; label: string 
   ],
 };
 
-/** The first tab a role lands on after auth (provider has no Home). */
+/**
+ * Tab routes a role can reach that are NOT in its bottom nav. A Caregiver's mobile
+ * shell has no Home tab, but the desktop web portal (WebShell) still surfaces a
+ * Dashboard at /home (rendered by home.web.tsx). Listing it here keeps the (app)
+ * foreign-tab guard from bouncing a Caregiver off that desktop route while it stays
+ * hidden from the mobile tab bar.
+ */
+const ROLE_EXTRA_TABS: Partial<Record<Role, TabId[]>> = {
+  caregiver: ['home'],
+};
+
+/** Whether a role may render a given tab route — a bottom-nav tab or an extra route. */
+export function roleOwnsTab(role: Role, tab: string): boolean {
+  return (
+    ROLE_TABS[role].some((t) => t.id === tab) || (ROLE_EXTRA_TABS[role]?.some((id) => id === tab) ?? false)
+  );
+}
+
+/** The first tab a role lands on after auth (Caregiver → Opportunities; Provider → Schedule). */
 export function landingTab(role: Role): TabId {
   return ROLE_TABS[role][0].id;
 }

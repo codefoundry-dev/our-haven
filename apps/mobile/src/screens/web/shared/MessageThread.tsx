@@ -11,7 +11,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useAuth } from '@/auth/AuthProvider';
 import { Icon } from '@/components/Icon';
@@ -20,8 +20,10 @@ import { OfferComposer } from '@/components/offers/OfferComposer';
 import { OfferCounterSheet } from '@/components/offers/OfferCounterSheet';
 import { Avatar } from '@/components/ui/Avatar';
 import { Card } from '@/components/ui/Card';
+import { VideoCallBubble } from '@/components/video/VideoCallBubble';
+import { VideoCallModal, type VideoCallSessionState } from '@/components/video/VideoCallModal';
 import { WebPageHeader } from '@/components/web/WebShell';
-import type { ChatMessage, Offer } from '@/api/client';
+import { ApiError, joinCall, type ChatMessage, type Offer } from '@/api/client';
 import {
   MESSAGING_DISCLOSURE_BODY,
   MESSAGING_DISCLOSURE_TITLE,
@@ -44,6 +46,7 @@ export function MessageThreadWeb() {
     error,
     sending,
     send,
+    startCall,
     composeOffer,
     acceptOffer,
     declineOffer,
@@ -64,7 +67,39 @@ export function MessageThreadWeb() {
   const [editing, setEditing] = useState<Offer | null>(null);
   const [countering, setCountering] = useState<Offer | null>(null);
   const [busyOfferId, setBusyOfferId] = useState<string | null>(null);
+  const [callSession, setCallSession] = useState<VideoCallSessionState | null>(null);
+  const [startingCall, setStartingCall] = useState(false);
+  const [joiningCallId, setJoiningCallId] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
+
+  const onVideoError = (e: unknown, fallback: string) =>
+    Alert.alert('Video call', e instanceof ApiError ? e.message : fallback);
+
+  const onStartCall = async () => {
+    if (startingCall) return;
+    setStartingCall(true);
+    try {
+      const res = await startCall();
+      if (res) setCallSession({ callId: res.call.callId, roomUrl: res.call.roomUrl, token: res.call.token });
+    } catch (e) {
+      onVideoError(e, 'Could not start the video call.');
+    } finally {
+      setStartingCall(false);
+    }
+  };
+
+  const onJoinCall = async (callId: string) => {
+    if (joiningCallId) return;
+    setJoiningCallId(callId);
+    try {
+      const s = await joinCall(callId);
+      setCallSession({ callId, roomUrl: s.roomUrl, token: s.token });
+    } catch (e) {
+      onVideoError(e, 'This call is no longer available.');
+    } finally {
+      setJoiningCallId(null);
+    }
+  };
 
   useEffect(() => {
     const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
@@ -114,6 +149,15 @@ export function MessageThreadWeb() {
                   </Text>
                   {roleLabel ? <Text style={styles.headSub}>{roleLabel}</Text> : null}
                 </View>
+                {/* Ad-hoc video call — either party, any thread (ADR-0008). */}
+                <Pressable
+                  onPress={onStartCall}
+                  disabled={loading || !!error || startingCall}
+                  accessibilityLabel="Start a video call"
+                  style={[styles.callBtn, (loading || !!error || startingCall) && styles.sendDisabled]}
+                >
+                  <Icon name="video" size={18} color={colors.brand} />
+                </Pressable>
               </View>
 
               {/* collapsible redaction / Trust & Safety banner (no encryption claim) */}
@@ -142,7 +186,16 @@ export function MessageThreadWeb() {
                   ) : (
                     timeline.map((item) =>
                       item.kind === 'message' ? (
-                        <Bubble key={`m-${item.id}`} message={item.message} mine={item.message.senderUid === myUid} />
+                        item.message.kind === 'video_call' ? (
+                          <VideoCallBubble
+                            key={`v-${item.id}`}
+                            mine={item.message.senderUid === myUid}
+                            joining={joiningCallId != null && joiningCallId === item.message.videoCallLinkId}
+                            onJoin={() => item.message.videoCallLinkId && onJoinCall(item.message.videoCallLinkId)}
+                          />
+                        ) : (
+                          <Bubble key={`m-${item.id}`} message={item.message} mine={item.message.senderUid === myUid} />
+                        )
                       ) : (
                         <OfferBubble
                           key={`o-${item.id}`}
@@ -254,6 +307,8 @@ export function MessageThreadWeb() {
           if (countering) await counterOffer(countering.id, body);
         }}
       />
+
+      <VideoCallModal session={callSession} onClose={() => setCallSession(null)} />
     </View>
   );
 }
@@ -303,6 +358,14 @@ const styles = StyleSheet.create({
   },
   headName: { fontFamily: fonts.bold, fontSize: 16, color: colors.ink },
   headSub: { fontFamily: fonts.medium, fontSize: 12, color: colors.ink2, marginTop: 2 },
+  callBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: radii.pill,
+    backgroundColor: colors.brandSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   banner: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginHorizontal: 22, marginTop: 18, padding: 13, borderRadius: radii.md, backgroundColor: colors.brandSoft },
   bannerTitle: { fontFamily: fonts.semibold, fontSize: 13, color: colors.ink },

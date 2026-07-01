@@ -67,7 +67,7 @@ function makeStripe(over: Record<string, unknown> = {}): AppDeps['stripe'] {
 
 function makeDeps(db: AppDeps['db'], stripe?: AppDeps['stripe']): AppDeps {
   const stub = new Proxy({} as never, { get: () => stub });
-  return { env: buildTestEnv(), db, supabase: stub, stripe: stripe ?? makeStripe(), backgroundCheck: stub };
+  return { env: buildTestEnv(), db, supabase: stub, stripe: stripe ?? makeStripe(), backgroundCheck: stub, daily: stub };
 }
 
 const parentToken = (uid = 'uid-par') =>

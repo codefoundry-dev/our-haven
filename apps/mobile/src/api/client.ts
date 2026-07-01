@@ -82,6 +82,15 @@ export type ParentCheckoutLink = paths['/v1/parents/me/subscription/checkout-lin
 export type ParentCheckoutLinkBody = NonNullable<paths['/v1/parents/me/subscription/checkout-link']['post']['requestBody']>['content']['application/json'];
 export type ParentPortalLink = paths['/v1/parents/me/subscription/portal-link']['post']['responses'][200]['content']['application/json'];
 
+// Provider Subscription (OH-191 server / OH-222 shell). Provider is a Stripe
+// Customer (NOT Connect) — the subscription is what makes the practice `listed`
+// (search-visible + bookable). The shell reads the status and opens the two
+// hosted linkouts (checkout to start, Billing Portal to manage / cancel).
+export type ProviderSubscription = paths['/v1/providers/me/subscription']['get']['responses'][200]['content']['application/json'];
+export type ProviderSubscriptionStatus = ProviderSubscription['status'];
+export type ProviderCheckoutLink = paths['/v1/providers/me/subscription/checkout-link']['post']['responses'][200]['content']['application/json'];
+export type ProviderPortalLink = paths['/v1/providers/me/subscription/portal-link']['post']['responses'][200]['content']['application/json'];
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -369,6 +378,28 @@ export function createParentPortalLink(): Promise<ParentPortalLink> {
 }
 
 /**
+ * Provider Subscription (OH-191 server / OH-222 shell). `getProviderSubscription`
+ * reads the listing state (`listed` is the gate — true iff status is
+ * active/trialing — which is what lets a Provider publish bookable slots and show
+ * in Search); `createProviderCheckoutLink` returns the Stripe-hosted Checkout URL
+ * to start the subscription (the listing flips when the billing webhook fires, so
+ * the shell polls the summary on return); `createProviderPortalLink` returns the
+ * Billing Portal URL to manage / cancel. Provider-role-gated server-side (403).
+ */
+
+export function getProviderSubscription(): Promise<ProviderSubscription> {
+  return get<ProviderSubscription>('/v1/providers/me/subscription');
+}
+
+export function createProviderCheckoutLink(): Promise<ProviderCheckoutLink> {
+  return post<ProviderCheckoutLink>('/v1/providers/me/subscription/checkout-link', undefined);
+}
+
+export function createProviderPortalLink(): Promise<ProviderPortalLink> {
+  return post<ProviderPortalLink>('/v1/providers/me/subscription/portal-link', undefined);
+}
+
+/**
  * In-app Messaging (OH-205). `openThread` is the Parent's idempotent
  * get-or-create of a pre-acceptance Direct-Message thread with a Caregiver
  * (402 when not subscribed, 404 when the Caregiver is not listable); `getThreads`
@@ -400,6 +431,30 @@ export function getThreadMessages(threadId: string, limit?: number): Promise<Cha
 
 export function sendMessage(threadId: string, body: string): Promise<ChatMessage> {
   return post<ChatMessage>(`/v1/threads/${threadId}/messages`, { body } satisfies SendMessageBody);
+}
+
+/**
+ * Ad-hoc embedded video calls inside a thread (OH-216; ADR-0008). `startThreadCall`
+ * creates a short-lived (~30 min) Daily.co private room, logs the link generation
+ * for Trust & Safety (no content recorded), and posts a "Join video call" poke the
+ * counterparty receives over the messaging Realtime pipe — it returns the
+ * initiator's join session (room URL + owner token) plus the poke message so the
+ * caller can add the bubble without a refetch. `joinCall` mints a fresh per-user
+ * token for a still-live call (throws 410 `call_expired` once it has ended). A
+ * Parent start/join is Subscription-gated (402); 503 when video is unconfigured.
+ * The room is entered via the Daily SDK on native / an iframe on web.
+ */
+export type VideoCallSession =
+  paths['/v1/calls/{callId}/join']['post']['responses'][200]['content']['application/json'];
+export type StartVideoCallResult =
+  paths['/v1/threads/{threadId}/calls']['post']['responses'][201]['content']['application/json'];
+
+export function startThreadCall(threadId: string): Promise<StartVideoCallResult> {
+  return post<StartVideoCallResult>(`/v1/threads/${threadId}/calls`, undefined);
+}
+
+export function joinCall(callId: string): Promise<VideoCallSession> {
+  return post<VideoCallSession>(`/v1/calls/${callId}/join`, undefined);
 }
 
 /**
