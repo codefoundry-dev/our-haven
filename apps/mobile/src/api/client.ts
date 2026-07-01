@@ -389,6 +389,65 @@ export function rescindReduceRequest(bookingId: string): Promise<BookingAdjustPe
 }
 
 /**
+ * Caregiver Schedule (OH-220) — the Caregiver-facing side of the hourly Booking
+ * lifecycle (the mirror of the OH-211 Parent surface above). `getCaregiverBookings`
+ * is the schedule feed the client buckets into Today / Upcoming / needs-attention;
+ * `acceptCaregiverBooking` / `declineCaregiverBooking` answer a 24h posted-Job
+ * award; `startCaregiverSession` marks in-progress (drives the active-session
+ * banner); `proposeCaregiverHours` ends the session and proposes the hours (opens
+ * the Parent's 24h confirm window); `approve/declineCaregiverTimeChange` respond to
+ * a Parent's shorten request. All Caregiver-role-gated server-side.
+ */
+export type CaregiverBooking =
+  paths['/v1/caregiver/bookings']['get']['responses'][200]['content']['application/json']['bookings'][number];
+export type CaregiverBookingState = CaregiverBooking['state'];
+export type CaregiverBookingPendingTimeChange = NonNullable<CaregiverBooking['pendingTimeChange']>;
+export type CaregiverBookingTransition =
+  paths['/v1/caregiver/bookings/{bookingId}/accept']['post']['responses'][200]['content']['application/json'];
+export type CaregiverProposeHoursBody =
+  paths['/v1/caregiver/bookings/{bookingId}/propose-hours']['post']['requestBody']['content']['application/json'];
+export type CaregiverProposeHoursResult =
+  paths['/v1/caregiver/bookings/{bookingId}/propose-hours']['post']['responses'][200]['content']['application/json'];
+
+/** The Caregiver's schedule — their hourly Bookings across every state (OH-220). */
+export function getCaregiverBookings(): Promise<CaregiverBooking[]> {
+  return get<{ bookings: CaregiverBooking[] }>('/v1/caregiver/bookings').then((r) => r.bookings);
+}
+
+/** Accept a 24h posted-Job award (`requested → accepted`). */
+export function acceptCaregiverBooking(bookingId: string): Promise<CaregiverBookingTransition> {
+  return post<CaregiverBookingTransition>(`/v1/caregiver/bookings/${bookingId}/accept`, undefined);
+}
+
+/** Decline a 24h posted-Job award (`requested → declined`; releases the hold). */
+export function declineCaregiverBooking(bookingId: string): Promise<CaregiverBookingTransition> {
+  return post<CaregiverBookingTransition>(`/v1/caregiver/bookings/${bookingId}/decline`, undefined);
+}
+
+/** Mark the session in-progress (`accepted → in-progress`). */
+export function startCaregiverSession(bookingId: string): Promise<CaregiverBookingTransition> {
+  return post<CaregiverBookingTransition>(`/v1/caregiver/bookings/${bookingId}/start`, undefined);
+}
+
+/** End the session and propose the hours worked (`in-progress → awaiting-confirmation`). */
+export function proposeCaregiverHours(
+  bookingId: string,
+  body: CaregiverProposeHoursBody,
+): Promise<CaregiverProposeHoursResult> {
+  return post<CaregiverProposeHoursResult>(`/v1/caregiver/bookings/${bookingId}/propose-hours`, body);
+}
+
+/** Approve a Parent's pending shorten request (applies the shorter window). */
+export function approveCaregiverTimeChange(bookingId: string): Promise<CaregiverBookingTransition> {
+  return post<CaregiverBookingTransition>(`/v1/caregiver/bookings/${bookingId}/time-change/approve`, undefined);
+}
+
+/** Decline a Parent's pending shorten request (keeps the original window + pay). */
+export function declineCaregiverTimeChange(bookingId: string): Promise<CaregiverBookingTransition> {
+  return post<CaregiverBookingTransition>(`/v1/caregiver/bookings/${bookingId}/time-change/decline`, undefined);
+}
+
+/**
  * Parent Subscription — the demand-side paywall (OH-204) on top of OH-193's
  * server endpoints. `getParentSubscription` reads the gate state (`entitled`,
  * true iff status is active/trialing); `createParentCheckoutLink` returns the

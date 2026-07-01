@@ -1,17 +1,24 @@
 /**
- * Availability (WEB) — the clinical Provider's consultation-slot editor.
- *  - WIDE   → the desktop two-column editor inside the WebShell side-rail chrome.
- *  - NARROW → the native mobile Availability screen (same body as the native
- *    route), so phone-width web matches the native design.
+ * Availability (WEB) — role-aware.
+ *  - Caregiver → the native 7×3 grid editor (OH-220) at every width. The desktop
+ *    caregiver portal chrome for this surface is a follow-up.
+ *  - Provider → WIDE: the two-column consultation-slot editor inside the WebShell
+ *    side-rail; NARROW: the native mobile Availability screen.
  * Metro resolves this over availability.tsx on web; the native file is untouched.
  */
+import { useAuth } from '@/auth/AuthProvider';
 import { WebShell } from '@/components/web/WebShell';
 import { useWebWide } from '@/lib/responsive';
 import { ProviderAvailabilityWeb } from '@/screens/web/cp/Availability';
-import AvailabilityScreen from '@/screens/provider/Availability';
+import { CaregiverAvailability } from '@/screens/caregiver/Availability';
+import ProviderAvailabilityScreen from '@/screens/provider/Availability';
 
 export default function AvailabilityWeb() {
-  if (!useWebWide()) return <AvailabilityScreen />;
+  const { role } = useAuth();
+  const wide = useWebWide();
+
+  if (role !== 'provider') return <CaregiverAvailability />;
+  if (!wide) return <ProviderAvailabilityScreen />;
 
   return (
     <WebShell role="provider" active="availability">

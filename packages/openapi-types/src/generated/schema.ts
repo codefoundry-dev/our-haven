@@ -3999,6 +3999,529 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/caregiver/bookings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The Caregiver's schedule feed — OH-220
+         * @description Returns all of the authenticated Caregiver's hourly Bookings (`kind = caregiver`, `provider_id = caller`) across every state, newest first. The client buckets them into Today / Upcoming / needs-attention (awarded confirm, live session, pending shorten).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The schedule */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingList"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/caregiver/bookings/{bookingId}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept an awarded (requested) Booking — OH-220
+         * @description Confirms a posted-Job award within the 24h window (`requested → accepted`). The service address reveals to the Caregiver from here on.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    bookingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Accepted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingTransition"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingError"];
+                    };
+                };
+                /** @description Not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingError"];
+                    };
+                };
+                /** @description Not acceptable from the current state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/caregiver/bookings/{bookingId}/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decline an awarded (requested) Booking — OH-220
+         * @description Declines a posted-Job award (`requested → declined`) and releases any authorization hold back to the Parent.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    bookingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Declined */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingTransition"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingError"];
+                    };
+                };
+                /** @description Not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingError"];
+                    };
+                };
+                /** @description Not declinable from the current state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/caregiver/bookings/{bookingId}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark the session in-progress — OH-220
+         * @description Starts the session (`accepted → in-progress`); the active-session banner + timer begin.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    bookingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description In session */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingTransition"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingError"];
+                    };
+                };
+                /** @description Not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingError"];
+                    };
+                };
+                /** @description Not startable from the current state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/caregiver/bookings/{bookingId}/propose-hours": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End session → propose hours — OH-220
+         * @description Ends the session and proposes the hours worked (`in-progress → awaiting-confirmation`), opening the ~24h Parent review window (ADR-0013). Records `proposed_hours` + the derived `proposed_amount_cents` (capped at the authorized hold); the Parent confirms (OH-211) or it auto-confirms + captures on lapse.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    bookingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CaregiverBookingProposeHours"];
+                };
+            };
+            responses: {
+                /** @description Proposed */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingProposeHoursResult"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingError"];
+                    };
+                };
+                /** @description Not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingError"];
+                    };
+                };
+                /** @description Not in-progress */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/caregiver/bookings/{bookingId}/time-change/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve the Parent's shorten request — OH-220
+         * @description Approves a pending shorten (ADR-0014 §A3): applies the proposed shorter window + re-derives the estimate, and clears the proposal. The existing authorization hold already covers the smaller amount, so no re-authorize is needed — capture-at-session-end simply captures less.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    bookingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Approved */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingTransition"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingError"];
+                    };
+                };
+                /** @description Not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingError"];
+                    };
+                };
+                /** @description No pending change / not accepted */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/caregiver/bookings/{bookingId}/time-change/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decline the Parent's shorten request — OH-220
+         * @description Declines a pending shorten: drops the proposal; the Booking keeps its original window + pay.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    bookingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Declined */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingTransition"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingError"];
+                    };
+                };
+                /** @description Not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingError"];
+                    };
+                };
+                /** @description No pending change */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverBookingError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/threads": {
         parameters: {
             query?: never;
@@ -7305,6 +7828,69 @@ export interface components {
         };
         BookingReduceRequestBody: {
             newDurationHours: number;
+            note?: string;
+        };
+        CaregiverBookingList: {
+            bookings: components["schemas"]["CaregiverBooking"][];
+        };
+        CaregiverBooking: {
+            id: string;
+            /** @enum {string} */
+            state: "requested" | "accepted" | "declined" | "expired" | "in-progress" | "awaiting-confirmation" | "completed" | "disputed" | "cancelled";
+            /** @enum {string|null} */
+            origin: "posted-job" | "direct-message" | null;
+            jobId: string | null;
+            offerId: string | null;
+            seriesId: string | null;
+            parentName: string | null;
+            /** @enum {string|null} */
+            category: "babysitter" | "tutor" | "nanny" | null;
+            scheduledDate: string;
+            startMin: number;
+            endMin: number;
+            childCount: number | null;
+            childAges: number[];
+            serviceAddress: components["schemas"]["CaregiverBookingAddress"];
+            agreedRateCents: number | null;
+            computedTotalCents: number | null;
+            proposedHours: number | null;
+            proposedAmountCents: number | null;
+            requestExpiresAt: string | null;
+            confirmDeadlineAt: string | null;
+            pendingTimeChange: components["schemas"]["CaregiverBookingPendingTimeChange"];
+        };
+        CaregiverBookingAddress: {
+            line1: string | null;
+            line2: string | null;
+            city: string | null;
+            state: string | null;
+            postalCode: string | null;
+        } | null;
+        CaregiverBookingPendingTimeChange: {
+            proposedDurationHours: number;
+            proposedEndMin: number | null;
+            note: string | null;
+            requestedAt: string;
+        } | null;
+        CaregiverBookingError: {
+            error: string;
+            reason?: string;
+        };
+        CaregiverBookingTransition: {
+            id: string;
+            /** @enum {string} */
+            state: "requested" | "accepted" | "declined" | "expired" | "in-progress" | "awaiting-confirmation" | "completed" | "disputed" | "cancelled";
+        };
+        CaregiverBookingProposeHoursResult: {
+            id: string;
+            /** @enum {string} */
+            state: "awaiting-confirmation";
+            proposedHours: number;
+            proposedAmountCents: number;
+            confirmDeadlineAt: string;
+        };
+        CaregiverBookingProposeHours: {
+            hours: number;
             note?: string;
         };
         MessageThreadSummary: {
