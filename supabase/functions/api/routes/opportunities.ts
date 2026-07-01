@@ -379,7 +379,9 @@ function toOpportunityDTO(
     recurrence: row.recurrence,
     childCount: row.child_count,
     childAges: row.child_ages ?? [],
-    safetyBehaviors: row.safety_behaviors ?? [],
+    // Values are taxonomy-validated on the Parent write path (compose disclosure);
+    // narrow the raw string[] at the boundary (mirrors search.ts's enum'd facets).
+    safetyBehaviors: (row.safety_behaviors ?? []) as z.infer<typeof SafetyBehaviorEnum>[],
     budgetHintCents: row.budget_hint_cents,
     location: toLocation(row, caregiverPoint),
     applicantCount,
