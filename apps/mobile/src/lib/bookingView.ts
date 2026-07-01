@@ -43,6 +43,10 @@ export type BookingActions = {
   canConfirm: boolean;
   /** Dispute is reachable on accepted / awaiting-confirmation / completed. */
   canDispute: boolean;
+  /** Adjust-time (extend now / request a shorten) — accepted Caregiver Bookings with no pending change (OH-212). */
+  canAdjustTime: boolean;
+  /** A pending shorten the Parent can rescind before the Caregiver acts. */
+  hasPendingTimeChange: boolean;
 };
 
 const ACTIVE = new Set(['requested', 'accepted', 'in-progress', 'awaiting-confirmation']);
@@ -53,6 +57,8 @@ export function bookingActionsFor(b: BookingDetail): BookingActions {
     canCancel: b.kind === 'caregiver' ? ACTIVE.has(b.state) : b.state === 'accepted',
     canConfirm: b.kind === 'caregiver' && b.state === 'awaiting-confirmation',
     canDispute: b.kind === 'caregiver' && DISPUTABLE_WINDOW.has(b.state),
+    canAdjustTime: b.kind === 'caregiver' && b.state === 'accepted' && b.pendingTimeChange == null,
+    hasPendingTimeChange: b.pendingTimeChange != null,
   };
 }
 

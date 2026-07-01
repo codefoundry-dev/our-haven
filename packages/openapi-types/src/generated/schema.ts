@@ -3767,6 +3767,238 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/bookings/{bookingId}/extend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Extend a booked session — applies immediately + re-authorizes — OH-212
+         * @description Buys more of the Caregiver's time on an `accepted` Caregiver Booking. Applies at once (no Caregiver approval needed — ADR-0014 §A3): the duration/end grows and the larger total is re-authorized on the Parent's card. A card hold can't be raised in place, so the old hold is released and a new one placed; when 3DS is needed the response carries a `clientSecret`. A still-`scheduled` Booking just raises the amount the lazy authorize sweep will hold. 409 unless `accepted`, the target adds time, and no shorten is pending.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    bookingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BookingExtendRequest"];
+                };
+            };
+            responses: {
+                /** @description Extended + re-authorized */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingExtend"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+                /** @description Card declined on re-authorization */
+                402: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+                /** @description Booking not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+                /** @description Not extendable from the current state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bookings/{bookingId}/reduce-request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request to shorten a booked session (Caregiver approval) — OH-212
+         * @description Requests fewer paid hours on an `accepted` Caregiver Booking. Does NOT apply immediately — it removes hours the Caregiver agreed to, so it writes a transient `pendingTimeChange` the Caregiver approves/declines (ADR-0014 §A3). The Booking keeps its original duration and pay until approved. 409 unless `accepted`, the target shortens, and no shorten is already pending.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    bookingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BookingReduceRequestBody"];
+                };
+            };
+            responses: {
+                /** @description Shorten requested (pending) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingAdjustPending"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+                /** @description Booking not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+                /** @description Not reducible from the current state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+            };
+        };
+        /**
+         * Rescind the Parent’s own pending shorten — OH-212
+         * @description Drops a pending shorten the Parent filed, before the Caregiver has acted (ADR-0014 §A3). The Booking resolves back to a plain `accepted` with its original duration/pay. 409 when there is no pending shorten.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    bookingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Pending shorten rescinded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingAdjustPending"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+                /** @description Booking not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+                /** @description No pending shorten to rescind */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingError"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/threads": {
         parameters: {
             query?: never;
@@ -7006,6 +7238,7 @@ export interface components {
             cancellationTier: "free" | "half" | "full" | null;
             /** @enum {string|null} */
             disputeReason: "overcharged" | "no-show" | "safety" | "quality" | "other" | null;
+            pendingTimeChange: components["schemas"]["BookingPendingTimeChange"];
         };
         BookingServiceAddress: {
             line1: string | null;
@@ -7013,6 +7246,12 @@ export interface components {
             city: string | null;
             state: string | null;
             postalCode: string | null;
+        } | null;
+        BookingPendingTimeChange: {
+            proposedDurationHours: number;
+            proposedEndMin: number;
+            note: string | null;
+            requestedAt: string;
         } | null;
         BookingError: {
             error: string;
@@ -7040,6 +7279,33 @@ export interface components {
             /** @enum {string} */
             reason: "overcharged" | "no-show" | "safety" | "quality" | "other";
             details?: string;
+        };
+        BookingExtend: {
+            id: string;
+            /** @enum {string} */
+            state: "requested" | "accepted" | "declined" | "expired" | "in-progress" | "awaiting-confirmation" | "completed" | "disputed" | "cancelled";
+            startMin: number;
+            endMin: number;
+            durationHours: number;
+            computedTotalCents: number;
+            authorizedAmountCents: number;
+            /** @enum {string|null} */
+            paymentStatus: "scheduled" | "requires_action" | "authorized" | "captured" | "canceled" | "refunded" | "failed" | null;
+            paymentIntentId: string | null;
+            clientSecret: string | null;
+        };
+        BookingExtendRequest: {
+            newDurationHours: number;
+        };
+        BookingAdjustPending: {
+            id: string;
+            /** @enum {string} */
+            state: "requested" | "accepted" | "declined" | "expired" | "in-progress" | "awaiting-confirmation" | "completed" | "disputed" | "cancelled";
+            pendingTimeChange: components["schemas"]["BookingPendingTimeChange"];
+        };
+        BookingReduceRequestBody: {
+            newDurationHours: number;
+            note?: string;
         };
         MessageThreadSummary: {
             id: string;

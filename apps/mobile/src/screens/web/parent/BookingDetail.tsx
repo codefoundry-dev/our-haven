@@ -21,7 +21,8 @@ import { PricingSummary } from '@/components/ui/PricingSummary';
 import { StatusPill } from '@/components/ui/StatusPill';
 import { CancelSheet } from '@/components/parent/CancelSheet';
 import { DisputeSheet } from '@/components/parent/DisputeSheet';
-import { ApiError, confirmBookingHours } from '@/api/client';
+import { AdjustTimeSheet } from '@/components/parent/AdjustTimeSheet';
+import { ApiError, confirmBookingHours, rescindReduceRequest } from '@/api/client';
 import { formatMoney } from '@/lib/offerCopy';
 import {
   bookingActionsFor,
@@ -43,6 +44,7 @@ export function ParentBookingDetailWeb() {
 
   const [cancelOpen, setCancelOpen] = useState(false);
   const [disputeOpen, setDisputeOpen] = useState(false);
+  const [adjustOpen, setAdjustOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -55,6 +57,20 @@ export function ParentBookingDetailWeb() {
       await reload();
     } catch (e) {
       setActionError(e instanceof ApiError ? e.message : 'Could not confirm the hours.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const rescindShorten = async () => {
+    if (!bookingId || busy) return;
+    setBusy(true);
+    setActionError(null);
+    try {
+      await rescindReduceRequest(bookingId);
+      await reload();
+    } catch (e) {
+      setActionError(e instanceof ApiError ? e.message : 'Could not withdraw the request.');
     } finally {
       setBusy(false);
     }
@@ -201,6 +217,46 @@ export function ParentBookingDetailWeb() {
               </Text>
             </Card>
 
+            {actions.hasPendingTimeChange && booking.pendingTimeChange ? (
+              <Card radius={radii.xl} padding={20} style={styles.pendingCard}>
+                <View style={styles.pendingHead}>
+                  <Icon name="clock" size={16} color={colors.ink} />
+                  <Text style={styles.pendingTitle}>Shorten request pending</Text>
+                </View>
+                <Text style={styles.pendingText}>
+                  You asked to change this to {booking.pendingTimeChange.proposedDurationHours}h. Waiting for the
+                  caregiver to approve — nothing changes until they do.
+                </Text>
+                <Pressable
+                  onPress={rescindShorten}
+                  disabled={busy}
+                  accessibilityRole="button"
+                  style={({ pressed }) => [styles.pendingBtn, { opacity: pressed || busy ? 0.85 : 1 }]}
+                >
+                  <Text style={styles.pendingBtnText}>{busy ? 'Withdrawing…' : 'Withdraw request'}</Text>
+                </Pressable>
+              </Card>
+            ) : null}
+
+            {actions.canAdjustTime ? (
+              <Card radius={radii.xl} padding={6} style={styles.sideCard}>
+                <Pressable
+                  onPress={() => setAdjustOpen(true)}
+                  accessibilityRole="button"
+                  style={({ pressed }) => [styles.manageRow, { opacity: pressed ? 0.85 : 1 }]}
+                >
+                  <View style={styles.manageIcon}>
+                    <Icon name="clock" size={17} color={colors.ink} />
+                  </View>
+                  <View style={styles.manageText}>
+                    <Text style={styles.manageLabel}>Adjust time</Text>
+                    <Text style={styles.manageSub}>Add hours now, or request a shorter session</Text>
+                  </View>
+                  <Icon name="chevron-right" size={16} color={colors.ink3} />
+                </Pressable>
+              </Card>
+            ) : null}
+
             {actions.canDispute ? (
               <Card radius={radii.xl} padding={6} style={styles.sideCard}>
                 <Pressable
@@ -247,6 +303,15 @@ export function ParentBookingDetailWeb() {
         onClose={() => setDisputeOpen(false)}
         onDisputed={() => {
           setDisputeOpen(false);
+          void reload();
+        }}
+      />
+      <AdjustTimeSheet
+        visible={adjustOpen}
+        booking={booking}
+        onClose={() => setAdjustOpen(false)}
+        onAdjusted={() => {
+          setAdjustOpen(false);
           void reload();
         }}
       />
@@ -300,6 +365,22 @@ const styles = StyleSheet.create({
   secHead: { fontFamily: fonts.bold, fontSize: 11.5, letterSpacing: 0.5, textTransform: 'uppercase', color: colors.ink2, marginBottom: 12 },
   payLabel: { fontFamily: fonts.semibold, fontSize: 15, color: colors.ink },
   payNote: { fontFamily: fonts.regular, fontSize: 13, lineHeight: 19, color: colors.ink2, marginTop: 4 },
+
+  pendingCard: { backgroundColor: colors.highlight, gap: 8, ...shadow.e1 },
+  pendingHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  pendingTitle: { fontFamily: fonts.semibold, fontSize: 14.5, color: colors.ink },
+  pendingText: { fontFamily: fonts.regular, fontSize: 13, lineHeight: 19, color: colors.ink2 },
+  pendingBtn: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: radii.pill,
+    borderWidth: 1.5,
+    borderColor: colors.ink,
+    backgroundColor: colors.surface,
+  },
+  pendingBtnText: { fontFamily: fonts.semibold, fontSize: 13.5, color: colors.ink },
 
   manageRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, paddingHorizontal: 12 },
   manageIcon: { width: 36, height: 36, borderRadius: radii.pill, backgroundColor: colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' },

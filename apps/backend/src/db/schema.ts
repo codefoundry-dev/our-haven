@@ -260,6 +260,16 @@ export interface BookingsTable {
   dispute_reason: string | null;
   dispute_details: string | null;
   payment_error: string | null;
+  // ── adjust booked time (OH-212; NULL on a provider consultation / no pending) ─
+  // Transient shorten proposal on an `accepted` Booking (ADR-0014 §A3): presence
+  // of `pending_time_change_requested_at` means a shorten is awaiting resolution.
+  // `pending_time_change_hours` is Postgres numeric → surfaced as a string by the driver.
+  pending_time_change_hours: ColumnType<string | null, string | number | null, string | number | null>;
+  pending_time_change_note: string | null;
+  pending_time_change_requested_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  // The Offer's per-child, per-hour surcharge, snapshotted at Award (NULL ⇒ 0) —
+  // lets adjust-time re-price the Booking for the new duration self-contained.
+  per_child_surcharge_cents: number | null;
   created_at: Generated<Date>;
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
 }
