@@ -4,13 +4,14 @@
  * destinations show (and in what order) per role while React Navigation owns
  * the actual screen state.
  */
-import { Platform, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon } from '@/components/Icon';
 import { WEB_WIDE_BREAKPOINT } from '@/lib/responsive';
 import { ROLE_TABS, type Role } from '@/lib/roles';
-import { colors, radii, shadow } from '@/theme/tokens';
+import { useShellBadges } from '@/lib/useShellBadges';
+import { colors, fonts, radii, shadow } from '@/theme/tokens';
 
 /**
  * Above this width on the web, the desktop side-rail (WebShell / ParentWebShell)
@@ -38,6 +39,7 @@ interface TabBarProps {
 export function BottomNav({ state, navigation, role }: TabBarProps) {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
+  const badges = useShellBadges();
   const items = ROLE_TABS[role];
   const activeName = state.routes[state.index]?.name;
 
@@ -54,6 +56,7 @@ export function BottomNav({ state, navigation, role }: TabBarProps) {
       {items.map((item) => {
         const route = state.routes.find((r) => r.name === item.id);
         const focused = activeName === item.id;
+        const count = badges[item.id];
 
         const onPress = () => {
           if (!route) return;
@@ -68,7 +71,7 @@ export function BottomNav({ state, navigation, role }: TabBarProps) {
             key={item.id}
             accessibilityRole="button"
             accessibilityState={focused ? { selected: true } : {}}
-            accessibilityLabel={item.label}
+            accessibilityLabel={count ? `${item.label}, ${count} new` : item.label}
             onPress={onPress}
             style={styles.item}
           >
@@ -82,6 +85,11 @@ export function BottomNav({ state, navigation, role }: TabBarProps) {
               ]}
             >
               <Icon name={item.icon} size={20} color={focused ? colors.inkInv : colors.ink} />
+              {count ? (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{count > 99 ? '99+' : count}</Text>
+                </View>
+              ) : null}
             </View>
             <View style={styles.dotSlot}>{focused ? <View style={styles.dot} /> : null}</View>
           </Pressable>
@@ -104,6 +112,21 @@ const styles = StyleSheet.create({
   },
   item: { alignItems: 'center' },
   pill: { width: 44, height: 44, borderRadius: radii.pill, alignItems: 'center', justifyContent: 'center' },
+  badge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 5,
+    borderRadius: radii.pill,
+    backgroundColor: colors.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: colors.surface,
+  },
+  badgeText: { fontFamily: fonts.bold, fontSize: 11, color: colors.inkInv, lineHeight: 14 },
   dotSlot: { height: 10, justifyContent: 'center' },
   dot: { width: 6, height: 6, borderRadius: radii.pill, backgroundColor: colors.highlight },
 });
