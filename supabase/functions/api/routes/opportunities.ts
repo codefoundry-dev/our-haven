@@ -1114,6 +1114,20 @@ export function registerOpportunityRoutes(app: OpenAPIHono<AppEnv>): void {
             .execute();
         }
 
+        // Notify the Parent a new Application landed on their Job
+        // (`application_received`, OH-223 — push + web_push + email, deep-links
+        // to the Job detail). Deduped per Application so a retry never double-sends.
+        await trx
+          .insertInto('notification_outbox')
+          .values({
+            recipient_uid: job.parent_uid,
+            event_type: 'application_received',
+            payload: { jobId: job.id },
+            dedupe_key: `application_received:${application.id}`,
+          })
+          .onConflict((oc) => oc.column('dedupe_key').doNothing())
+          .execute();
+
         return application;
       });
 

@@ -706,14 +706,18 @@ export interface NotificationWebPushSubscriptionsTable {
 }
 
 /**
- * Per-recipient notification channel preferences (OH-221). One row per `uid`
- * (the Supabase auth user); a missing row means "all channels on" — the
- * dispatcher never blocks a channel it has no explicit `false` for. Each column
- * is a best-effort opt-out the worker-tick notifications dispatcher honours for
- * `push` / `web_push` / `email`. SMS is deliberately included but is NEVER
- * suppressed for the mandatory-SMS event set (safety-critical, CONTEXT §
- * Notifications) — the flag only forward-declares an opt-out for any future
- * non-mandatory SMS. Service-role-only (read/written through the Edge).
+ * Per-recipient notification preferences. One row per `uid` (the Supabase auth
+ * user); two tickets share the table (their migrations are order-proof — see
+ * 20260716000001):
+ *   - OH-221: best-effort CHANNEL opt-outs (`push`/`web_push`/`email`) the
+ *     worker-tick dispatcher honours; a missing row means "all channels on".
+ *     `sms` is stored but NEVER suppresses the mandatory-SMS event set
+ *     (safety-critical, CONTEXT § Notifications) — it only forward-declares an
+ *     opt-out for any future non-mandatory SMS.
+ *   - OH-223: the MARKETING opt-in (`marketing_opt_in`, default false — opt-IN),
+ *     a separate consent from transactional; the transactional dispatcher's
+ *     matrix routing never reads it. `marketing_opt_in_at` stamps the consent.
+ * Service-role-only (RLS enabled; read/written through the Edge by `principal.uid`).
  */
 export interface NotificationPreferencesTable {
   uid: string;
@@ -721,6 +725,8 @@ export interface NotificationPreferencesTable {
   web_push: ColumnType<boolean, boolean | undefined, boolean>;
   email: ColumnType<boolean, boolean | undefined, boolean>;
   sms: ColumnType<boolean, boolean | undefined, boolean>;
+  marketing_opt_in: ColumnType<boolean, boolean | undefined, boolean>;
+  marketing_opt_in_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
   created_at: Generated<Date>;
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
 }
@@ -765,6 +771,10 @@ export interface JobsTable {
   service_state: string | null;
   service_postal_code: string | null;
   budget_hint_cents: number | null;
+  // The instant a posted Job stops being awardable (earliest scheduled slot start,
+  // stamped at publish; NULL for Direct-Message Jobs). Drives the OH-223 job-expiry
+  // sweeps (job_expiring_48h / job_expired_no_award).
+  expires_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
   created_at: Generated<Date>;
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
 }

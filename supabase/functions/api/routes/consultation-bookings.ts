@@ -27,7 +27,10 @@ import {
   deriveAccessDecision,
   type StripeSubscriptionStatus,
 } from '../../../../packages/domain/src/parent-subscription/index.ts';
-import { calculateCancellation } from '../../../../packages/domain/src/cancellation/index.ts';
+import {
+  calculateCancellation,
+  CANCELLATION_FREE_THRESHOLD_MS,
+} from '../../../../packages/domain/src/cancellation/index.ts';
 import { applyCancellationCharge } from '../services/booking-payments.ts';
 import {
   buildBookingRatingView,
@@ -272,6 +275,34 @@ const BOOKING_COLUMNS = [
   'updated_at',
 ] as const;
 
+/**
+ * Enqueue `cancellation_within_24h` (SMS-mandatory) to each distinct recipient —
+ * "inside the 24h window → both sides" (CONTEXT § Notifications). De-duped per
+ * (booking, recipient) so a retry never double-sends. Runs inside the caller's
+ * transaction (`db` is the trx handle).
+ */
+async function enqueueCancellationWithin24h(
+  db: Db,
+  bookingId: string,
+  recipients: Array<string | null>,
+): Promise<void> {
+  const seen = new Set<string>();
+  for (const uid of recipients) {
+    if (!uid || seen.has(uid)) continue;
+    seen.add(uid);
+    await db
+      .insertInto('notification_outbox')
+      .values({
+        recipient_uid: uid,
+        event_type: 'cancellation_within_24h',
+        payload: { bookingId },
+        dedupe_key: `cancellation_within_24h:${bookingId}:${uid}`,
+      })
+      .onConflict((oc) => oc.column('dedupe_key').doNothing())
+      .execute();
+  }
+}
+
 /* ── route definitions ──────────────────────────────────────────────────────── */
 
 const bookRoute = createRoute({
@@ -446,6 +477,20 @@ export function registerConsultationBookingRoutes(app: OpenAPIHono<AppEnv>): voi
           .returning(['id'])
           .executeTakeFirst();
         if (!held) throw new SlotUnavailableError();
+
+        // Notify the Provider a consultation slot was filled (`consultation_booked`,
+        // SMS-mandatory — the Provider's most time-sensitive event). Recipient is
+        // the Provider's auth uid; deduped per Booking so a retry never double-sends.
+        await trx
+          .insertInto('notification_outbox')
+          .values({
+            recipient_uid: provider.uid,
+            event_type: 'consultation_booked',
+            payload: { bookingId: inserted.id },
+            dedupe_key: `consultation_booked:${inserted.id}`,
+          })
+          .onConflict((oc) => oc.column('dedupe_key').doNothing())
+          .execute();
 
         return inserted.id;
       });
@@ -622,6 +667,13 @@ export function registerConsultationBookingRoutes(app: OpenAPIHono<AppEnv>): voi
       const next = result.next;
       const releasesSlot = result.sideEffects.some((s) => s.type === 'release-consultation-slot');
 
+      // A cancellation inside the 24h window notifies BOTH sides (SMS-mandatory).
+      // Consultations carry no fee math, so the window is timing-only here — the
+      // same 24h threshold the Caregiver cancellation calculator uses.
+      const startAt = slotStartAtUtc(toDateStr(row.scheduled_date), row.start_min);
+      const within24h = startAt.getTime() - now.getTime() < CANCELLATION_FREE_THRESHOLD_MS;
+      const providerOwnerUid = within24h ? (await loadProviderById(db, row.provider_id))?.uid ?? null : null;
+
       await db.transaction().execute(async (trx) => {
         await trx.updateTable('bookings').set({ state: next, updated_at: now }).where('id', '=', bookingId).execute();
         if (releasesSlot && row.slot_id) {
@@ -631,6 +683,9 @@ export function registerConsultationBookingRoutes(app: OpenAPIHono<AppEnv>): voi
             .where('id', '=', row.slot_id)
             .where('state', '=', 'held')
             .execute();
+        }
+        if (within24h) {
+          await enqueueCancellationWithin24h(trx, bookingId, [row.parent_uid, providerOwnerUid]);
         }
       });
 
@@ -654,17 +709,26 @@ export function registerConsultationBookingRoutes(app: OpenAPIHono<AppEnv>): voi
       cancellationAt: now,
       cancelledBy: 'parent',
     });
+    // Inside the 24h window iff the policy tier is not `free` (≥24h ⇒ free). Notify
+    // both sides (SMS-mandatory) — here the caregiver is the awarded provider row.
+    const within24h = cancellation.tier !== 'free';
+    const caregiverOwnerUid = within24h ? (await loadProviderById(db, row.provider_id))?.uid ?? null : null;
     const { patch } = await applyCancellationCharge(stripe, {
       bookingId: row.id,
       paymentIntentId: row.payment_intent_id,
       cancellation,
       commissionBp: row.commission_bp ?? 0,
     });
-    await db
-      .updateTable('bookings')
-      .set({ state: 'cancelled', cancelled_at: now, ...patch, updated_at: now })
-      .where('id', '=', row.id)
-      .execute();
+    await db.transaction().execute(async (trx) => {
+      await trx
+        .updateTable('bookings')
+        .set({ state: 'cancelled', cancelled_at: now, ...patch, updated_at: now })
+        .where('id', '=', row.id)
+        .execute();
+      if (within24h) {
+        await enqueueCancellationWithin24h(trx, row.id, [row.parent_uid, caregiverOwnerUid]);
+      }
+    });
 
     return c.json(
       {

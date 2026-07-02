@@ -22,6 +22,7 @@ import { AppBar } from '@/components/AppBar';
 import { Icon, type IconName } from '@/components/Icon';
 import { Screen } from '@/components/Screen';
 import { Toggle } from '@/components/ui/Toggle';
+import { useNotificationPrefs } from '@/lib/notificationPrefs';
 import { colors, fonts, radii, shadow } from '@/theme/tokens';
 
 /** The two channels a mobile recipient can opt out of (web-push is browser-only). */
@@ -33,6 +34,9 @@ export default function NotificationPreferencesScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // Marketing opt-in (OH-223) — a SEPARATE consent from the channel opt-outs
+  // above (CONTEXT § Notifications); its own store + route.
+  const marketing = useNotificationPrefs();
 
   useEffect(() => {
     let alive = true;
@@ -117,6 +121,21 @@ export default function NotificationPreferencesScreen() {
               <Text style={styles.alwaysText}>Always on</Text>
             </View>
           </View>
+
+          {/* Marketing is a separate opt-IN, distinct from the transactional
+              channels above (OH-223; CONTEXT § Notifications). */}
+          <ToggleRow
+            icon="sparkle"
+            title="Marketing emails"
+            sub="News, tips and offers — separate from booking alerts."
+            on={marketing.marketingOptIn}
+            onPress={() => {
+              if (!marketing.loading && !marketing.saving) {
+                marketing.setMarketingOptIn(!marketing.marketingOptIn);
+              }
+            }}
+          />
+          {marketing.error ? <Text style={styles.error}>{marketing.error}</Text> : null}
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
         </>

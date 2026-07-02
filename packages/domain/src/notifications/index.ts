@@ -47,7 +47,7 @@ export const NOTIFICATION_CHANNELS: readonly NotificationChannel[] = [
  */
 export type NotificationEventKind =
   // SMS-mandatory (push + web_push + email + sms) — CONTEXT § Notifications.
-  | 'booking_request_received' // → Caregiver (the single most critical notification)
+  | 'booking_request_received' // → Caregiver (direct Book-request received — the single most critical notification)
   | 'job_awarded' // → Caregiver (Application accepted, Booking being created)
   | 'consultation_booked' // → Provider (a consultation slot was filled)
   | 'cancellation_within_24h' // → both sides (inside the 24h window)
@@ -60,7 +60,22 @@ export type NotificationEventKind =
   | 'session_start_reminder' // → both sides (1h before the session)
   | 'booking_accepted' // → Parent (Caregiver accepted the booking request)
   | 'booking_declined' // → Parent (Caregiver declined the booking request)
-  | 'booking_expired'; // → Parent (booking request expired with no response)
+  | 'booking_expired' // → Parent (booking request expired with no response)
+  // Promoted operational Booking events (OH-223) — push + web_push + email, no SMS.
+  // Each is already enqueued by an OH-211/212/213 producer; OH-223 gives them copy
+  // + a deep-link so they actually deliver instead of falling through to logging.
+  | 'booking_session_started' // → Parent (Caregiver started the session)
+  | 'booking_hours_proposed' // → Parent (hours submitted — confirm in the review window)
+  | 'booking_time_change_approved' // → Parent (their shorten request was approved)
+  | 'booking_time_change_declined' // → Parent (their shorten request was declined)
+  | 'booking_time_extended' // → Caregiver (Parent bought more time)
+  | 'booking_time_reduce_requested' // → Caregiver (Parent requested a shorter session)
+  | 'booking_time_reduce_rescinded' // → Caregiver (Parent withdrew the shorten request)
+  | 'booking_disputed' // → Parent (a dispute was opened on the booking)
+  | 'booking_no_show' // → Caregiver (Parent reported a no-show)
+  | 'booking_payment_failed' // → Parent (a payment attempt failed)
+  | 'booking_authorization_action_required' // → Parent (3DS needed to authorize)
+  | 'booking_tip_received'; // → Caregiver (a settled tip landed — 100% pass-through, OH-215)
 
 export const NOTIFICATION_EVENT_KINDS: readonly NotificationEventKind[] = [
   'booking_request_received',
@@ -76,6 +91,18 @@ export const NOTIFICATION_EVENT_KINDS: readonly NotificationEventKind[] = [
   'booking_accepted',
   'booking_declined',
   'booking_expired',
+  'booking_session_started',
+  'booking_hours_proposed',
+  'booking_time_change_approved',
+  'booking_time_change_declined',
+  'booking_time_extended',
+  'booking_time_reduce_requested',
+  'booking_time_reduce_rescinded',
+  'booking_disputed',
+  'booking_no_show',
+  'booking_payment_failed',
+  'booking_authorization_action_required',
+  'booking_tip_received',
 ] as const;
 
 export function isNotificationEventKind(value: string): value is NotificationEventKind {
@@ -123,7 +150,10 @@ function entry(
  * surface, since a booked consultation materialises a Booking).
  */
 export const CHANNEL_MATRIX: Readonly<Record<NotificationEventKind, ChannelMatrixEntry>> = {
-  booking_request_received: entry(PUSH_EMAIL_SMS, 'schedule/booking/{bookingId}', ['bookingId']),
+  // Fired when a Parent SENDS a direct Book-request Offer to a Caregiver, so the
+  // deep link takes the Caregiver into the chat thread to Accept/Counter/Decline
+  // (the posted-Job "you were awarded" path is the separate `job_awarded` below).
+  booking_request_received: entry(PUSH_EMAIL_SMS, 'thread/{threadId}', ['threadId']),
   job_awarded: entry(PUSH_EMAIL_SMS, 'schedule/booking/{bookingId}', ['bookingId']),
   consultation_booked: entry(PUSH_EMAIL_SMS, 'schedule/booking/{bookingId}', ['bookingId']),
   cancellation_within_24h: entry(PUSH_EMAIL_SMS, 'booking/{bookingId}', ['bookingId']),
@@ -136,6 +166,21 @@ export const CHANNEL_MATRIX: Readonly<Record<NotificationEventKind, ChannelMatri
   booking_accepted: entry(PUSH_EMAIL, 'booking/{bookingId}', ['bookingId']),
   booking_declined: entry(PUSH_EMAIL, 'booking/{bookingId}', ['bookingId']),
   booking_expired: entry(PUSH_EMAIL, 'booking/{bookingId}', ['bookingId']),
+  // Promoted operational Booking events (OH-223). Parent-facing land on the shared
+  // booking detail (`booking/{bookingId}`); Caregiver-facing action items land on
+  // the Caregiver's Schedule tab (`schedule/booking/{bookingId}`).
+  booking_session_started: entry(PUSH_EMAIL, 'booking/{bookingId}', ['bookingId']),
+  booking_hours_proposed: entry(PUSH_EMAIL, 'booking/{bookingId}', ['bookingId']),
+  booking_time_change_approved: entry(PUSH_EMAIL, 'booking/{bookingId}', ['bookingId']),
+  booking_time_change_declined: entry(PUSH_EMAIL, 'booking/{bookingId}', ['bookingId']),
+  booking_time_extended: entry(PUSH_EMAIL, 'schedule/booking/{bookingId}', ['bookingId']),
+  booking_time_reduce_requested: entry(PUSH_EMAIL, 'schedule/booking/{bookingId}', ['bookingId']),
+  booking_time_reduce_rescinded: entry(PUSH_EMAIL, 'schedule/booking/{bookingId}', ['bookingId']),
+  booking_disputed: entry(PUSH_EMAIL, 'booking/{bookingId}', ['bookingId']),
+  booking_no_show: entry(PUSH_EMAIL, 'schedule/booking/{bookingId}', ['bookingId']),
+  booking_payment_failed: entry(PUSH_EMAIL, 'booking/{bookingId}', ['bookingId']),
+  booking_authorization_action_required: entry(PUSH_EMAIL, 'booking/{bookingId}', ['bookingId']),
+  booking_tip_received: entry(PUSH_EMAIL, 'schedule/booking/{bookingId}', ['bookingId']),
 };
 
 export function getChannelMatrixEntry(kind: NotificationEventKind): ChannelMatrixEntry {
@@ -319,6 +364,66 @@ function copyFor(kind: NotificationEventKind, payload: NotificationPayload): Cop
       return {
         title: 'Booking request expired',
         body: `Your booking request${actor ? ` to ${actor}` : ''} expired with no response.`,
+      };
+    case 'booking_session_started':
+      return {
+        title: 'Session started',
+        body: `${actor ?? 'Your caregiver'} started the session${forWhen}.`,
+      };
+    case 'booking_hours_proposed':
+      return {
+        title: 'Hours submitted for review',
+        body: `${actor ?? 'Your caregiver'} submitted their hours — review and confirm.`,
+      };
+    case 'booking_time_change_approved':
+      return {
+        title: 'Time change approved',
+        body: `${actor ?? 'Your caregiver'} approved your time change.`,
+      };
+    case 'booking_time_change_declined':
+      return {
+        title: 'Time change declined',
+        body: `${actor ?? 'Your caregiver'} declined your time change.`,
+      };
+    case 'booking_time_extended':
+      return {
+        title: 'Booking extended',
+        body: `${actor ?? 'The family'} added more time to your booking${forWhen}.`,
+      };
+    case 'booking_time_reduce_requested':
+      return {
+        title: 'Shorter session requested',
+        body: `${actor ?? 'The family'} asked to shorten your booking — review the request.`,
+      };
+    case 'booking_time_reduce_rescinded':
+      return {
+        title: 'Shorten request withdrawn',
+        body: `${actor ?? 'The family'} withdrew their request to shorten the booking.`,
+      };
+    case 'booking_disputed':
+      return {
+        title: 'Booking disputed',
+        body: `A dispute was opened on a booking${forWhen}.`,
+      };
+    case 'booking_no_show':
+      return {
+        title: 'No-show reported',
+        body: `${actor ?? 'The family'} reported a no-show for a booking${forWhen}.`,
+      };
+    case 'booking_payment_failed':
+      return {
+        title: 'Payment problem',
+        body: `A payment for your booking didn't go through — please check your payment method.`,
+      };
+    case 'booking_authorization_action_required':
+      return {
+        title: 'Action needed',
+        body: `Confirm your payment details to secure your booking.`,
+      };
+    case 'booking_tip_received':
+      return {
+        title: 'You received a tip',
+        body: `${actor ?? 'The family'} sent you a tip — 100% yours, no fees.`,
       };
   }
 }

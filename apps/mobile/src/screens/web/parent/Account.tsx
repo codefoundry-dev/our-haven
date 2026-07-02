@@ -14,6 +14,8 @@ import { WebPageHeader } from '@/components/web/ParentWebShell';
 import { SignOutConfirmModal, useSignOutFlow } from '@/components/web/SignOutConfirm';
 import { Icon, type IconName } from '@/components/Icon';
 import { Toggle } from '@/components/ui/Toggle';
+import { registerForPush } from '@/lib/notifications';
+import { useNotificationPrefs } from '@/lib/notificationPrefs';
 import { useParentGate } from '@/lib/paywallGate';
 import { colors, fonts, radii, shadow } from '@/theme/tokens';
 
@@ -40,6 +42,9 @@ export function ParentAccountWeb() {
   const [sms, setSms] = useState(true);
   const [email, setEmail] = useState(true);
   const [push, setPush] = useState(false);
+  // Marketing opt-in (OH-223) — the one PERSISTED preference here; a separate
+  // consent from transactional (CONTEXT § Notifications).
+  const prefs = useNotificationPrefs();
 
   return (
     <View>
@@ -95,8 +100,28 @@ export function ParentAccountWeb() {
             <View style={styles.divider} />
             <ToggleRow label="Email updates" sub="Booking confirmations, receipts, and weekly digests." on={email} onPress={() => setEmail((v) => !v)} />
             <View style={styles.divider} />
-            <ToggleRow label="Push notifications" sub="Real-time messages and Offer activity." on={push} onPress={() => setPush((v) => !v)} />
+            <ToggleRow
+              label="Push notifications"
+              sub="Real-time messages and Offer activity."
+              on={push}
+              onPress={() => {
+                // Turning ON from this click (a user gesture) runs the real
+                // browser permission prompt + web-push subscribe (OH-223).
+                if (!push) registerForPush({ interactive: true }).catch(() => {});
+                setPush((v) => !v);
+              }}
+            />
+            <View style={styles.divider} />
+            <ToggleRow
+              label="Marketing emails"
+              sub="News, tips and offers — separate from booking alerts."
+              on={prefs.marketingOptIn}
+              onPress={() => {
+                if (!prefs.loading && !prefs.saving) prefs.setMarketingOptIn(!prefs.marketingOptIn);
+              }}
+            />
           </View>
+          {prefs.error ? <Text style={styles.prefsError}>{prefs.error}</Text> : null}
 
           {/* Settings */}
           <Text style={styles.sectionLabel}>Settings</Text>
@@ -185,6 +210,8 @@ const styles = StyleSheet.create({
   linkIcon: { width: 40, height: 40, borderRadius: radii.pill, backgroundColor: colors.brandSoft, alignItems: 'center', justifyContent: 'center' },
   linkTitle: { fontFamily: fonts.semibold, fontSize: 15, color: colors.ink },
   linkSub: { fontFamily: fonts.regular, fontSize: 12.5, color: colors.ink2, marginTop: 2 },
+
+  prefsError: { fontFamily: fonts.regular, fontSize: 12, color: colors.danger, marginTop: 8 },
 
   signOut: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 52, borderRadius: radii.pill, borderWidth: 1.5, borderColor: colors.danger, marginTop: 28 },
   signOutText: { fontFamily: fonts.semibold, fontSize: 15, color: colors.danger },

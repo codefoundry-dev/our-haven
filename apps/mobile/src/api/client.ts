@@ -142,7 +142,7 @@ const get = <T>(path: string): Promise<T> => request<T>('GET', path);
 const post = <T>(path: string, body: unknown): Promise<T> => request<T>('POST', path, body);
 const patchJson = <T>(path: string, body: unknown): Promise<T> => request<T>('PATCH', path, body);
 const putJson = <T>(path: string, body: unknown): Promise<T> => request<T>('PUT', path, body);
-const del = <T>(path: string): Promise<T> => request<T>('DELETE', path);
+const del = <T>(path: string, body?: unknown): Promise<T> => request<T>('DELETE', path, body);
 
 /**
  * Set the permanent role on the authenticated user (M2.2 — POST /v1/auth/role-claim).
@@ -850,4 +850,49 @@ export function applyToJob(jobId: string, body: ApplyToJobBody): Promise<MyAppli
 /** Withdraw my Application on a Job (submitted / countered → withdrawn). */
 export function withdrawApplication(jobId: string): Promise<MyApplication> {
   return post<MyApplication>(`/v1/opportunities/${jobId}/withdraw`, undefined);
+}
+
+/* ── Notifications — device registration + marketing opt-in (OH-223) ──────────
+ * The client WRITE side of the OH-194 channel matrix: register/refresh this
+ * device's Expo push token (native) or VAPID web-push subscription (web) so the
+ * worker-tick dispatcher has somewhere to fan out, plus the marketing opt-in
+ * (kept separate from transactional — CONTEXT § Notifications). Distinct from
+ * OH-221's per-CHANNEL `NotificationPreferences` (/v1/me/notification-preferences),
+ * hence the `Marketing*` naming.
+ */
+export type PushTokenBody =
+  paths['/v1/notifications/push-tokens']['put']['requestBody']['content']['application/json'];
+export type WebPushBody =
+  paths['/v1/notifications/web-push']['put']['requestBody']['content']['application/json'];
+export type MarketingPreferences =
+  paths['/v1/notifications/preferences']['get']['responses'][200]['content']['application/json'];
+
+/** Register/refresh this device's Expo push token (upsert; re-points a shared device). */
+export function registerPushToken(body: PushTokenBody): Promise<{ ok: true }> {
+  return putJson<{ ok: true }>('/v1/notifications/push-tokens', body);
+}
+
+/** Drop this device's Expo push token on sign-out (scoped to token + caller). */
+export function deletePushToken(expoPushToken: string): Promise<{ ok: true }> {
+  return del<{ ok: true }>('/v1/notifications/push-tokens', { expoPushToken });
+}
+
+/** Register/refresh a VAPID web-push subscription (upsert on endpoint). */
+export function registerWebPushSubscription(body: WebPushBody): Promise<{ ok: true }> {
+  return putJson<{ ok: true }>('/v1/notifications/web-push', body);
+}
+
+/** Drop a web-push subscription (scoped to endpoint + caller). */
+export function deleteWebPushSubscription(endpoint: string): Promise<{ ok: true }> {
+  return del<{ ok: true }>('/v1/notifications/web-push', { endpoint });
+}
+
+/** The caller's marketing opt-in (default false; transactional is unaffected). */
+export function getMarketingPreferences(): Promise<MarketingPreferences> {
+  return get<MarketingPreferences>('/v1/notifications/preferences');
+}
+
+/** Set the marketing opt-in (separate consent from transactional notifications). */
+export function setMarketingPreferences(marketingOptIn: boolean): Promise<MarketingPreferences> {
+  return putJson<MarketingPreferences>('/v1/notifications/preferences', { marketingOptIn });
 }

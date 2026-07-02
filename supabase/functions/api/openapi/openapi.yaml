@@ -84,6 +84,12 @@ tags:
       exact street reveal-at-accept), and My Applications with the derived
       monthly quota. Filing/Counter/Withdraw + cap enforcement are the
       Application composer (OH-219)."
+  - name: notifications
+    description: "Notification registration + preferences (OH-223) — the client
+      WRITE side of the OH-194 channel matrix: register/refresh a device Expo
+      push token or VAPID web-push subscription (all roles), and the marketing
+      opt-in (kept separate from transactional notifications; the four
+      SMS-mandatory events are no-opt-out)."
   - name: ratings
     description: "Two-way Ratings (OH-214) — after a Booking completes, both parties
       rate 1–5 (+ optional text) within 14 days. Submissions are BLIND and
@@ -3767,6 +3773,91 @@ components:
           type: boolean
         sms:
           type: boolean
+    NotificationOk:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          enum:
+            - true
+      required:
+        - ok
+    NotificationError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
+    NotificationPushTokenRequest:
+      type: object
+      properties:
+        expoPushToken:
+          type: string
+          minLength: 1
+          maxLength: 255
+        platform:
+          type: string
+          enum:
+            - ios
+            - android
+            - web
+      required:
+        - expoPushToken
+        - platform
+    NotificationPushTokenDeleteRequest:
+      type: object
+      properties:
+        expoPushToken:
+          type: string
+          minLength: 1
+          maxLength: 255
+      required:
+        - expoPushToken
+    NotificationWebPushRequest:
+      type: object
+      properties:
+        endpoint:
+          type: string
+          maxLength: 2048
+          format: uri
+        p256dh:
+          type: string
+          minLength: 1
+          maxLength: 255
+        auth:
+          type: string
+          minLength: 1
+          maxLength: 255
+      required:
+        - endpoint
+        - p256dh
+        - auth
+    NotificationWebPushDeleteRequest:
+      type: object
+      properties:
+        endpoint:
+          type: string
+          maxLength: 2048
+          format: uri
+      required:
+        - endpoint
+    MarketingPreferences:
+      type: object
+      properties:
+        marketingOptIn:
+          type: boolean
+      required:
+        - marketingOptIn
+    MarketingPreferencesRequest:
+      type: object
+      properties:
+        marketingOptIn:
+          type: boolean
+      required:
+        - marketingOptIn
     Offer:
       type: object
       properties:
@@ -9121,6 +9212,182 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/NotificationPreferencesError"
+  /v1/notifications/push-tokens:
+    put:
+      tags:
+        - notifications
+      summary: Register or refresh this device's Expo push token
+      description: Upserts the caller's Expo push token (unique per device).
+        Re-registering a token already on file re-points it to the current user
+        + refreshes the platform — a shared device that switches account rebinds
+        cleanly. Idempotent.
+      security:
+        - supabaseAccessToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationPushTokenRequest"
+      responses:
+        "200":
+          description: Token registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationOk"
+        "400":
+          description: Invalid token / platform
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationError"
+    delete:
+      tags:
+        - notifications
+      summary: Drop this device's Expo push token on sign-out
+      description: Deletes the caller's push token (scoped to token AND uid, so a
+        caller only ever removes their own row). Idempotent — deleting an
+        unknown token is a no-op.
+      security:
+        - supabaseAccessToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationPushTokenDeleteRequest"
+      responses:
+        "200":
+          description: Token removed (or already absent)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationOk"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationError"
+  /v1/notifications/web-push:
+    put:
+      tags:
+        - notifications
+      summary: Register or refresh a VAPID web-push subscription
+      description: Upserts a browser web-push subscription (unique per endpoint).
+        Re-points the endpoint to the current user on conflict. v1 delivery is a
+        best-effort empty 'tickle'.
+      security:
+        - supabaseAccessToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationWebPushRequest"
+      responses:
+        "200":
+          description: Subscription registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationOk"
+        "400":
+          description: Invalid subscription
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationError"
+    delete:
+      tags:
+        - notifications
+      summary: Drop a VAPID web-push subscription
+      description: Deletes a web-push subscription (scoped to endpoint AND uid). Idempotent.
+      security:
+        - supabaseAccessToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationWebPushDeleteRequest"
+      responses:
+        "200":
+          description: Subscription removed (or already absent)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationOk"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationError"
+  /v1/notifications/preferences:
+    get:
+      tags:
+        - notifications
+      summary: Read the marketing opt-in preference
+      description: Returns the caller's marketing opt-in (default false when never
+        set). Transactional notifications are unaffected by this — they always
+        send per the channel matrix.
+      security:
+        - supabaseAccessToken: []
+      responses:
+        "200":
+          description: The preferences
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketingPreferences"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationError"
+    put:
+      tags:
+        - notifications
+      summary: Set the marketing opt-in preference
+      description: Sets the caller's marketing opt-in (separate from transactional
+        notifications; CONTEXT § Notifications). Stamps the moment the value was
+        set for the consent audit trail. Idempotent.
+      security:
+        - supabaseAccessToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarketingPreferencesRequest"
+      responses:
+        "200":
+          description: The updated preferences
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketingPreferences"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationError"
   /v1/threads/{threadId}/offers:
     post:
       tags:

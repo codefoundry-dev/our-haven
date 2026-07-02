@@ -237,6 +237,42 @@ function toIso(value: Date | string): string {
 }
 
 /** The Parent owns the Job, so the full service address is always revealed here. */
+/** Interpret a slot's wall-clock (date + minute) as a UTC instant — the same
+ *  tz-agnostic convention Bookings use (OH-203). */
+function slotStartUtc(date: string, startMin: number): Date {
+  const [y, m, d] = date.split('-').map(Number);
+  return new Date(Date.UTC(y ?? 1970, (m ?? 1) - 1, d ?? 1, 0, startMin, 0, 0));
+}
+
+/**
+ * The instant a posted Job stops being awardable — its EARLIEST scheduled service
+ * start (OH-223 job-expiry; drives job_expiring_48h / job_expired_no_award). A
+ * one-off (incl. a multi-day one-off already fanned to one Job per date): the slot
+ * start. Recurring: the first occurrence on/after the rule's startDate whose
+ * weekday matches, bounded by endDate. `null` when neither yields a date (the Job
+ * then carries no expiry timer).
+ */
+function jobExpiresAt(post: {
+  slots?: readonly { date: string; startMin: number; endMin: number }[] | null;
+  recurrence?: { startDate: string; endDate: string; weekdays: readonly number[]; startMin: number } | null;
+}): Date | null {
+  const slots = post.slots ?? [];
+  if (slots.length > 0) {
+    return slots
+      .map((s) => slotStartUtc(s.date, s.startMin))
+      .reduce((a, b) => (a.getTime() <= b.getTime() ? a : b));
+  }
+  const r = post.recurrence;
+  if (!r) return null;
+  const endMs = Date.parse(`${r.endDate}T00:00:00.000Z`);
+  for (let t = Date.parse(`${r.startDate}T00:00:00.000Z`); t <= endMs; t += 86_400_000) {
+    if (r.weekdays.includes(new Date(t).getUTCDay())) {
+      return slotStartUtc(new Date(t).toISOString().slice(0, 10), r.startMin);
+    }
+  }
+  return null;
+}
+
 function toJobDTO(row: JobRow): z.infer<typeof JobSchema> {
   const hasAddress =
     row.service_address_line1 !== null ||
@@ -537,6 +573,8 @@ export function registerJobRoutes(app: OpenAPIHono<AppEnv>): void {
       service_state: post.serviceAddress.state ?? null,
       service_postal_code: post.serviceAddress.postalCode,
       budget_hint_cents: post.budgetHintCents,
+      // The awardable-until instant (OH-223) — earliest scheduled service start.
+      expires_at: jobExpiresAt(post),
       updated_at: now,
     }));
 

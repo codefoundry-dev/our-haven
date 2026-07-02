@@ -50,6 +50,13 @@
         {
           "enableGooglePay": false
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#208AEF",
+          "defaultChannel": "default"
+        }
       ]
     ],
     "experiments": {

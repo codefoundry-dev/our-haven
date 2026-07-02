@@ -7,15 +7,52 @@ import {
   dueAutoConfirmQuery,
   dueAuthorizeQuery,
   dueConsultationsQuery,
+  dueExpiredJobsQuery,
+  dueJobWarningsQuery,
+  dueOffersQuery,
+  dueRemindersQuery,
   dueRequestExpiryQuery,
   dueScreeningsQuery,
   dueTipSettleQuery,
+  jobExpirySweep,
+  jobExpiryWarnSweep,
+  offerExpirySweep,
   screeningDisposalSweep,
   sessionAutoConfirmSweep,
+  sessionStartReminderSweep,
   SWEEPS,
   tipSettleSweep,
 } from './sweeps.ts';
 import { compileOnlyDb } from './_test/env.ts';
+
+/** A flat db fake (no transaction) for the reminder / job-warn sweeps that read +
+ *  enqueue directly on `db`. The query chain resolves to `dueRows`; inserts are captured. */
+function makeFlatDb(dueRows: Record<string, unknown>[]) {
+  const inserts: Array<{ values: Record<string, unknown> }> = [];
+  const chain: Record<string, unknown> = {};
+  Object.assign(chain, {
+    innerJoin: () => chain,
+    select: () => chain,
+    where: () => chain,
+    orderBy: () => chain,
+    limit: () => chain,
+    execute: async () => dueRows,
+  });
+  const db = {
+    selectFrom: () => chain,
+    insertInto: () => ({
+      values: (v: Record<string, unknown>) => ({
+        onConflict: () => ({
+          execute: async () => {
+            inserts.push({ values: v });
+            return [];
+          },
+        }),
+      }),
+    }),
+  } as unknown as Parameters<typeof sessionStartReminderSweep.run>[0];
+  return { db, inserts };
+}
 
 /** A table-routed trx fake: select* resolve to `rows[table]`, writes are captured. */
 function makeTrx(rows: Record<string, Record<string, unknown>[]> = {}) {
@@ -76,7 +113,7 @@ function makeStripe(over: Record<string, unknown> = {}) {
 const NOW = new Date('2026-07-12T12:00:00Z');
 
 describe('SWEEPS registry', () => {
-  it('includes screening + consultation + the booking-payment sweeps + tip settle in order', () => {
+  it('includes screening + consultation + booking-payment + tip settle + the OH-223 notification sweeps in order', () => {
     expect(SWEEPS.map((s) => s.name)).toEqual([
       'screening_disposal',
       'consultation_auto_complete',
@@ -84,6 +121,10 @@ describe('SWEEPS registry', () => {
       'booking_request_expiry',
       'session_auto_confirm',
       'tip_settle',
+      'session_start_reminder',
+      'offer_expiry',
+      'job_expiry_warn',
+      'job_expiry',
     ]);
   });
 });
@@ -237,13 +278,117 @@ describe('bookingAuthorizeDueSweep', () => {
 });
 
 describe('bookingRequestExpirySweep', () => {
-  it('expires a stale requested Booking and releases the hold', async () => {
-    const { db, updates } = makeTrx({
-      bookings: [{ id: 'b1', state: 'requested', origin: 'posted-job', payment_intent_id: 'pi_1', payment_status: 'authorized' }],
+  it('expires a stale requested Booking, releases the hold, and notifies the Parent', async () => {
+    const { db, updates, inserts } = makeTrx({
+      bookings: [{ id: 'b1', state: 'requested', parent_uid: 'par-1', origin: 'posted-job', payment_intent_id: 'pi_1', payment_status: 'authorized' }],
     });
     const res = await bookingRequestExpirySweep.run(db, { now: NOW, limit: 100, stripe: makeStripe() });
     expect(res).toEqual({ name: 'booking_request_expiry', processed: 1 });
     expect(updates[0]!.set).toMatchObject({ state: 'expired', payment_status: 'canceled' });
+    expect(inserts.find((i) => i.table === 'notification_outbox')?.values).toMatchObject({
+      recipient_uid: 'par-1',
+      event_type: 'booking_expired',
+      payload: { bookingId: 'b1' },
+    });
+  });
+});
+
+// ── OH-223 notification-producing sweeps ───────────────────────────────────────
+describe('OH-223 due queries', () => {
+  it('dueRemindersQuery joins providers, filters accepted, and is NOT a locking claim', () => {
+    const end = new Date(NOW.getTime() + 60 * 60 * 1000);
+    const { sql } = dueRemindersQuery(compileOnlyDb(), NOW, end, 1000).compile();
+    const lower = sql.toLowerCase();
+    expect(lower).toContain('inner join');
+    expect(lower).toContain("time zone 'utc'");
+    expect(lower).toContain('"state" =');
+    // A reminder is read-only — no row is claimed/locked (the outbox dedupe guards it).
+    expect(lower).not.toContain('for update');
+  });
+  it('dueOffersQuery is a SKIP LOCKED claim on pending offers by valid_until', () => {
+    const { sql } = dueOffersQuery(compileOnlyDb(), NOW, 1000).compile();
+    const lower = sql.toLowerCase();
+    expect(lower).toContain('for update');
+    expect(lower).toContain('skip locked');
+    expect(lower).toContain('"valid_until" <=');
+    expect(lower).toContain('"status" =');
+  });
+  it('dueJobWarningsQuery bounds by expires_at and excludes Jobs with Applications', () => {
+    const end = new Date(NOW.getTime() + 48 * 60 * 60 * 1000);
+    const { sql } = dueJobWarningsQuery(compileOnlyDb(), NOW, end, 1000).compile();
+    const lower = sql.toLowerCase();
+    expect(lower).toContain('"expires_at" <=');
+    expect(lower).toContain('not exists');
+    expect(lower).toContain('applications');
+  });
+  it('dueExpiredJobsQuery is a SKIP LOCKED claim on open Jobs past expires_at', () => {
+    const { sql } = dueExpiredJobsQuery(compileOnlyDb(), NOW, 1000).compile();
+    const lower = sql.toLowerCase();
+    expect(lower).toContain('for update');
+    expect(lower).toContain('skip locked');
+    expect(lower).toContain('"expires_at" <=');
+  });
+});
+
+describe('sessionStartReminderSweep', () => {
+  it('reminds BOTH sides of an imminent session (parent + supply)', async () => {
+    const { db, inserts } = makeFlatDb([{ id: 'b1', parent_uid: 'par-1', provider_uid: 'sup-1' }]);
+    const res = await sessionStartReminderSweep.run(db, { now: NOW, limit: 100 });
+    expect(res).toEqual({ name: 'session_start_reminder', processed: 1 });
+    const recips = inserts.map((i) => i.values.recipient_uid).sort();
+    expect(recips).toEqual(['par-1', 'sup-1']);
+    expect(inserts.every((i) => i.values.event_type === 'session_start_reminder')).toBe(true);
+    expect(inserts.every((i) => (i.values.payload as { bookingId: string }).bookingId === 'b1')).toBe(true);
+  });
+
+  it('processes nothing when no session is imminent', async () => {
+    const { db, inserts } = makeFlatDb([]);
+    const res = await sessionStartReminderSweep.run(db, { now: NOW, limit: 100 });
+    expect(res).toEqual({ name: 'session_start_reminder', processed: 0 });
+    expect(inserts).toHaveLength(0);
+  });
+});
+
+describe('offerExpirySweep', () => {
+  it('expires pending Offers and notifies the sender', async () => {
+    const { db, updates, inserts } = makeTrx({
+      offers: [{ id: 'o1', thread_id: 't1', sender_uid: 'snd-1' }],
+    });
+    const res = await offerExpirySweep.run(db, { now: NOW, limit: 100 });
+    expect(res).toEqual({ name: 'offer_expiry', processed: 1 });
+    expect(updates.find((u) => u.table === 'offers')?.set).toMatchObject({ status: 'expired' });
+    expect(inserts.find((i) => i.table === 'notification_outbox')?.values).toMatchObject({
+      recipient_uid: 'snd-1',
+      event_type: 'offer_expired',
+      payload: { threadId: 't1' },
+    });
+  });
+});
+
+describe('jobExpiryWarnSweep', () => {
+  it('warns the Parent about an application-less Job nearing expiry', async () => {
+    const { db, inserts } = makeFlatDb([{ id: 'j1', parent_uid: 'par-1' }]);
+    const res = await jobExpiryWarnSweep.run(db, { now: NOW, limit: 100 });
+    expect(res).toEqual({ name: 'job_expiry_warn', processed: 1 });
+    expect(inserts[0]!.values).toMatchObject({
+      recipient_uid: 'par-1',
+      event_type: 'job_expiring_48h',
+      payload: { jobId: 'j1' },
+    });
+  });
+});
+
+describe('jobExpirySweep', () => {
+  it('expires an unawarded open Job and notifies the Parent', async () => {
+    const { db, updates, inserts } = makeTrx({ jobs: [{ id: 'j1', parent_uid: 'par-1' }] });
+    const res = await jobExpirySweep.run(db, { now: NOW, limit: 100 });
+    expect(res).toEqual({ name: 'job_expiry', processed: 1 });
+    expect(updates.find((u) => u.table === 'jobs')?.set).toMatchObject({ state: 'expired' });
+    expect(inserts.find((i) => i.table === 'notification_outbox')?.values).toMatchObject({
+      recipient_uid: 'par-1',
+      event_type: 'job_expired_no_award',
+      payload: { jobId: 'j1' },
+    });
   });
 });
 

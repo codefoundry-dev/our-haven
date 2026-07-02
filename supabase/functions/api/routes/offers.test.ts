@@ -282,6 +282,24 @@ describe('POST /v1/threads/{threadId}/offers (compose)', () => {
     expect(captures.updates.find((u) => u.table === 'message_threads')?.set).toMatchObject({
       last_message_redacted: false,
     });
+    // The Caregiver is notified a direct Book-request arrived (SMS-mandatory), deep-
+    // linking into the thread; recipient is the thread's supply side.
+    const notif = captures.inserts.find(
+      (i) => i.table === 'notification_outbox' && i.values.event_type === 'booking_request_received',
+    );
+    expect(notif?.values).toMatchObject({ recipient_uid: 'uid-cg', payload: { threadId: TID } });
+  });
+
+  it('does NOT notify booking_request_received on a Caregiver-sent Offer', async () => {
+    const { db, captures } = makeDb(composable());
+    const app = buildApp(makeDeps(db));
+    const res = await app.request(OFFERS_PATH, post(await caregiverToken(), composeBody()));
+    expect(res.status).toBe(201);
+    expect(
+      captures.inserts.some(
+        (i) => i.table === 'notification_outbox' && i.values.event_type === 'booking_request_received',
+      ),
+    ).toBe(false);
   });
 
   it('201 bakes the per-child surcharge into the total for 2 children', async () => {
@@ -773,6 +791,13 @@ describe('POST /v1/offers/{id}/counter', () => {
       proposed_rate_cents: 4500,
       sender: 'caregiver',
       child_count: 1,
+    });
+    // The counter recipient (the other party — here the Parent) is notified.
+    const notif = captures.inserts.find((i) => i.table === 'notification_outbox');
+    expect(notif?.values).toMatchObject({
+      recipient_uid: 'uid-par',
+      event_type: 'counter_offer_received',
+      payload: { threadId: TID },
     });
   });
 
