@@ -275,6 +275,15 @@ export interface BookingsTable {
   per_child_surcharge_cents: number | null;
   // Stamp set when a no-show cancels this Booking (OH-213). NULL otherwise.
   no_show_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  // ── post-session Tip (OH-215; ADR-0018 — NULL on a provider consultation /
+  // untipped Booking). A commission-exempt gratuity on a completed Caregiver
+  // Booking: its own zero-application-fee destination charge, mutable until the
+  // worker-tick captures it at `tip_settle_at` (then immutable).
+  tip_cents: number | null;
+  tip_payment_intent_id: string | null;
+  tip_status: 'requires_action' | 'authorized' | 'captured' | 'failed' | null;
+  tip_settle_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  tip_captured_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
   created_at: Generated<Date>;
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
 }

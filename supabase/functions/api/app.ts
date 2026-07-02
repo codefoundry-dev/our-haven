@@ -8,6 +8,7 @@ import { registerAdminDisputeRoutes } from './routes/admin/disputes.ts';
 import { registerAdminStripeTaxRoutes } from './routes/admin/stripe-tax.ts';
 import { registerAuthRoutes } from './routes/auth.ts';
 import { registerBookingRoutes } from './routes/bookings.ts';
+import { registerBookingTipRoutes } from './routes/booking-tips.ts';
 import { registerCaregiverBadgeRoutes } from './routes/caregiver-badges.ts';
 import { registerCaregiverBookingRoutes } from './routes/caregiver-bookings.ts';
 import { registerCaregiverConnectRoutes } from './routes/caregiver-connect.ts';
@@ -198,6 +199,7 @@ export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerSupplyProfileRoutes(v1);
   registerConsultationBookingRoutes(v1);
   registerBookingRoutes(v1);
+  registerBookingTipRoutes(v1);
   registerCaregiverBookingRoutes(v1);
   registerRatingRoutes(v1);
   registerMessagingRoutes(v1);
