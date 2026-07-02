@@ -79,6 +79,13 @@ tags:
       exact street reveal-at-accept), and My Applications with the derived
       monthly quota. Filing/Counter/Withdraw + cap enforcement are the
       Application composer (OH-219)."
+  - name: ratings
+    description: "Two-way Ratings (OH-214) — after a Booking completes, both parties
+      rate 1–5 (+ optional text) within 14 days. Submissions are BLIND and
+      revealed mutually (both submit or the window closes). Display is
+      asymmetric: Parent→supply ratings are public on the profile (with text);
+      supply→Parent ratings surface to supply only as an aggregate (stars +
+      count)."
   - name: verification
     description: Supply verification — state + email/phone/ID-doc facts (OH-184)
   - name: screening
@@ -2683,6 +2690,20 @@ components:
         autoCompleteAt:
           type: string
           nullable: true
+        rating:
+          $ref: "#/components/schemas/RatingStatus"
+        counterpartyRating:
+          type: object
+          nullable: true
+          properties:
+            averageStars:
+              type: number
+              nullable: true
+            count:
+              type: integer
+          required:
+            - averageStars
+            - count
       required:
         - id
         - kind
@@ -2696,6 +2717,52 @@ components:
         - endMin
         - rateCents
         - autoCompleteAt
+        - rating
+        - counterpartyRating
+    RatingStatus:
+      type: object
+      properties:
+        canRate:
+          type: boolean
+        windowClosesAt:
+          type: string
+          nullable: true
+        mine:
+          type: object
+          nullable: true
+          properties:
+            stars:
+              type: integer
+              minimum: 1
+              maximum: 5
+            text:
+              type: string
+              nullable: true
+          required:
+            - stars
+            - text
+        revealed:
+          type: boolean
+        counterparty:
+          type: object
+          nullable: true
+          properties:
+            stars:
+              type: integer
+              minimum: 1
+              maximum: 5
+            text:
+              type: string
+              nullable: true
+          required:
+            - stars
+            - text
+      required:
+        - canRate
+        - windowClosesAt
+        - mine
+        - revealed
+        - counterparty
     ConsultationBookingError:
       type: object
       properties:
@@ -2861,6 +2928,8 @@ components:
             - null
         pendingTimeChange:
           $ref: "#/components/schemas/BookingPendingTimeChange"
+        rating:
+          $ref: "#/components/schemas/RatingStatus"
       required:
         - id
         - kind
@@ -2887,6 +2956,7 @@ components:
         - cancellationTier
         - disputeReason
         - pendingTimeChange
+        - rating
     BookingServiceAddress:
       type: object
       nullable: true
@@ -3222,6 +3292,19 @@ components:
           nullable: true
         pendingTimeChange:
           $ref: "#/components/schemas/CaregiverBookingPendingTimeChange"
+        rating:
+          $ref: "#/components/schemas/RatingStatus"
+        parentRating:
+          type: object
+          properties:
+            averageStars:
+              type: number
+              nullable: true
+            count:
+              type: integer
+          required:
+            - averageStars
+            - count
       required:
         - id
         - state
@@ -3244,6 +3327,8 @@ components:
         - requestExpiresAt
         - confirmDeadlineAt
         - pendingTimeChange
+        - rating
+        - parentRating
     CaregiverBookingAddress:
       type: object
       nullable: true
@@ -3351,6 +3436,27 @@ components:
           maxLength: 1000
       required:
         - hours
+    RatingError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
+    SubmitRatingRequest:
+      type: object
+      properties:
+        stars:
+          type: integer
+          minimum: 1
+          maximum: 5
+        text:
+          type: string
+          maxLength: 1000
+      required:
+        - stars
     MessageThreadSummary:
       type: object
       properties:
@@ -8340,6 +8446,71 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CaregiverBookingError"
+  /v1/bookings/{bookingId}/rating:
+    post:
+      tags:
+        - ratings
+      summary: Submit this side of a two-way Booking rating — OH-214
+      description: "Submits the caller's 1–5 star rating (+ optional text) for a
+        `completed` Booking. Direction is derived from the caller: a Parent
+        rates the supply member (a PUBLIC profile rating); a Caregiver/Provider
+        rates the Parent (a supply-internal, aggregate-only rating). Ratings are
+        BLIND — the mutual reveal happens once both sides submit or the 14-day
+        window closes. 409 when the Booking isn't completed, the window has
+        closed, or the caller already rated their side; 404 when the Booking
+        isn't the caller's."
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: bookingId
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitRatingRequest"
+      responses:
+        "200":
+          description: Rating submitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RatingStatus"
+        "400":
+          description: Invalid rating
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RatingError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RatingError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RatingError"
+        "404":
+          description: Booking not found (or not the caller's)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RatingError"
+        "409":
+          description: Not ratable (not completed / window closed / already rated)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RatingError"
   /v1/threads:
     post:
       tags:

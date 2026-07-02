@@ -22,6 +22,7 @@ import { registerOfferRoutes } from './routes/offers.ts';
 import { registerOpportunityRoutes } from './routes/opportunities.ts';
 import { registerVideoCallRoutes } from './routes/video-calls.ts';
 import { registerParentProfileRoutes } from './routes/parent-profile.ts';
+import { registerRatingRoutes } from './routes/ratings.ts';
 import { registerParentSubscriptionRoutes } from './routes/parent-subscription.ts';
 import { registerProviderCredentialsRoutes } from './routes/provider-credentials.ts';
 import { registerProviderProfileRoutes } from './routes/provider-profile.ts';
@@ -110,6 +111,11 @@ export const openApiInfo = {
       description:
         'Caregiver Opportunities (OH-218) — the Caregiver-facing READ side of the Posted-Job chain: the open-Jobs feed across the categories a Caregiver offers (ranked recency + distance, one-off/recurring + category filters), one Job\'s detail (disclosed child bundle + approximate distance, exact street reveal-at-accept), and My Applications with the derived monthly quota. Filing/Counter/Withdraw + cap enforcement are the Application composer (OH-219).',
     },
+    {
+      name: 'ratings',
+      description:
+        'Two-way Ratings (OH-214) — after a Booking completes, both parties rate 1–5 (+ optional text) within 14 days. Submissions are BLIND and revealed mutually (both submit or the window closes). Display is asymmetric: Parent→supply ratings are public on the profile (with text); supply→Parent ratings surface to supply only as an aggregate (stars + count).',
+    },
     { name: 'verification', description: 'Supply verification — state + email/phone/ID-doc facts (OH-184)' },
     {
       name: 'screening',
@@ -193,6 +199,7 @@ export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerConsultationBookingRoutes(v1);
   registerBookingRoutes(v1);
   registerCaregiverBookingRoutes(v1);
+  registerRatingRoutes(v1);
   registerMessagingRoutes(v1);
   registerOfferRoutes(v1);
   registerVideoCallRoutes(v1);

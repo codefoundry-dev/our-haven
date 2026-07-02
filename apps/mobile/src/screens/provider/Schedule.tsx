@@ -23,6 +23,8 @@ import { Screen } from '@/components/Screen';
 import { Card } from '@/components/ui/Card';
 import { SectionHeader } from '@/components/ui/SectionHeader';
 import { StatusPill } from '@/components/ui/StatusPill';
+import { RatingValue } from '@/components/ui/StarRating';
+import { RatingSheet } from '@/components/RatingSheet';
 import { useBookings } from '@/lib/useBookings';
 import { useProviderSubscription } from '@/lib/useProviderSubscription';
 import { minutesToClock, slotTimeRange } from '@/lib/consultation';
@@ -71,6 +73,7 @@ export function ProviderSchedule() {
 
   const days = useMemo(() => buildWeek(7), []);
   const [selectedIso, setSelectedIso] = useState(() => days[0]?.iso ?? '');
+  const [ratingFor, setRatingFor] = useState<BookingSummary | null>(null);
   const selected = days.find((d) => d.iso === selectedIso) ?? days[0];
 
   const now = useMemo(() => new Date(), []);
@@ -165,10 +168,28 @@ export function ProviderSchedule() {
       ) : (
         <View style={styles.list}>
           {dayBookings.map((b) => (
-            <SessionCard key={b.id} booking={b} live={isLive(b)} onJoin={() => router.push('/consult')} />
+            <SessionCard
+              key={b.id}
+              booking={b}
+              live={isLive(b)}
+              onJoin={() => router.push('/consult')}
+              onRate={() => setRatingFor(b)}
+            />
           ))}
         </View>
       )}
+
+      <RatingSheet
+        visible={ratingFor != null}
+        bookingId={ratingFor?.id ?? null}
+        subjectName={ratingFor?.counterpartyName ?? null}
+        target="parent"
+        onClose={() => setRatingFor(null)}
+        onRated={() => {
+          setRatingFor(null);
+          refetch();
+        }}
+      />
     </Screen>
   );
 }
@@ -206,10 +227,21 @@ function GoLiveCard({ router }: { router: ReturnType<typeof useRouter> }) {
   );
 }
 
-function SessionCard({ booking, live, onJoin }: { booking: BookingSummary; live: boolean; onJoin: () => void }) {
+function SessionCard({
+  booking,
+  live,
+  onJoin,
+  onRate,
+}: {
+  booking: BookingSummary;
+  live: boolean;
+  onJoin: () => void;
+  onRate: () => void;
+}) {
   const label = minutesToClock(booking.startMin);
   const [time, mer] = label.split(' ');
   const name = booking.counterpartyName ?? 'Family';
+  const { rating, counterpartyRating } = booking;
 
   return (
     <Card padding={14} radius={radii.lg} style={styles.card}>
@@ -225,15 +257,27 @@ function SessionCard({ booking, live, onJoin }: { booking: BookingSummary; live:
             <Text style={styles.liveText}>Live now</Text>
           </View>
         ) : null}
-        <Text style={styles.cardTitle} numberOfLines={1}>
-          {name}
-        </Text>
+        <View style={styles.titleRow}>
+          <Text style={styles.cardTitle} numberOfLines={1}>
+            {name}
+          </Text>
+          {/* The family's standing (aggregate, no text — the asymmetric parent projection). */}
+          {counterpartyRating && counterpartyRating.count > 0 && counterpartyRating.averageStars != null ? (
+            <RatingValue value={counterpartyRating.averageStars} count={counterpartyRating.count} size={13} />
+          ) : null}
+        </View>
         <Text style={styles.cardSub} numberOfLines={1}>
           Consultation · {slotTimeRange(booking)}
         </Text>
         <View style={styles.pillRow}>
           <StatusPill state={booking.state} />
         </View>
+        {rating.mine ? (
+          <View style={styles.ratedRow}>
+            <Text style={styles.ratedText}>You rated</Text>
+            <RatingValue value={rating.mine.stars} size={13} />
+          </View>
+        ) : null}
       </View>
 
       {live ? (
@@ -243,6 +287,15 @@ function SessionCard({ booking, live, onJoin }: { booking: BookingSummary; live:
           style={({ pressed }) => [styles.joinBtn, { opacity: pressed ? 0.85 : 1 }]}
         >
           <Text style={styles.joinText}>Join</Text>
+        </Pressable>
+      ) : rating.canRate ? (
+        <Pressable
+          onPress={onRate}
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.joinBtn, styles.rateBtn, { opacity: pressed ? 0.85 : 1 }]}
+        >
+          <Icon name="star" size={14} color={colors.inkInv} />
+          <Text style={styles.joinText}>Rate</Text>
         </Pressable>
       ) : null}
     </Card>
@@ -302,9 +355,12 @@ const styles = StyleSheet.create({
   liveRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
   liveDot: { width: 7, height: 7, borderRadius: radii.pill, backgroundColor: colors.info },
   liveText: { fontFamily: fonts.bold, fontSize: 10, letterSpacing: 0.5, textTransform: 'uppercase', color: colors.info },
-  cardTitle: { fontFamily: fonts.semibold, fontSize: 14, color: colors.ink },
+  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  cardTitle: { flex: 1, fontFamily: fonts.semibold, fontSize: 14, color: colors.ink },
   cardSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.ink2, marginTop: 2 },
   pillRow: { flexDirection: 'row', marginTop: 8 },
+  ratedRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
+  ratedText: { fontFamily: fonts.semibold, fontSize: 12, color: colors.ink2 },
   joinBtn: {
     height: 36,
     paddingHorizontal: 16,
@@ -313,6 +369,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  rateBtn: { flexDirection: 'row', gap: 6 },
   joinText: { fontFamily: fonts.semibold, fontSize: 13, color: colors.inkInv },
 
   state: { alignItems: 'center', gap: 12, paddingVertical: 48 },

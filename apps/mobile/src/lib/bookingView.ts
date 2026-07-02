@@ -49,6 +49,9 @@ export type BookingActions = {
   hasPendingTimeChange: boolean;
   /** Report a no-show — an `accepted` Booking once its start time has passed (OH-213). */
   canReportNoShow: boolean;
+  /** Rate the counterparty — a `completed` Booking still inside its 14-day window
+   *  that the caller hasn't yet rated (OH-214; the server-computed gate). */
+  canRate: boolean;
 };
 
 const ACTIVE = new Set(['requested', 'accepted', 'in-progress', 'awaiting-confirmation']);
@@ -69,6 +72,8 @@ export function bookingActionsFor(b: BookingDetail, now: number = Date.now()): B
     hasPendingTimeChange: b.pendingTimeChange != null,
     // Reportable once the session should have started (at/after start), while accepted.
     canReportNoShow: b.state === 'accepted' && bookingStartMs(b) <= now,
+    // The server folds the completed + in-window + not-yet-rated gate into `rating`.
+    canRate: b.rating.canRate,
   };
 }
 
