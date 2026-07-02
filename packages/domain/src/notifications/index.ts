@@ -74,7 +74,8 @@ export type NotificationEventKind =
   | 'booking_disputed' // → Parent (a dispute was opened on the booking)
   | 'booking_no_show' // → Caregiver (Parent reported a no-show)
   | 'booking_payment_failed' // → Parent (a payment attempt failed)
-  | 'booking_authorization_action_required'; // → Parent (3DS needed to authorize)
+  | 'booking_authorization_action_required' // → Parent (3DS needed to authorize)
+  | 'booking_tip_received'; // → Caregiver (a settled tip landed — 100% pass-through, OH-215)
 
 export const NOTIFICATION_EVENT_KINDS: readonly NotificationEventKind[] = [
   'booking_request_received',
@@ -101,6 +102,7 @@ export const NOTIFICATION_EVENT_KINDS: readonly NotificationEventKind[] = [
   'booking_no_show',
   'booking_payment_failed',
   'booking_authorization_action_required',
+  'booking_tip_received',
 ] as const;
 
 export function isNotificationEventKind(value: string): value is NotificationEventKind {
@@ -178,6 +180,7 @@ export const CHANNEL_MATRIX: Readonly<Record<NotificationEventKind, ChannelMatri
   booking_no_show: entry(PUSH_EMAIL, 'schedule/booking/{bookingId}', ['bookingId']),
   booking_payment_failed: entry(PUSH_EMAIL, 'booking/{bookingId}', ['bookingId']),
   booking_authorization_action_required: entry(PUSH_EMAIL, 'booking/{bookingId}', ['bookingId']),
+  booking_tip_received: entry(PUSH_EMAIL, 'schedule/booking/{bookingId}', ['bookingId']),
 };
 
 export function getChannelMatrixEntry(kind: NotificationEventKind): ChannelMatrixEntry {
@@ -416,6 +419,11 @@ function copyFor(kind: NotificationEventKind, payload: NotificationPayload): Cop
       return {
         title: 'Action needed',
         body: `Confirm your payment details to secure your booking.`,
+      };
+    case 'booking_tip_received':
+      return {
+        title: 'You received a tip',
+        body: `${actor ?? 'The family'} sent you a tip — 100% yours, no fees.`,
       };
   }
 }

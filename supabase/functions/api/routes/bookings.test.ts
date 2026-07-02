@@ -164,6 +164,27 @@ describe('GET /v1/bookings/{bookingId}', () => {
     expect(body.serviceAddress).toBeNull();
   });
 
+  it('folds the live tip + canTip into a completed detail (OH-215)', async () => {
+    const app = buildApp(
+      makeDeps(makeDb(fixtures(caregiverBooking({ state: 'completed', tip_cents: 1000, tip_status: 'authorized' }))).db),
+    );
+    const body = (await (await app.request(path, getReq(await parentToken()))).json()) as Record<string, any>;
+    expect(body.tip).toEqual({ amountCents: 1000, status: 'authorized', settled: false });
+    expect(body.canTip).toBe(true); // editable until the settle sweep captures it
+  });
+
+  it('canTip is false before completion and once the tip settles (OH-215)', async () => {
+    const active = buildApp(makeDeps(makeDb(fixtures(caregiverBooking())).db)); // accepted
+    const activeBody = (await (await active.request(path, getReq(await parentToken()))).json()) as Record<string, any>;
+    expect(activeBody).toMatchObject({ tip: null, canTip: false });
+
+    const settled = buildApp(
+      makeDeps(makeDb(fixtures(caregiverBooking({ state: 'completed', tip_cents: 1000, tip_status: 'captured' }))).db),
+    );
+    const settledBody = (await (await settled.request(path, getReq(await parentToken()))).json()) as Record<string, any>;
+    expect(settledBody).toMatchObject({ tip: { amountCents: 1000, settled: true }, canTip: false });
+  });
+
   it("404 when the Booking is not the caller's", async () => {
     const app = buildApp(makeDeps(makeDb(fixtures(caregiverBooking())).db));
     expect((await app.request(path, getReq(await parentToken('uid-other')))).status).toBe(404);

@@ -28,7 +28,7 @@ import {
   haversineMiles,
   type GeoPoint,
 } from '../../../../packages/domain/src/search/index.ts';
-import { projectPublicSupplyRating } from '../../../../packages/domain/src/rating-reveal/index.ts';
+import { loadPublicSupplyRating } from '../services/ratings.ts';
 import {
   CAREGIVER_CATEGORIES,
   SPECIALTIES,
@@ -435,10 +435,9 @@ export function registerSupplyProfileRoutes(app: OpenAPIHono<AppEnv>): void {
 
     const grid = (profile.availability_grid ?? {}) as AvailabilityGrid;
 
-    // Public Ratings — cold start (no persistence yet): an empty exchange list
-    // projects to { count: 0, averageStars: null, items: [] }. Wired through the
-    // reveal projection so the capture story only supplies the rows.
-    const publicRating = projectPublicSupplyRating([], new Date());
+    // Public Ratings (OH-214) — every revealed, non-dispute-withheld Parent→supply
+    // rating for this supply member's completed Bookings, aggregated + with text.
+    const publicRating = await loadPublicSupplyRating(db, provider.id, new Date());
 
     // Open consultation slots — the Parent's slot-pick surface (OH-203). Always
     // present; non-empty only for a (listed) Provider.

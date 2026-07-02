@@ -8,9 +8,11 @@ import { registerAdminDisputeRoutes } from './routes/admin/disputes.ts';
 import { registerAdminStripeTaxRoutes } from './routes/admin/stripe-tax.ts';
 import { registerAuthRoutes } from './routes/auth.ts';
 import { registerBookingRoutes } from './routes/bookings.ts';
+import { registerBookingTipRoutes } from './routes/booking-tips.ts';
 import { registerCaregiverBadgeRoutes } from './routes/caregiver-badges.ts';
 import { registerCaregiverBookingRoutes } from './routes/caregiver-bookings.ts';
 import { registerCaregiverConnectRoutes } from './routes/caregiver-connect.ts';
+import { registerCaregiverPayoutRoutes } from './routes/caregiver-payouts.ts';
 import { registerCaregiverProfileRoutes } from './routes/caregiver-profile.ts';
 import { registerConsultationBookingRoutes } from './routes/consultation-bookings.ts';
 import { registerContactUsRoutes } from './routes/contact-us.ts';
@@ -18,11 +20,13 @@ import { registerApplicationRoutes } from './routes/applications.ts';
 import { registerHealthRoutes } from './routes/health.ts';
 import { registerJobRoutes } from './routes/jobs.ts';
 import { registerMessagingRoutes } from './routes/messaging.ts';
+import { registerNotificationPreferenceRoutes } from './routes/notification-preferences.ts';
 import { registerNotificationRoutes } from './routes/notifications.ts';
 import { registerOfferRoutes } from './routes/offers.ts';
 import { registerOpportunityRoutes } from './routes/opportunities.ts';
 import { registerVideoCallRoutes } from './routes/video-calls.ts';
 import { registerParentProfileRoutes } from './routes/parent-profile.ts';
+import { registerRatingRoutes } from './routes/ratings.ts';
 import { registerParentSubscriptionRoutes } from './routes/parent-subscription.ts';
 import { registerProviderCredentialsRoutes } from './routes/provider-credentials.ts';
 import { registerProviderProfileRoutes } from './routes/provider-profile.ts';
@@ -65,7 +69,16 @@ export const openApiInfo = {
   tags: [
     { name: 'health', description: 'Liveness and readiness probes' },
     { name: 'auth', description: 'Authentication — role-claim, email-OTP, step-up MFA' },
-    { name: 'caregiver', description: 'Caregiver Stripe Connect Express — onboarding, summary, dashboard (OH-190)' },
+    {
+      name: 'caregiver',
+      description:
+        'Caregiver payment rail — Stripe Connect Express onboarding / summary / dashboard (OH-190) + the read-only Payouts list (OH-221).',
+    },
+    {
+      name: 'notifications',
+      description:
+        'Per-recipient notification channel preferences (OH-221) — the Account tab reads/writes push / web_push / email opt-outs; the worker-tick dispatcher honours them (mandatory safety SMS always sends).',
+    },
     {
       name: 'badges',
       description:
@@ -115,6 +128,11 @@ export const openApiInfo = {
       name: 'notifications',
       description:
         'Notification registration + preferences (OH-223) — the client WRITE side of the OH-194 channel matrix: register/refresh a device Expo push token or VAPID web-push subscription (all roles), and the marketing opt-in (kept separate from transactional notifications; the four SMS-mandatory events are no-opt-out).',
+    },
+    {
+      name: 'ratings',
+      description:
+        'Two-way Ratings (OH-214) — after a Booking completes, both parties rate 1–5 (+ optional text) within 14 days. Submissions are BLIND and revealed mutually (both submit or the window closes). Display is asymmetric: Parent→supply ratings are public on the profile (with text); supply→Parent ratings surface to supply only as an aggregate (stars + count).',
     },
     { name: 'verification', description: 'Supply verification — state + email/phone/ID-doc facts (OH-184)' },
     {
@@ -186,6 +204,7 @@ export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerHealthRoutes(v1);
   registerAuthRoutes(v1);
   registerCaregiverConnectRoutes(v1);
+  registerCaregiverPayoutRoutes(v1);
   registerVerificationRoutes(v1);
   registerProviderCredentialsRoutes(v1);
   registerCaregiverBadgeRoutes(v1);
@@ -198,8 +217,11 @@ export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerSupplyProfileRoutes(v1);
   registerConsultationBookingRoutes(v1);
   registerBookingRoutes(v1);
+  registerBookingTipRoutes(v1);
   registerCaregiverBookingRoutes(v1);
+  registerRatingRoutes(v1);
   registerMessagingRoutes(v1);
+  registerNotificationPreferenceRoutes(v1);
   registerNotificationRoutes(v1);
   registerOfferRoutes(v1);
   registerVideoCallRoutes(v1);

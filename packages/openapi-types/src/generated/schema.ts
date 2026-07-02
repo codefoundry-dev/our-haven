@@ -343,6 +343,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/auth/web-handoff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint a single-use handoff URL that logs the caller into the web app (OH-221)
+         * @description Returns a `${WEB_APP_URL}/handoff?token_hash=…&next=…` link. The mobile Caregiver Account tab opens it in an in-app browser to reach a payout-management action that lives on the web portal (bank-detail changes / withdrawals — PRD story 80); the web `/handoff` route exchanges the token for a Supabase session and routes to `next`. The token is a single-use Supabase magic-link OTP minted for the caller's own email via the admin API (no email is sent), so it grants no more than the caller already has. Requires an email on the account.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        next?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Handoff URL issued */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["WebHandoffResponse"];
+                    };
+                };
+                /** @description No email on account, or handoff mint failed */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AuthErrorResponse"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AuthErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/caregiver/connect/summary": {
         parameters: {
             query?: never;
@@ -562,6 +625,63 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/caregiver/payouts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The Caregiver's read-only payouts list — OH-221
+         * @description Returns the authenticated Caregiver's settled payouts — their `kind = 'caregiver'` Bookings whose payment has reached `captured` or `refunded` — newest first, with a glance total of net take-home. A payout is a captured destination charge (OH-211); withdrawal + bank changes happen in the Stripe Express dashboard (reached via the web handoff), not here. `netCents` is a display estimate (gross − Commission − refund); Stripe holds the authoritative balance.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The payouts list */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverPayoutList"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverPayoutError"];
+                    };
+                };
+                /** @description Wrong role (Providers have no payouts) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverPayoutError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4076,6 +4196,105 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/bookings/{bookingId}/tip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set, edit, or clear the post-session tip — OH-215
+         * @description Sets the Parent's optional gratuity on a completed Caregiver Booking (ADR-0018): a separate zero-fee destination charge — 100% to the Caregiver, no Commission. `amountCents: 0` clears a prior tip. The tip is a mutable card hold until it settles (~24h after the last edit), then immutable. When the hold needs 3DS the response carries a `clientSecret`. 409 when the Booking isn't a completed Caregiver Booking (`not_tippable`) or the tip has settled (`tip_settled`); 404 when it isn't the caller's.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    bookingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SetBookingTipRequest"];
+                };
+            };
+            responses: {
+                /** @description Tip set / updated / cleared */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingTipResult"];
+                    };
+                };
+                /** @description Invalid tip amount */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingTipError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingTipError"];
+                    };
+                };
+                /** @description Card declined on the tip hold */
+                402: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingTipError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingTipError"];
+                    };
+                };
+                /** @description Booking not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingTipError"];
+                    };
+                };
+                /** @description Not tippable (kind/state) or the tip already settled */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingTipError"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/caregiver/bookings": {
         parameters: {
             query?: never;
@@ -4599,6 +4818,96 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/bookings/{bookingId}/rating": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit this side of a two-way Booking rating — OH-214
+         * @description Submits the caller's 1–5 star rating (+ optional text) for a `completed` Booking. Direction is derived from the caller: a Parent rates the supply member (a PUBLIC profile rating); a Caregiver/Provider rates the Parent (a supply-internal, aggregate-only rating). Ratings are BLIND — the mutual reveal happens once both sides submit or the 14-day window closes. 409 when the Booking isn't completed, the window has closed, or the caller already rated their side; 404 when the Booking isn't the caller's.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    bookingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SubmitRatingRequest"];
+                };
+            };
+            responses: {
+                /** @description Rating submitted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RatingStatus"];
+                    };
+                };
+                /** @description Invalid rating */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RatingError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RatingError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RatingError"];
+                    };
+                };
+                /** @description Booking not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RatingError"];
+                    };
+                };
+                /** @description Not ratable (not completed / window closed / already rated) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RatingError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/threads": {
         parameters: {
             query?: never;
@@ -4863,6 +5172,99 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/me/notification-preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the authenticated user's notification channel preferences
+         * @description Returns the caller's per-channel notification preferences (`push` / `webPush` / `email` / `sms`). A user who has never changed a preference has no row; the endpoint synthesises the all-on default. `sms` reflects the stored flag but mandatory safety SMS always sends regardless (CONTEXT § Notifications).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Effective preferences */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationPreferences"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationPreferencesError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update the authenticated user's notification channel preferences
+         * @description Partial update — only the channels named in the body change; the rest keep their current value (or the all-on default if no row exists yet). Upserts, so the first change materialises the row. Returns the full effective preferences after the change.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["NotificationPreferencesPatch"];
+                };
+            };
+            responses: {
+                /** @description Updated preferences */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationPreferences"];
+                    };
+                };
+                /** @description Empty patch */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationPreferencesError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationPreferencesError"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
     "/v1/notifications/push-tokens": {
         parameters: {
             query?: never;
@@ -5083,7 +5485,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["NotificationPreferences"];
+                        "application/json": components["schemas"]["MarketingPreferences"];
                     };
                 };
                 /** @description Unauthenticated */
@@ -5110,7 +5512,7 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": components["schemas"]["NotificationPreferencesRequest"];
+                    "application/json": components["schemas"]["MarketingPreferencesRequest"];
                 };
             };
             responses: {
@@ -5120,7 +5522,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["NotificationPreferences"];
+                        "application/json": components["schemas"]["MarketingPreferences"];
                     };
                 };
                 /** @description Unauthenticated */
@@ -7048,6 +7450,173 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/opportunities/{jobId}/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * File an Application + first Offer on an open Job — OH-219
+         * @description The authenticated Caregiver files an Application on an open posted Job in one of their categories: a free-text proposal + a first caregiver Offer (rate defaults to the published per-category Rate; locked to it when non-negotiable — ADR-0017). Atomically creates the Application (`submitted`), a companion job-anchored thread, and the first Offer (`pending`). Gated on Verification `cleared` (403), the per-Job 15-cap + the 30/month cap (409), and one Application per Job (409 on a repeat). The proposal + Offer note are redacted at write. Never Subscription-gated (Caregiver-sent).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ApplyToJobRequest"];
+                };
+            };
+            responses: {
+                /** @description The filed Application */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MyApplicationItem"];
+                    };
+                };
+                /** @description Invalid body / the Job schedule has no billable time */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityError"];
+                    };
+                };
+                /** @description Wrong role, or Verification not cleared */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityError"];
+                    };
+                };
+                /** @description Supply row / Job not found (or not in one of your categories) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityError"];
+                    };
+                };
+                /** @description Job not open, already applied, a cap was reached, or no published Rate */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/opportunities/{jobId}/withdraw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Withdraw my Application on a Job — OH-219
+         * @description The Caregiver withdraws their own still-open Application (submitted / countered → withdrawn) before the Parent awards or declines, sealing the live pending Offer. Frees a per-Job 15-cap slot; does NOT refund the monthly allowance (filing consumes one). 409 if the Application is already terminal (awarded / declined / withdrawn / expired).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The withdrawn Application */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MyApplicationItem"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityError"];
+                    };
+                };
+                /** @description Supply row / Application not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityError"];
+                    };
+                };
+                /** @description Application is no longer withdrawable (terminal state) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/providers/contact-us": {
         parameters: {
             query?: never;
@@ -7913,6 +8482,10 @@ export interface components {
             /** Format: date-time */
             expiresAt: string;
         };
+        WebHandoffResponse: {
+            /** Format: uri */
+            url: string;
+        };
         CaregiverConnectSummary: {
             hasAccount: boolean;
             stripeAccountId: string | null;
@@ -7945,6 +8518,29 @@ export interface components {
             url: string;
             /** Format: date-time */
             createdAt: string;
+        };
+        CaregiverPayoutList: {
+            payouts: components["schemas"]["CaregiverPayoutItem"][];
+            totalNetCents: number;
+            count: number;
+        };
+        CaregiverPayoutItem: {
+            bookingId: string;
+            /** @enum {string|null} */
+            category: "babysitter" | "tutor" | "nanny" | null;
+            scheduledDate: string;
+            /** Format: date-time */
+            paidAt: string | null;
+            /** @enum {string} */
+            status: "captured" | "refunded";
+            grossCents: number;
+            commissionCents: number;
+            refundedCents: number;
+            netCents: number;
+        };
+        CaregiverPayoutError: {
+            error: string;
+            reason?: string;
         };
         SupplyVerification: {
             /** @enum {string} */
@@ -8503,6 +9099,24 @@ export interface components {
             endMin: number;
             rateCents: number | null;
             autoCompleteAt: string | null;
+            rating: components["schemas"]["RatingStatus"];
+            counterpartyRating: {
+                averageStars: number | null;
+                count: number;
+            } | null;
+        };
+        RatingStatus: {
+            canRate: boolean;
+            windowClosesAt: string | null;
+            mine: {
+                stars: number;
+                text: string | null;
+            } | null;
+            revealed: boolean;
+            counterparty: {
+                stars: number;
+                text: string | null;
+            } | null;
         };
         ConsultationBookingError: {
             error: string;
@@ -8556,6 +9170,14 @@ export interface components {
             /** @enum {string|null} */
             disputeReason: "overcharged" | "no-show" | "safety" | "quality" | "other" | null;
             pendingTimeChange: components["schemas"]["BookingPendingTimeChange"];
+            rating: components["schemas"]["RatingStatus"];
+            tip: {
+                amountCents: number;
+                /** @enum {string} */
+                status: "requires_action" | "authorized" | "captured" | "failed";
+                settled: boolean;
+            } | null;
+            canTip: boolean;
         };
         BookingServiceAddress: {
             line1: string | null;
@@ -8632,6 +9254,24 @@ export interface components {
             newDurationHours: number;
             note?: string;
         };
+        BookingTipResult: {
+            id: string;
+            tip: {
+                amountCents: number;
+                /** @enum {string} */
+                status: "requires_action" | "authorized" | "captured" | "failed";
+                settled: boolean;
+            } | null;
+            canTip: boolean;
+            clientSecret: string | null;
+        };
+        BookingTipError: {
+            error: string;
+            reason?: string;
+        };
+        SetBookingTipRequest: {
+            amountCents: number;
+        };
         CaregiverBookingList: {
             bookings: components["schemas"]["CaregiverBooking"][];
         };
@@ -8660,6 +9300,13 @@ export interface components {
             requestExpiresAt: string | null;
             confirmDeadlineAt: string | null;
             pendingTimeChange: components["schemas"]["CaregiverBookingPendingTimeChange"];
+            rating: components["schemas"]["RatingStatus"];
+            parentRating: {
+                averageStars: number | null;
+                count: number;
+            };
+            tipCents: number | null;
+            tipSettled: boolean;
         };
         CaregiverBookingAddress: {
             line1: string | null;
@@ -8694,6 +9341,14 @@ export interface components {
         CaregiverBookingProposeHours: {
             hours: number;
             note?: string;
+        };
+        RatingError: {
+            error: string;
+            reason?: string;
+        };
+        SubmitRatingRequest: {
+            stars: number;
+            text?: string;
         };
         MessageThreadSummary: {
             id: string;
@@ -8735,6 +9390,22 @@ export interface components {
         SendMessageRequest: {
             body: string;
         };
+        NotificationPreferences: {
+            push: boolean;
+            webPush: boolean;
+            email: boolean;
+            sms: boolean;
+        };
+        NotificationPreferencesError: {
+            error: string;
+            reason?: string;
+        };
+        NotificationPreferencesPatch: {
+            push?: boolean;
+            webPush?: boolean;
+            email?: boolean;
+            sms?: boolean;
+        };
         NotificationOk: {
             /** @enum {boolean} */
             ok: true;
@@ -8761,10 +9432,10 @@ export interface components {
             /** Format: uri */
             endpoint: string;
         };
-        NotificationPreferences: {
+        MarketingPreferences: {
             marketingOptIn: boolean;
         };
-        NotificationPreferencesRequest: {
+        MarketingPreferencesRequest: {
             marketingOptIn: boolean;
         };
         Offer: {
@@ -9126,6 +9797,11 @@ export interface components {
             cap: number;
             remaining: number;
             periodYearMonth: string;
+        };
+        ApplyToJobRequest: {
+            proposal: string;
+            proposedRateCents?: number;
+            scopeNote?: string;
         };
         ContactUsResponse: {
             id: string;

@@ -91,6 +91,16 @@ export type ProviderSubscriptionStatus = ProviderSubscription['status'];
 export type ProviderCheckoutLink = paths['/v1/providers/me/subscription/checkout-link']['post']['responses'][200]['content']['application/json'];
 export type ProviderPortalLink = paths['/v1/providers/me/subscription/portal-link']['post']['responses'][200]['content']['application/json'];
 
+// Caregiver Account tab (OH-221). Read-only settled payouts (captured/refunded
+// Bookings + a net glance total); per-channel notification preferences; and the
+// single-use mobile→web session handoff for payout-management actions that live
+// on the web portal (bank-detail changes / withdrawals — PRD story 80).
+export type CaregiverPayoutList = paths['/v1/caregiver/payouts']['get']['responses'][200]['content']['application/json'];
+export type CaregiverPayoutItem = CaregiverPayoutList['payouts'][number];
+export type NotificationPreferences = paths['/v1/me/notification-preferences']['get']['responses'][200]['content']['application/json'];
+export type NotificationPreferencesPatch = paths['/v1/me/notification-preferences']['patch']['requestBody']['content']['application/json'];
+export type WebHandoff = paths['/v1/auth/web-handoff']['post']['responses'][200]['content']['application/json'];
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -204,6 +214,34 @@ export function getConnectSummary(): Promise<CaregiverConnectSummary> {
 
 export function createConnectOnboardingLink(): Promise<CaregiverConnectOnboardingLink> {
   return post<CaregiverConnectOnboardingLink>('/v1/caregiver/connect/onboarding-link', undefined);
+}
+
+/**
+ * Caregiver Account tab (OH-221).
+ *   - `getCaregiverPayouts` — read-only settled payouts (captured/refunded
+ *     Bookings) + a net take-home glance total.
+ *   - `createWebHandoff` — mint a single-use URL that logs the caller into the
+ *     web app; the Account tab opens it in an in-app browser to reach the
+ *     step-up-MFA'd bank/withdrawal management that lives on the web portal.
+ *   - `get/patchNotificationPreferences` — per-channel push/email/SMS opt-outs.
+ */
+
+export function getCaregiverPayouts(): Promise<CaregiverPayoutList> {
+  return get<CaregiverPayoutList>('/v1/caregiver/payouts');
+}
+
+export function createWebHandoff(next?: string): Promise<WebHandoff> {
+  return post<WebHandoff>('/v1/auth/web-handoff', next ? { next } : {});
+}
+
+export function getNotificationPreferences(): Promise<NotificationPreferences> {
+  return get<NotificationPreferences>('/v1/me/notification-preferences');
+}
+
+export function patchNotificationPreferences(
+  patch: NotificationPreferencesPatch,
+): Promise<NotificationPreferences> {
+  return patchJson<NotificationPreferences>('/v1/me/notification-preferences', patch);
 }
 
 /**
@@ -361,6 +399,44 @@ export type BookingReportNoShowResult =
 /** Report a Caregiver/Provider no-show → full refund (caregiver) + supply flag (OH-213). */
 export function reportNoShow(bookingId: string): Promise<BookingReportNoShowResult> {
   return post<BookingReportNoShowResult>(`/v1/bookings/${bookingId}/report-no-show`, undefined);
+}
+
+/**
+ * Two-way Ratings (OH-214) — after a Booking completes, both parties may rate 1–5
+ * (+ optional text) within 14 days. Submissions are BLIND; the reveal happens once
+ * both submit or the window closes. `submitBookingRating` posts the caller's side
+ * (direction is derived server-side from the caller) and returns the viewer's
+ * updated rating status. The same `RatingStatus` shape is folded into every
+ * Booking read surface (booking detail, caregiver + consultation schedule feeds),
+ * so the UI can gate "Rate / You rated / their rating" without a separate fetch.
+ */
+export type RatingStatus = BookingDetail['rating'];
+export type SubmittedRating = NonNullable<RatingStatus['mine']>;
+export type RatingAggregate = CaregiverBooking['parentRating'];
+export type SubmitRatingBody =
+  paths['/v1/bookings/{bookingId}/rating']['post']['requestBody']['content']['application/json'];
+
+export function submitBookingRating(bookingId: string, body: SubmitRatingBody): Promise<RatingStatus> {
+  return post<RatingStatus>(`/v1/bookings/${bookingId}/rating`, body);
+}
+
+/**
+ * Post-session tipping (OH-215; ADR-0018) — an optional Parent gratuity on a
+ * completed Caregiver Booking, 100% pass-through (no Commission), offered after
+ * rating and editable later from the Booking detail. `setBookingTip` sets /
+ * edits / clears (`amountCents: 0`) the tip; it stays a mutable card hold until
+ * the ~24h settlement cut-off, then becomes immutable (`tip.settled`). The
+ * result carries a `clientSecret` for opportunistic 3DS when
+ * `tip.status === 'requires_action'`. Provider consultations can't be tipped.
+ */
+export type BookingTip = NonNullable<BookingDetail['tip']>;
+export type SetBookingTipBody =
+  paths['/v1/bookings/{bookingId}/tip']['put']['requestBody']['content']['application/json'];
+export type SetBookingTipResult =
+  paths['/v1/bookings/{bookingId}/tip']['put']['responses'][200]['content']['application/json'];
+
+export function setBookingTip(bookingId: string, body: SetBookingTipBody): Promise<SetBookingTipResult> {
+  return putJson<SetBookingTipResult>(`/v1/bookings/${bookingId}/tip`, body);
 }
 
 /**
@@ -755,17 +831,40 @@ export function getMyApplications(): Promise<MyApplications> {
   return get<MyApplications>('/v1/applications');
 }
 
-/* ── Notifications — device registration + preferences (OH-223) ───────────────
+// ── Caregiver apply + withdraw (OH-219) ───────────────────────────────────────
+/**
+ * File an Application (a free-text proposal + a first Offer) on an open Job, or
+ * withdraw it. The apply body's `proposedRateCents` defaults to the Caregiver's
+ * published per-category Rate and is ignored (locked to published) when they are
+ * non-negotiable (ADR-0017). Both responses echo the affected Application (the same
+ * shape as a My-Applications item). `ApiError.code` surfaces the gate that fired —
+ * verification_not_cleared / job_not_open / job_application_cap_reached /
+ * monthly_cap_reached / already_applied / rate_not_published / not_withdrawable.
+ */
+export type ApplyToJobBody = paths['/v1/opportunities/{jobId}/apply']['post']['requestBody']['content']['application/json'];
+
+export function applyToJob(jobId: string, body: ApplyToJobBody): Promise<MyApplication> {
+  return post<MyApplication>(`/v1/opportunities/${jobId}/apply`, body);
+}
+
+/** Withdraw my Application on a Job (submitted / countered → withdrawn). */
+export function withdrawApplication(jobId: string): Promise<MyApplication> {
+  return post<MyApplication>(`/v1/opportunities/${jobId}/withdraw`, undefined);
+}
+
+/* ── Notifications — device registration + marketing opt-in (OH-223) ──────────
  * The client WRITE side of the OH-194 channel matrix: register/refresh this
  * device's Expo push token (native) or VAPID web-push subscription (web) so the
  * worker-tick dispatcher has somewhere to fan out, plus the marketing opt-in
- * (kept separate from transactional — CONTEXT § Notifications).
+ * (kept separate from transactional — CONTEXT § Notifications). Distinct from
+ * OH-221's per-CHANNEL `NotificationPreferences` (/v1/me/notification-preferences),
+ * hence the `Marketing*` naming.
  */
 export type PushTokenBody =
   paths['/v1/notifications/push-tokens']['put']['requestBody']['content']['application/json'];
 export type WebPushBody =
   paths['/v1/notifications/web-push']['put']['requestBody']['content']['application/json'];
-export type NotificationPreferences =
+export type MarketingPreferences =
   paths['/v1/notifications/preferences']['get']['responses'][200]['content']['application/json'];
 
 /** Register/refresh this device's Expo push token (upsert; re-points a shared device). */
@@ -789,11 +888,11 @@ export function deleteWebPushSubscription(endpoint: string): Promise<{ ok: true 
 }
 
 /** The caller's marketing opt-in (default false; transactional is unaffected). */
-export function getNotificationPreferences(): Promise<NotificationPreferences> {
-  return get<NotificationPreferences>('/v1/notifications/preferences');
+export function getMarketingPreferences(): Promise<MarketingPreferences> {
+  return get<MarketingPreferences>('/v1/notifications/preferences');
 }
 
 /** Set the marketing opt-in (separate consent from transactional notifications). */
-export function setNotificationPreferences(marketingOptIn: boolean): Promise<NotificationPreferences> {
-  return putJson<NotificationPreferences>('/v1/notifications/preferences', { marketingOptIn });
+export function setMarketingPreferences(marketingOptIn: boolean): Promise<MarketingPreferences> {
+  return putJson<MarketingPreferences>('/v1/notifications/preferences', { marketingOptIn });
 }

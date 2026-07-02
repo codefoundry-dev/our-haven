@@ -11,7 +11,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 
-import { ApiError, getNotificationPreferences, setNotificationPreferences } from '@/api/client';
+import { ApiError, getMarketingPreferences, setMarketingPreferences } from '@/api/client';
 
 export interface UseNotificationPrefsResult {
   marketingOptIn: boolean;
@@ -36,7 +36,7 @@ export function useNotificationPrefs(enabled = true): UseNotificationPrefsResult
     let cancelled = false;
     setLoading(true);
     setError(null);
-    getNotificationPreferences()
+    getMarketingPreferences()
       .then((prefs) => {
         if (cancelled) return;
         setOptIn(prefs.marketingOptIn);
@@ -56,7 +56,7 @@ export function useNotificationPrefs(enabled = true): UseNotificationPrefsResult
     setOptIn(optIn); // optimistic — the switch answers immediately
     setSaving(true);
     setError(null);
-    setNotificationPreferences(optIn)
+    setMarketingPreferences(optIn)
       .then((prefs) => {
         setOptIn(prefs.marketingOptIn);
         setSaving(false);

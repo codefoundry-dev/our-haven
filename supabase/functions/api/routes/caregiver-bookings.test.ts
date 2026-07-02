@@ -168,6 +168,26 @@ describe('GET /v1/caregiver/bookings', () => {
     });
   });
 
+  it('surfaces a live tip as the additive payout line; hides failed/3DS-pending ones (OH-215)', async () => {
+    const live = buildApp(
+      makeDeps(makeDb(fixtures(booking({ state: 'completed', tip_cents: 1000, tip_status: 'authorized' }))).db),
+    );
+    const liveBody = (await (await live.request(path, getReq(await caregiverToken()))).json()) as Record<string, any>;
+    expect(liveBody.bookings[0]).toMatchObject({ tipCents: 1000, tipSettled: false });
+
+    const settled = buildApp(
+      makeDeps(makeDb(fixtures(booking({ state: 'completed', tip_cents: 1000, tip_status: 'captured' }))).db),
+    );
+    const settledBody = (await (await settled.request(path, getReq(await caregiverToken()))).json()) as Record<string, any>;
+    expect(settledBody.bookings[0]).toMatchObject({ tipCents: 1000, tipSettled: true });
+
+    const pending = buildApp(
+      makeDeps(makeDb(fixtures(booking({ state: 'completed', tip_cents: 1000, tip_status: 'requires_action' }))).db),
+    );
+    const pendingBody = (await (await pending.request(path, getReq(await caregiverToken()))).json()) as Record<string, any>;
+    expect(pendingBody.bookings[0]).toMatchObject({ tipCents: null, tipSettled: false });
+  });
+
   it('403 for a parent', async () => {
     const app = buildApp(makeDeps(makeDb(fixtures(booking())).db));
     expect((await app.request(path, getReq(await parentToken()))).status).toBe(403);

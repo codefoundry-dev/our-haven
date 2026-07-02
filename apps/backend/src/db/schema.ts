@@ -275,6 +275,15 @@ export interface BookingsTable {
   per_child_surcharge_cents: number | null;
   // Stamp set when a no-show cancels this Booking (OH-213). NULL otherwise.
   no_show_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  // ── post-session Tip (OH-215; ADR-0018 — NULL on a provider consultation /
+  // untipped Booking). A commission-exempt gratuity on a completed Caregiver
+  // Booking: its own zero-application-fee destination charge, mutable until the
+  // worker-tick captures it at `tip_settle_at` (then immutable).
+  tip_cents: number | null;
+  tip_payment_intent_id: string | null;
+  tip_status: 'requires_action' | 'authorized' | 'captured' | 'failed' | null;
+  tip_settle_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  tip_captured_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
   created_at: Generated<Date>;
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
 }
@@ -535,10 +544,13 @@ export interface MessagesTable {
  */
 export interface MessageFlagsTable {
   id: Generated<string>;
-  // Exactly one of message_id / offer_id is set (DB-checked). offer_id covers a
-  // flagged Offer `scope_note` (OH-206; PRD story 109) in the same T&S queue.
+  // Exactly one of message_id / offer_id / application_id is set (DB-checked).
+  // offer_id covers a flagged Offer `scope_note` (OH-206; PRD story 109);
+  // application_id covers a flagged Application `proposal` (OH-219; story 98) —
+  // both share the same T&S queue.
   message_id: string | null;
   offer_id: ColumnType<string | null, string | null | undefined, string | null>;
+  application_id: ColumnType<string | null, string | null | undefined, string | null>;
   thread_id: string;
   sender_uid: string;
   categories: ColumnType<string[], string[], string[]>;
@@ -694,15 +706,18 @@ export interface NotificationWebPushSubscriptionsTable {
 }
 
 /**
- * Notification preferences — one row per auth user (`uid` PK). Two tickets share
- * the table (their migrations are order-proof — see 20260716000001):
- *   - OH-221: best-effort CHANNEL opt-outs (`push`/`web_push`/`email`; `sms`
- *     stored but never suppressing the mandatory-SMS event set). Missing row =
- *     all channels on.
+ * Per-recipient notification preferences. One row per `uid` (the Supabase auth
+ * user); two tickets share the table (their migrations are order-proof — see
+ * 20260716000001):
+ *   - OH-221: best-effort CHANNEL opt-outs (`push`/`web_push`/`email`) the
+ *     worker-tick dispatcher honours; a missing row means "all channels on".
+ *     `sms` is stored but NEVER suppresses the mandatory-SMS event set
+ *     (safety-critical, CONTEXT § Notifications) — it only forward-declares an
+ *     opt-out for any future non-mandatory SMS.
  *   - OH-223: the MARKETING opt-in (`marketing_opt_in`, default false — opt-IN),
  *     a separate consent from transactional; the transactional dispatcher's
  *     matrix routing never reads it. `marketing_opt_in_at` stamps the consent.
- * Service-role-only (RLS enabled); the Edge scopes reads/writes by `principal.uid`.
+ * Service-role-only (RLS enabled; read/written through the Edge by `principal.uid`).
  */
 export interface NotificationPreferencesTable {
   uid: string;
@@ -778,6 +793,9 @@ export interface ApplicationsTable {
   state: 'submitted' | 'countered' | 'awarded' | 'declined' | 'withdrawn' | 'expired';
   accepted_offer_id: string | null;
   proposal: string | null;
+  // The `proposal` free-text is stored REDACTED (disintermediation runs at write
+  // time — CONTEXT § Message); true when contact info was stripped (OH-219).
+  proposal_redacted: ColumnType<boolean, boolean | undefined, boolean>;
   awarded_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
   created_at: Generated<Date>;
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
@@ -845,6 +863,31 @@ export interface SupplyFlagsTable {
   created_at: Generated<Date>;
 }
 
+/**
+ * Two-way Ratings (OH-214) — the store the OH-180 `rating-reveal` deep module
+ * projects. One row per (completed Booking, direction). `direction` names who
+ * rated whom; `subject_provider_id` / `subject_parent_uid` denormalise the rated
+ * party (snapshotted from the Booking) so the public per-supply and supply-internal
+ * per-parent aggregations are single-table scans. The 14-day reveal-window anchor
+ * is derived from the Booking's completion instant, NOT stored here.
+ * Service-role-only (read through the Edge).
+ */
+export interface RatingsTable {
+  id: Generated<string>;
+  booking_id: string;
+  direction: 'parent-to-supply' | 'supply-to-parent';
+  rater_uid: string;
+  // Set on a 'parent-to-supply' row (the rated supply); NULL on the other direction.
+  subject_provider_id: string | null;
+  // Set on a 'supply-to-parent' row (the rated Parent uid); NULL on the other direction.
+  subject_parent_uid: string | null;
+  stars: number;
+  text: string | null;
+  submitted_at: Generated<Date>;
+  created_at: Generated<Date>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
 export interface Database {
   auth_email_otps: AuthEmailOtpsTable;
   auth_step_up_grants: AuthStepUpGrantsTable;
@@ -879,4 +922,5 @@ export interface Database {
   notification_preferences: NotificationPreferencesTable;
   disputes: DisputesTable;
   supply_flags: SupplyFlagsTable;
+  ratings: RatingsTable;
 }

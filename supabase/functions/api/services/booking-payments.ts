@@ -22,7 +22,7 @@
  * IS the payout, so the domain `enqueue-payout` tag needs no separate call.
  */
 
-import { calculatePricing } from '../../../../packages/domain/src/pricing/index.ts';
+import { calculatePricing, calculateTip } from '../../../../packages/domain/src/pricing/index.ts';
 import type { CancellationResult } from '../../../../packages/domain/src/cancellation/index.ts';
 import type { StripeAdapter } from '../vendors/stripe.ts';
 
@@ -284,6 +284,130 @@ export async function applyCancellationCharge(
       cancellation_tier: cancellation.tier,
       commission_cents: commissionCents,
     },
+  };
+}
+
+/* ── Tip — post-session gratuity, commission-exempt (OH-215; ADR-0018) ────────
+ * A Tip is NOT part of the engagement receipt: it is its own manual-capture
+ * destination charge with `application_fee_amount = 0` (100% pass-through — the
+ * domain `calculateTip` is the authority on that split). It stays a mutable
+ * hold until the settlement cut-off (`TIP_SETTLE_HOURS` after the last edit),
+ * when the worker-tick `tip_settle` sweep captures it — the capture IS the
+ * pass-through payout. Editing cancels the old hold and places a new one;
+ * setting `0` cancels and clears (ADR-0018 §3).
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** The ADR-0018 §3 settlement cut-off: a tip is mutable for this long after the
+ *  last edit, then captured (well inside Stripe's ~7-day hold validity). */
+export const TIP_SETTLE_HOURS = 24;
+
+export type TipStatus = 'requires_action' | 'authorized' | 'captured' | 'failed';
+
+/** The tip-only columns a tip move sets. The caller merges `updated_at`. */
+export interface TipPatch {
+  tip_cents?: number | null;
+  tip_payment_intent_id?: string | null;
+  tip_status?: TipStatus | null;
+  tip_settle_at?: Date | null;
+  tip_captured_at?: Date | null;
+}
+
+export interface SetTipInput {
+  bookingId: string;
+  /** The new gratuity, integer cents. `0` clears any prior tip (ADR-0018 §3). */
+  tipCents: number;
+  /** The prior (uncaptured) tip hold to release, or null on a first tip. */
+  oldTipPaymentIntentId: string | null;
+  /** Caregiver's Connect Express account (`acct_…`) — the pass-through destination. */
+  connectAccountId: string;
+  /** Parent's Stripe Customer (`cus_…`). */
+  customerId: string;
+  /** Parent's saved card (`pm_…`). */
+  paymentMethodId: string;
+  description: string;
+  /** The caller's clock — anchors `tip_settle_at` and the per-edit idempotency key. */
+  now: Date;
+}
+
+export interface SetTipResult {
+  patch: TipPatch;
+  /** For the interactive path — the client confirms 3DS with this when needed. */
+  clientSecret: string | null;
+}
+
+/**
+ * Set / edit / clear the Booking's Tip. Cancels the prior hold (each edit is a
+ * fresh PaymentIntent — a card hold can't be changed in place), then for a
+ * non-zero amount places a new zero-fee hold on the Parent's card. The
+ * authorize key is per-edit (`now`-stamped): unlike the engagement authorize, a
+ * tip is legitimately re-created at the same amount after an intervening edit,
+ * so a booking-stable key would replay a cancelled PI. Release/capture keys are
+ * PI-scoped and deterministic.
+ */
+export async function setBookingTip(
+  stripe: StripeAdapter,
+  input: SetTipInput,
+): Promise<SetTipResult> {
+  // Domain authority on the split: validates the amount and pins the platform
+  // take to 0 (`caregiverTipCents === tipCents` — ADR-0018 §2).
+  const tip = calculateTip(input.tipCents);
+
+  if (input.oldTipPaymentIntentId) {
+    await stripe.cancelPaymentIntent(
+      input.oldTipPaymentIntentId,
+      `tip:release:${input.oldTipPaymentIntentId}`,
+    );
+  }
+
+  if (tip.tipCents === 0) {
+    return {
+      patch: { tip_cents: null, tip_payment_intent_id: null, tip_status: null, tip_settle_at: null },
+      clientSecret: null,
+    };
+  }
+
+  const res = await stripe.createBookingPaymentIntent({
+    amountCents: tip.caregiverTipCents,
+    applicationFeeCents: tip.platformCommissionCents, // always 0 — no skim on a gift
+    destinationAccountId: input.connectAccountId,
+    description: input.description,
+    metadata: { purpose: 'tip', booking_id: input.bookingId },
+    customerId: input.customerId,
+    paymentMethodId: input.paymentMethodId,
+    confirm: true,
+    offSession: false, // the Parent is in the sheet — 3DS surfaces interactively
+    idempotencyKey: `tip:authorize:${input.bookingId}:${input.now.getTime()}`,
+  });
+  const status = mapAuthorizeStatus(res.status);
+  return {
+    patch: {
+      tip_cents: tip.tipCents,
+      tip_payment_intent_id: res.id,
+      tip_status: status === 'authorized' || status === 'requires_action' || status === 'captured'
+        ? status
+        : 'failed',
+      tip_settle_at: new Date(input.now.getTime() + TIP_SETTLE_HOURS * 60 * 60 * 1000),
+    },
+    clientSecret: res.client_secret || null,
+  };
+}
+
+/**
+ * Capture a due tip hold (the worker-tick `tip_settle` sweep): the full amount
+ * transfers to the Caregiver's connected account with a 0 application fee — the
+ * commission-exempt pass-through payout. After this the tip is immutable.
+ */
+export async function captureTip(
+  stripe: StripeAdapter,
+  input: { paymentIntentId: string; now: Date },
+): Promise<{ patch: TipPatch }> {
+  await stripe.capturePaymentIntent({
+    id: input.paymentIntentId,
+    applicationFeeCents: 0,
+    idempotencyKey: `tip:capture:${input.paymentIntentId}`,
+  });
+  return {
+    patch: { tip_status: 'captured', tip_settle_at: null, tip_captured_at: input.now },
   };
 }
 

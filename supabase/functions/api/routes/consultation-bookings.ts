@@ -32,6 +32,15 @@ import {
   CANCELLATION_FREE_THRESHOLD_MS,
 } from '../../../../packages/domain/src/cancellation/index.ts';
 import { applyCancellationCharge } from '../services/booking-payments.ts';
+import {
+  buildBookingRatingView,
+  completionAnchor,
+  loadParentRatingAggregates,
+  loadRatingsByBooking,
+  type RatingAggregate,
+  type RatingDirection,
+} from '../services/ratings.ts';
+import { RatingAggregateSchema, RatingStatusSchema } from './ratings.ts';
 
 /**
  * Provider consultation booking (OH-203) — CONTEXT.md § Booking (slot-pick,
@@ -107,6 +116,11 @@ const BookingSummarySchema = z
     rateCents: z.number().int().nullable(),
     /** When the consultation auto-completes (ISO), or null. */
     autoCompleteAt: z.string().nullable(),
+    /** Two-way rating status from the viewer's perspective (OH-214). */
+    rating: RatingStatusSchema,
+    /** For a Provider viewer, the Parent counterparty's supply-internal standing
+     *  (aggregate stars + count); null for a Parent viewer (OH-214). */
+    counterpartyRating: RatingAggregateSchema.nullable(),
   })
   .openapi('ConsultationBookingSummary');
 
@@ -166,6 +180,8 @@ interface BookingRow {
   end_min: number;
   rate_cents: number | null;
   auto_complete_at: Date | string | null;
+  confirmed_at: Date | string | null;
+  updated_at: Date | string | null;
 }
 
 /** The cancel handler additionally reads the caregiver payment columns (OH-211). */
@@ -255,6 +271,8 @@ const BOOKING_COLUMNS = [
   'end_min',
   'rate_cents',
   'auto_complete_at',
+  'confirmed_at',
+  'updated_at',
 ] as const;
 
 /**
@@ -496,6 +514,15 @@ export function registerConsultationBookingRoutes(app: OpenAPIHono<AppEnv>): voi
       endMin: slot.endMin,
       rateCents: profile?.published_rate_cents ?? null,
       autoCompleteAt: autoCompleteAt.toISOString(),
+      // A freshly-`accepted` Booking is never completed → the inert rating view.
+      rating: buildBookingRatingView({
+        state,
+        completedAt: null,
+        pair: { parentToSupply: null, supplyToParent: null },
+        viewerDirection: 'parent-to-supply',
+        now,
+      }),
+      counterpartyRating: null,
     };
     return c.json(summary, 201);
   });
@@ -556,6 +583,18 @@ export function registerConsultationBookingRoutes(app: OpenAPIHono<AppEnv>): voi
       }
     }
 
+    // Two-way ratings (OH-214): each Booking's viewer-relative status, plus — for a
+    // Provider viewer — the Parent counterparty's supply-internal standing (batched).
+    const now = new Date();
+    const viewerDirection: RatingDirection =
+      viewerRole === 'parent' ? 'parent-to-supply' : 'supply-to-parent';
+    const [pairs, parentAggs] = await Promise.all([
+      loadRatingsByBooking(db, rows.map((r) => r.id)),
+      viewerRole === 'provider'
+        ? loadParentRatingAggregates(db, [...new Set(rows.map((r) => r.parent_uid))], now)
+        : Promise.resolve(new Map<string, RatingAggregate>()),
+    ]);
+
     const bookings: z.infer<typeof BookingSummarySchema>[] = rows.map((r) => ({
       id: r.id,
       kind: r.kind,
@@ -572,6 +611,15 @@ export function registerConsultationBookingRoutes(app: OpenAPIHono<AppEnv>): voi
       endMin: r.end_min,
       rateCents: r.rate_cents,
       autoCompleteAt: r.auto_complete_at != null ? toIso(r.auto_complete_at) : null,
+      rating: buildBookingRatingView({
+        state: r.state,
+        completedAt: completionAnchor(r),
+        pair: pairs.get(r.id) ?? { parentToSupply: null, supplyToParent: null },
+        viewerDirection,
+        now,
+      }),
+      counterpartyRating:
+        viewerRole === 'provider' ? parentAggs.get(r.parent_uid) ?? { averageStars: null, count: 0 } : null,
     }));
 
     return c.json({ bookings }, 200);

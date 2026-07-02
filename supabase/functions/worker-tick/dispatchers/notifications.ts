@@ -48,6 +48,20 @@ export interface WebPushSubscriptionRef {
   endpoint: string;
 }
 
+/**
+ * Per-recipient channel opt-outs (OH-221; `notification_preferences`). Best-effort
+ * `push` / `web_push` / `email` are suppressed when explicitly `false`; `sms`
+ * is carried but never suppresses the mandatory-SMS set. Absent (no row) ⇒ every
+ * field `true` — the dispatcher only blocks a channel it holds an explicit
+ * `false` for, so an unresolved preference (undefined) is treated as "on".
+ */
+export interface NotificationChannelPreferences {
+  push: boolean;
+  webPush: boolean;
+  email: boolean;
+  sms: boolean;
+}
+
 export interface RecipientContacts {
   /** From `auth.users.email`. */
   email: string | null;
@@ -55,6 +69,8 @@ export interface RecipientContacts {
   phone: string | null;
   expoPushTokens: string[];
   webPushSubscriptions: WebPushSubscriptionRef[];
+  /** Channel opt-outs (OH-221). Omitted ⇒ all channels on. */
+  preferences?: NotificationChannelPreferences;
 }
 
 /** All recipient-table I/O behind one seam so the dispatcher is fake-testable. */
@@ -101,6 +117,9 @@ export function createNotificationsDispatcher(
       // the drain treats as a retryable failure (never a silent broken deep link).
       const rendered = renderNotification(kind, row.payload, deps.bases);
       const contacts = await deps.resolver.resolve(row.recipient_uid);
+      // OH-221: an absent preference (no row) ⇒ the channel is on; only an
+      // explicit `false` suppresses. Mandatory SMS ignores prefs entirely.
+      const prefs = contacts.preferences;
 
       let deliveredAny = false;
       const bestEffortErrors: string[] = [];
@@ -118,7 +137,12 @@ export function createNotificationsDispatcher(
       }
 
       // ── 2. Push (Expo) — best-effort ──
-      if (entry.channels.includes('push') && deps.expoPush && contacts.expoPushTokens.length > 0) {
+      if (
+        entry.channels.includes('push') &&
+        prefs?.push !== false &&
+        deps.expoPush &&
+        contacts.expoPushTokens.length > 0
+      ) {
         try {
           const result = await deps.expoPush.sendPush(
             contacts.expoPushTokens.map((token) => ({
@@ -142,6 +166,7 @@ export function createNotificationsDispatcher(
       // ── 3. Web push (VAPID, empty tickle) — best-effort (adapter swallows per-endpoint) ──
       if (
         entry.channels.includes('web_push') &&
+        prefs?.webPush !== false &&
         deps.webPush &&
         contacts.webPushSubscriptions.length > 0
       ) {
@@ -159,7 +184,7 @@ export function createNotificationsDispatcher(
       }
 
       // ── 4. Email (Resend) — best-effort ──
-      if (entry.channels.includes('email') && deps.resend && contacts.email) {
+      if (entry.channels.includes('email') && prefs?.email !== false && deps.resend && contacts.email) {
         try {
           await deps.resend.sendEmail({
             to: contacts.email,
@@ -209,6 +234,12 @@ export function makeKyselyRecipientResolver(db: Db): RecipientResolver {
         .select('endpoint')
         .where('uid', '=', uid)
         .execute();
+      // Channel opt-outs (OH-221). No row ⇒ undefined ⇒ every channel on.
+      const prefRow = await db
+        .selectFrom('notification_preferences')
+        .select(['push', 'web_push', 'email', 'sms'])
+        .where('uid', '=', uid)
+        .executeTakeFirst();
 
       const row = user.rows[0];
       // Supabase stores empty phone/email as '' rather than NULL in some flows.
@@ -220,6 +251,9 @@ export function makeKyselyRecipientResolver(db: Db): RecipientResolver {
         phone,
         expoPushTokens: tokens.map((t) => t.expo_push_token),
         webPushSubscriptions: subs.map((s) => ({ endpoint: s.endpoint })),
+        preferences: prefRow
+          ? { push: prefRow.push, webPush: prefRow.web_push, email: prefRow.email, sms: prefRow.sms }
+          : undefined,
       };
     },
 

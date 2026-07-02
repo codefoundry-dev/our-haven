@@ -33,6 +33,13 @@ import {
 } from '../services/payment-source.ts';
 import { insertDisputeRecord } from '../services/disputes.ts';
 import { reconcileSupplyStanding } from '../services/supply-flags.ts';
+import {
+  buildBookingRatingView,
+  completionAnchor,
+  loadRatingsByBooking,
+} from '../services/ratings.ts';
+import { RatingStatusSchema } from './ratings.ts';
+import { canTipOf, tipViewOf, TipViewSchema } from './booking-tips.ts';
 
 /**
  * Parent-facing Caregiver Booking management (OH-211 + OH-212) — the
@@ -142,6 +149,13 @@ const BookingDetailSchema = z
     disputeReason: DisputeReasonEnum.nullable(),
     /** A Parent's pending shorten awaiting Caregiver approval, or null (OH-212). */
     pendingTimeChange: PendingTimeChangeSchema.nullable(),
+    /** Two-way rating status from the Parent's perspective (OH-214). */
+    rating: RatingStatusSchema,
+    /** The live post-session tip, or null when none is set (OH-215; ADR-0018). */
+    tip: TipViewSchema.nullable(),
+    /** Whether the Parent may set/edit the tip now (completed Caregiver Booking,
+     *  tip not yet settled). */
+    canTip: z.boolean(),
   })
   .openapi('BookingDetail');
 
@@ -273,6 +287,11 @@ interface BookingRow {
   pending_time_change_note: string | null;
   pending_time_change_requested_at: Date | string | null;
   per_child_surcharge_cents: number | null;
+  tip_cents: number | null;
+  tip_status: 'requires_action' | 'authorized' | 'captured' | 'failed' | null;
+  confirmed_at: Date | string | null;
+  auto_complete_at: Date | string | null;
+  updated_at: Date | string | null;
 }
 
 const BOOKING_COLUMNS = [
@@ -310,6 +329,11 @@ const BOOKING_COLUMNS = [
   'pending_time_change_note',
   'pending_time_change_requested_at',
   'per_child_surcharge_cents',
+  'tip_cents',
+  'tip_status',
+  'confirmed_at',
+  'auto_complete_at',
+  'updated_at',
 ] as const;
 
 function toDateStr(value: Date | string): string {
@@ -590,6 +614,18 @@ export function registerBookingRoutes(app: OpenAPIHono<AppEnv>): void {
       .where('provider_id', '=', row.provider_id)
       .executeTakeFirst()) as { display_name: string | null } | undefined;
 
+    // Two-way rating status (OH-214) — the Parent rates the supply member.
+    const pair =
+      (await loadRatingsByBooking(db, [row.id])).get(row.id) ??
+      { parentToSupply: null, supplyToParent: null };
+    const rating = buildBookingRatingView({
+      state: row.state,
+      completedAt: completionAnchor(row),
+      pair,
+      viewerDirection: 'parent-to-supply',
+      now: new Date(),
+    });
+
     const addressRevealed = ADDRESS_REVEALED.has(row.state);
     return c.json(
       {
@@ -629,6 +665,10 @@ export function registerBookingRoutes(app: OpenAPIHono<AppEnv>): void {
           const p = readPendingTimeChange(row);
           return p ? pendingToWire(p, row.start_min) : null;
         })(),
+        rating,
+        // Post-session tip (OH-215) — the live tip + whether it is editable now.
+        tip: tipViewOf(row),
+        canTip: canTipOf(row),
       },
       200,
     );

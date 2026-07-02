@@ -21,7 +21,14 @@ interface Tables {
   caregiver_credentials?: Record<string, unknown>[];
   provider_slots?: Record<string, unknown>[];
   specialist_credentials?: Record<string, unknown>[];
+  // Two-way ratings (OH-214): completed Bookings + their rating rows + any open
+  // disputes feed the public profile Rating aggregation.
+  bookings?: Record<string, unknown>[];
+  ratings?: Record<string, unknown>[];
+  disputes?: Record<string, unknown>[];
 }
+
+const daysAgo = (d: number) => new Date(Date.now() - d * 24 * 60 * 60 * 1000);
 
 function makeDb(tables: Tables = {}) {
   const chain = (rows: unknown[]) => {
@@ -216,8 +223,51 @@ describe('GET /v1/supply/{id} — listable Caregiver', () => {
     expect(body.credentials[0]!.label).toBe('CPR & First Aid');
   });
 
-  it('public Ratings are empty at cold start (no persistence yet)', async () => {
+  it('public Ratings are empty when there are no completed Bookings', async () => {
     const app = buildApp(makeDeps(makeDb(listableCaregiver())));
+    const body = (await (await app.request(PATH, get(await parentToken()))).json()) as Body;
+    expect(body.rating).toEqual({ average: null, count: 0, reviews: [] });
+  });
+
+  it('public Ratings aggregate revealed Parent→supply reviews (with text)', async () => {
+    // Two completed Bookings; their 14-day windows have closed → both Parent
+    // reviews are revealed even though the supply never rated back.
+    const app = buildApp(
+      makeDeps(
+        makeDb(
+          listableCaregiver({
+            bookings: [
+              { id: 'b1', parent_uid: 'p1', state: 'completed', confirmed_at: daysAgo(20), auto_complete_at: null, updated_at: daysAgo(20) },
+              { id: 'b2', parent_uid: 'p2', state: 'completed', confirmed_at: daysAgo(20), auto_complete_at: null, updated_at: daysAgo(20) },
+            ],
+            ratings: [
+              { booking_id: 'b1', direction: 'parent-to-supply', stars: 5, text: 'Fantastic tutor' },
+              { booking_id: 'b2', direction: 'parent-to-supply', stars: 4, text: null },
+            ],
+          }),
+        ),
+      ),
+    );
+    const body = (await (await app.request(PATH, get(await parentToken()))).json()) as Body;
+    expect(body.rating).toMatchObject({ average: 4.5, count: 2 });
+    expect(body.rating.reviews).toEqual([
+      { stars: 5, text: 'Fantastic tutor' },
+      { stars: 4, text: null },
+    ]);
+  });
+
+  it('withholds a review whose Booking has an open dispute', async () => {
+    const app = buildApp(
+      makeDeps(
+        makeDb(
+          listableCaregiver({
+            bookings: [{ id: 'b1', parent_uid: 'p1', state: 'completed', confirmed_at: daysAgo(20), auto_complete_at: null, updated_at: daysAgo(20) }],
+            ratings: [{ booking_id: 'b1', direction: 'parent-to-supply', stars: 1, text: 'unhappy' }],
+            disputes: [{ subject_type: 'booking', subject_id: 'b1', status: 'open' }],
+          }),
+        ),
+      ),
+    );
     const body = (await (await app.request(PATH, get(await parentToken()))).json()) as Body;
     expect(body.rating).toEqual({ average: null, count: 0, reviews: [] });
   });

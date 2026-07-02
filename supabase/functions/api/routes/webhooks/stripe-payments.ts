@@ -180,6 +180,85 @@ async function handleBookingPaymentEvent(
   }
 }
 
+interface TipPaymentRow {
+  id: string;
+  parent_uid: string;
+  tip_status: string | null;
+}
+
+/**
+ * Mirror a TIP PaymentIntent's Stripe lifecycle onto its `bookings` tip columns
+ * (OH-215; ADR-0018). Keyed by `tip_payment_intent_id` — an event for a
+ * superseded tip PI (already replaced by an edit, or cleared) matches no row
+ * and is a no-op. A settled (`captured`) tip is terminal and never walked back.
+ */
+async function handleTipPaymentEvent(
+  db: Db,
+  eventType: string,
+  pi: WebhookPaymentIntent,
+): Promise<void> {
+  const booking = (await db
+    .selectFrom('bookings')
+    .select(['id', 'parent_uid', 'tip_status'])
+    .where('tip_payment_intent_id', '=', pi.id)
+    .executeTakeFirst()) as TipPaymentRow | undefined;
+  if (!booking) return; // a stale (edited-away / cleared) tip PI — expected noise
+  const now = new Date();
+  const settled = booking.tip_status === 'captured';
+
+  switch (eventType) {
+    case 'payment_intent.amount_capturable_updated': {
+      // The tip hold is placed — a 3DS challenge completed (requires_action →
+      // authorized). `tip_settle_at` keeps its original last-edit anchor.
+      if (settled) return;
+      await db
+        .updateTable('bookings')
+        .set({ tip_status: 'authorized', updated_at: now })
+        .where('id', '=', booking.id)
+        .execute();
+      return;
+    }
+    case 'payment_intent.succeeded': {
+      // Captured — the zero-fee pass-through transferred to the Caregiver. The
+      // sweep is the usual capturer; this reconciles it (or a Dashboard capture).
+      await db
+        .updateTable('bookings')
+        .set({ tip_status: 'captured', tip_settle_at: null, tip_captured_at: now, updated_at: now })
+        .where('id', '=', booking.id)
+        .execute();
+      return;
+    }
+    case 'payment_intent.canceled': {
+      // The hold died outside our edit flow (e.g. the ~7-day hold expiry) — the
+      // tip never settled, so clear it; the Parent may tip again.
+      if (settled) return;
+      await db
+        .updateTable('bookings')
+        .set({
+          tip_cents: null,
+          tip_payment_intent_id: null,
+          tip_status: null,
+          tip_settle_at: null,
+          updated_at: now,
+        })
+        .where('id', '=', booking.id)
+        .execute();
+      return;
+    }
+    case 'payment_intent.payment_failed': {
+      if (settled) return;
+      await db
+        .updateTable('bookings')
+        .set({ tip_status: 'failed', tip_settle_at: null, updated_at: now })
+        .where('id', '=', booking.id)
+        .execute();
+      return;
+    }
+    default:
+      return; // any other tip PI event → ack, no-op
+  }
+}
+
 const webhookRoute = createRoute({
   method: 'post',
   path: '/webhooks/stripe-payments',
@@ -218,6 +297,13 @@ export function registerStripePaymentsWebhookRoutes(app: OpenAPIHono<AppEnv>): v
     // states are never walked back by a late / duplicate delivery.
     if (purpose === 'booking') {
       await handleBookingPaymentEvent(db as Db, event.type, pi);
+      return c.json({ received: true as const }, 200);
+    }
+
+    // ── Tip lifecycle (OH-215): the zero-fee pass-through hold, keyed by
+    // tip_payment_intent_id. Same idempotent / out-of-order posture as bookings.
+    if (purpose === 'tip') {
+      await handleTipPaymentEvent(db as Db, event.type, pi);
       return c.json({ received: true as const }, 200);
     }
 

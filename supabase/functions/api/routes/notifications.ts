@@ -65,16 +65,20 @@ const WebPushDeleteRequest = z
   .object({ endpoint: z.string().url().max(2048) })
   .openapi('NotificationWebPushDeleteRequest');
 
+// NB: OpenAPI component names are GLOBAL across route files (a duplicate silently
+// overwrites — the OH-218 gotcha); OH-221's notification-preferences.ts owns
+// 'NotificationPreferences' (channel opt-outs), so the marketing pair is
+// namespaced 'Marketing*'.
 const PreferencesResponse = z
   .object({
     /** Whether the user has opted IN to marketing messages (default false). */
     marketingOptIn: z.boolean(),
   })
-  .openapi('NotificationPreferences');
+  .openapi('MarketingPreferences');
 
 const PreferencesRequest = z
   .object({ marketingOptIn: z.boolean() })
-  .openapi('NotificationPreferencesRequest');
+  .openapi('MarketingPreferencesRequest');
 
 /* ── helpers ─────────────────────────────────────────────────────────────────── */
 

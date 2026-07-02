@@ -24,6 +24,9 @@ import { CancelSheet } from '@/components/parent/CancelSheet';
 import { DisputeSheet } from '@/components/parent/DisputeSheet';
 import { NoShowSheet } from '@/components/parent/NoShowSheet';
 import { AdjustTimeSheet } from '@/components/parent/AdjustTimeSheet';
+import { TipSheet } from '@/components/parent/TipSheet';
+import { RatingSheet } from '@/components/RatingSheet';
+import { RatingValue } from '@/components/ui/StarRating';
 import { ApiError, confirmBookingHours, rescindReduceRequest } from '@/api/client';
 import { formatMoney } from '@/lib/offerCopy';
 import {
@@ -48,6 +51,8 @@ export default function BookingDetailScreen() {
   const [disputeOpen, setDisputeOpen] = useState(false);
   const [noShowOpen, setNoShowOpen] = useState(false);
   const [adjustOpen, setAdjustOpen] = useState(false);
+  const [ratingOpen, setRatingOpen] = useState(false);
+  const [tipOpen, setTipOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -172,8 +177,14 @@ export default function BookingDetailScreen() {
               ...(totalCents - rateCents * hours > 0
                 ? [{ label: 'Per-child surcharge', value: formatMoney(totalCents - rateCents * hours), muted: true }]
                 : []),
+              ...(booking.tip
+                ? [{ label: 'Tip (100% to the caregiver)', value: formatMoney(booking.tip.amountCents), muted: true }]
+                : []),
             ]}
-            total={{ label: 'Total', value: formatMoney(totalCents) }}
+            total={{
+              label: booking.tip ? 'Total incl. tip' : 'Total',
+              value: formatMoney(totalCents + (booking.tip?.amountCents ?? 0)),
+            }}
           />
         </View>
 
@@ -252,6 +263,70 @@ export default function BookingDetailScreen() {
             <Icon name="chevron-right" size={16} color={colors.ink3} />
           </Pressable>
         ) : null}
+
+        {/* Two-way rating (OH-214) — offer to rate a completed booking, or show the
+            rating already left (with the counterparty's stars once revealed). */}
+        {actions.canRate ? (
+          <Pressable style={[styles.manageRow, styles.rateRow]} onPress={() => setRatingOpen(true)} accessibilityRole="button">
+            <View style={styles.manageIcon}>
+              <Icon name="star" size={17} color={colors.ink} />
+            </View>
+            <View style={styles.manageText}>
+              <Text style={styles.manageLabel}>Rate {booking.kind === 'caregiver' ? 'the caregiver' : 'the provider'}</Text>
+              <Text style={styles.manageSub}>Leave a 1–5 star rating within 14 days</Text>
+            </View>
+            <Icon name="chevron-right" size={16} color={colors.ink3} />
+          </Pressable>
+        ) : booking.rating.mine ? (
+          <View style={styles.ratingCard}>
+            <View style={styles.ratingHead}>
+              <Text style={styles.ratingTitle}>Your rating</Text>
+              <RatingValue value={booking.rating.mine.stars} />
+            </View>
+            {booking.rating.mine.text ? <Text style={styles.ratingText}>{booking.rating.mine.text}</Text> : null}
+            {booking.rating.revealed && booking.rating.counterparty ? (
+              <View style={styles.ratingReveal}>
+                <Text style={styles.ratingRevealText}>They rated you</Text>
+                <RatingValue value={booking.rating.counterparty.stars} />
+              </View>
+            ) : (
+              <Text style={styles.ratingPending}>
+                Their rating stays hidden until they rate too or the 14-day window closes.
+              </Text>
+            )}
+          </View>
+        ) : null}
+
+        {/* Post-session tip (OH-215) — add / edit while mutable; final once settled. */}
+        {booking.canTip || booking.tip ? (
+          <Pressable
+            style={[styles.manageRow, styles.rateRow]}
+            onPress={() => booking.canTip && setTipOpen(true)}
+            disabled={!booking.canTip}
+            accessibilityRole="button"
+          >
+            <View style={styles.manageIcon}>
+              <Icon name="dollar" size={17} color={colors.ink} />
+            </View>
+            <View style={styles.manageText}>
+              <Text style={styles.manageLabel}>
+                {booking.tip ? `Tip · ${formatMoney(booking.tip.amountCents)}` : 'Add a tip'}
+              </Text>
+              <Text style={styles.manageSub}>
+                {!booking.tip
+                  ? '100% goes to the caregiver — no fees'
+                  : booking.tip.settled
+                    ? 'Paid in full to the caregiver'
+                    : booking.tip.status === 'requires_action'
+                      ? 'Card confirmation needed — tap to finish'
+                      : booking.tip.status === 'failed'
+                        ? 'Payment failed — tap to retry'
+                        : 'Tap to edit or remove — settles in about 24h'}
+              </Text>
+            </View>
+            {booking.canTip ? <Icon name="chevron-right" size={16} color={colors.ink3} /> : null}
+          </Pressable>
+        ) : null}
       </ScrollView>
 
       <View style={styles.footer}>
@@ -314,6 +389,29 @@ export default function BookingDetailScreen() {
         onClose={() => setAdjustOpen(false)}
         onAdjusted={() => {
           setAdjustOpen(false);
+          void reload();
+        }}
+      />
+      <RatingSheet
+        visible={ratingOpen}
+        bookingId={bookingId}
+        subjectName={booking.counterpartyName}
+        target="supply"
+        onClose={() => setRatingOpen(false)}
+        onRated={() => {
+          setRatingOpen(false);
+          void reload();
+          // The natural "how did it go?" moment (ADR-0018): offer a tip right
+          // after the rating lands — Caregiver Bookings only, never required.
+          if (booking.canTip) setTipOpen(true);
+        }}
+      />
+      <TipSheet
+        visible={tipOpen}
+        booking={booking}
+        onClose={() => setTipOpen(false)}
+        onSaved={() => {
+          setTipOpen(false);
           void reload();
         }}
       />
@@ -399,6 +497,22 @@ const styles = StyleSheet.create({
   manageText: { flex: 1, minWidth: 0 },
   manageLabel: { fontFamily: fonts.semibold, fontSize: 14.5, color: colors.ink },
   manageSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.ink2, marginTop: 1 },
+  rateRow: { marginTop: 12 },
+
+  ratingCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.lg,
+    padding: 16,
+    marginTop: 12,
+    gap: 8,
+    ...shadow.e1,
+  },
+  ratingHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  ratingTitle: { fontFamily: fonts.semibold, fontSize: 14.5, color: colors.ink },
+  ratingText: { fontFamily: fonts.regular, fontSize: 13.5, lineHeight: 19, color: colors.ink2 },
+  ratingReveal: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
+  ratingRevealText: { fontFamily: fonts.semibold, fontSize: 13, color: colors.ink2 },
+  ratingPending: { fontFamily: fonts.regular, fontSize: 12, lineHeight: 17, color: colors.ink3 },
 
   err: { fontFamily: fonts.medium, fontSize: 13, color: colors.danger, textAlign: 'center', marginVertical: 8 },
 

@@ -13,6 +13,7 @@ import {
   dueRemindersQuery,
   dueRequestExpiryQuery,
   dueScreeningsQuery,
+  dueTipSettleQuery,
   jobExpirySweep,
   jobExpiryWarnSweep,
   offerExpirySweep,
@@ -20,6 +21,7 @@ import {
   sessionAutoConfirmSweep,
   sessionStartReminderSweep,
   SWEEPS,
+  tipSettleSweep,
 } from './sweeps.ts';
 import { compileOnlyDb } from './_test/env.ts';
 
@@ -111,13 +113,14 @@ function makeStripe(over: Record<string, unknown> = {}) {
 const NOW = new Date('2026-07-12T12:00:00Z');
 
 describe('SWEEPS registry', () => {
-  it('includes screening + consultation + booking-payment + the OH-223 notification sweeps in order', () => {
+  it('includes screening + consultation + booking-payment + tip settle + the OH-223 notification sweeps in order', () => {
     expect(SWEEPS.map((s) => s.name)).toEqual([
       'screening_disposal',
       'consultation_auto_complete',
       'booking_authorize_due',
       'booking_request_expiry',
       'session_auto_confirm',
+      'tip_settle',
       'session_start_reminder',
       'offer_expiry',
       'job_expiry_warn',
@@ -424,6 +427,99 @@ describe('sessionAutoConfirmSweep', () => {
     });
     const res = await sessionAutoConfirmSweep.run(db, { now: NOW, limit: 100, stripe: makeStripe() });
     expect(res.processed).toBe(0);
+    expect(updates).toHaveLength(0);
+  });
+});
+
+// ── Tip settlement sweep (OH-215; ADR-0018 §3) ─────────────────────────────────
+describe('dueTipSettleQuery (SKIP LOCKED claim)', () => {
+  it('scans live tip holds by tip_settle_at', () => {
+    const { sql } = dueTipSettleQuery(compileOnlyDb(), NOW, 1000).compile();
+    const lower = sql.toLowerCase();
+    expect(lower).toContain('for update');
+    expect(lower).toContain('skip locked');
+    expect(lower).toContain('"tip_status" in');
+    expect(lower).toContain('"tip_settle_at" <=');
+  });
+});
+
+describe('tipSettleSweep', () => {
+  const dueTip = (over: Record<string, unknown> = {}) => ({
+    id: 'b1',
+    provider_id: 'p1',
+    tip_cents: 1000,
+    tip_payment_intent_id: 'pi_tip_1',
+    tip_status: 'authorized',
+    ...over,
+  });
+
+  it('skips (records an error) when Stripe is unconfigured', async () => {
+    const { db } = makeTrx();
+    const res = await tipSettleSweep.run(db, { now: NOW, limit: 100 });
+    expect(res).toMatchObject({ name: 'tip_settle', processed: 0, error: 'stripe_unconfigured' });
+  });
+
+  it('captures a due authorized tip (zero fee) and notifies the Caregiver', async () => {
+    const captured: Array<Record<string, unknown>> = [];
+    const stripe = makeStripe({
+      capturePaymentIntent: async (input: Record<string, unknown>) => {
+        captured.push(input);
+        return { id: 'pi_tip_1', status: 'succeeded', amount: 1000 };
+      },
+    });
+    const { db, updates, inserts } = makeTrx({
+      bookings: [dueTip()],
+      providers: [{ uid: 'uid-cg' }],
+    });
+    const res = await tipSettleSweep.run(db, { now: NOW, limit: 100, stripe });
+    expect(res).toEqual({ name: 'tip_settle', processed: 1 });
+    // The pass-through capture: full amount, application fee 0 (ADR-0018 §2).
+    expect(captured[0]).toMatchObject({ id: 'pi_tip_1', applicationFeeCents: 0 });
+    expect(updates[0]!.set).toMatchObject({
+      tip_status: 'captured',
+      tip_settle_at: null,
+      tip_captured_at: NOW,
+    });
+    expect(inserts[0]!.values).toMatchObject({
+      recipient_uid: 'uid-cg',
+      event_type: 'booking_tip_received',
+      dedupe_key: 'booking_tip_received:pi_tip_1',
+    });
+  });
+
+  it('releases + clears a tip stuck on requires_action (abandoned 3DS)', async () => {
+    const cancelled: string[] = [];
+    const stripe = makeStripe({
+      cancelPaymentIntent: async (id: string) => {
+        cancelled.push(id);
+        return { id, status: 'canceled', amount: 0 };
+      },
+    });
+    const { db, updates, inserts } = makeTrx({
+      bookings: [dueTip({ tip_status: 'requires_action' })],
+      providers: [{ uid: 'uid-cg' }],
+    });
+    const res = await tipSettleSweep.run(db, { now: NOW, limit: 100, stripe });
+    expect(res).toEqual({ name: 'tip_settle', processed: 1 });
+    expect(cancelled).toEqual(['pi_tip_1']);
+    expect(updates[0]!.set).toMatchObject({
+      tip_cents: null,
+      tip_payment_intent_id: null,
+      tip_status: null,
+      tip_settle_at: null,
+    });
+    expect(inserts).toHaveLength(0); // no money moved — nothing to announce
+  });
+
+  it('isolates a capture failure to its row (logged, not thrown)', async () => {
+    const stripe = makeStripe({
+      capturePaymentIntent: async () => {
+        throw new Error('boom');
+      },
+    });
+    const { db, updates } = makeTrx({ bookings: [dueTip()], providers: [{ uid: 'uid-cg' }] });
+    const res = await tipSettleSweep.run(db, { now: NOW, limit: 100, stripe });
+    expect(res).toEqual({ name: 'tip_settle', processed: 0 });
     expect(updates).toHaveLength(0);
   });
 });

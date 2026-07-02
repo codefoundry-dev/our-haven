@@ -259,6 +259,12 @@ async function loadThreadByParentProvider(
     .select(THREAD_COLUMNS)
     .where('parent_uid', '=', parentUid)
     .where('provider_id', '=', providerId)
+    // The pre-acceptance Direct-Message thread is the one with no Job anchor. A
+    // (parent, provider) pair may also have job-anchored Application threads
+    // (OH-219, job_id set) — those are reached via their Job/Application surface,
+    // never this general "open a DM" get-or-create (mirrors the partial
+    // message_threads_parent_provider_dm_uniq index).
+    .where('job_id', 'is', null)
     .executeTakeFirst();
   return row ? (row as unknown as ThreadRow) : null;
 }

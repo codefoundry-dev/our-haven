@@ -5,11 +5,14 @@ import {
   applyCancellationCharge,
   authorizeBooking,
   captureBooking,
+  captureTip,
   commissionOn,
   mapAuthorizeStatus,
   priceBooking,
   reauthorizeBooking,
   releaseBookingHold,
+  setBookingTip,
+  TIP_SETTLE_HOURS,
 } from './booking-payments.ts';
 
 /** A Stripe stub whose booking-payment methods are vi.fn()s; everything else 503s. */
@@ -248,5 +251,101 @@ describe('reauthorizeBooking', () => {
     expect(stripe.cancelPaymentIntent).toHaveBeenCalledWith('pi_old', 'booking:reauth-release:bkg-1');
     expect(stripe.createBookingPaymentIntent).toHaveBeenCalled();
     expect(res.patch.payment_status).toBe('authorized');
+  });
+});
+
+// ── Tip — commission-exempt pass-through (OH-215; ADR-0018) ────────────────────
+
+const NOW = new Date('2026-07-16T12:00:00Z');
+
+const TIP_INPUT = {
+  bookingId: 'bkg-1',
+  tipCents: 1_000,
+  oldTipPaymentIntentId: null,
+  connectAccountId: 'acct_cg',
+  customerId: 'cus_parent',
+  paymentMethodId: 'pm_saved',
+  description: 'Our Haven tip — booking bkg-1',
+  now: NOW,
+};
+
+describe('setBookingTip', () => {
+  it('places a ZERO-application-fee destination hold — 100% to the Caregiver', async () => {
+    const stripe = makeStripe();
+    const res = await setBookingTip(stripe, TIP_INPUT);
+    expect(stripe.createBookingPaymentIntent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amountCents: 1_000,
+        applicationFeeCents: 0, // no Commission skim on a gift (ADR-0018 §2)
+        destinationAccountId: 'acct_cg',
+        confirm: true,
+        offSession: false,
+        metadata: { purpose: 'tip', booking_id: 'bkg-1' },
+        idempotencyKey: `tip:authorize:bkg-1:${NOW.getTime()}`,
+      }),
+    );
+    expect(res.patch).toMatchObject({
+      tip_cents: 1_000,
+      tip_payment_intent_id: 'pi_new',
+      tip_status: 'authorized',
+    });
+    // The ADR-0018 §3 settlement cut-off anchors on the edit instant.
+    expect(res.patch.tip_settle_at).toEqual(new Date(NOW.getTime() + TIP_SETTLE_HOURS * 60 * 60 * 1000));
+    expect(res.clientSecret).toBe('pi_new_secret');
+    expect(stripe.cancelPaymentIntent).not.toHaveBeenCalled();
+  });
+
+  it('releases the prior hold before placing the new one (edit)', async () => {
+    const stripe = makeStripe();
+    await setBookingTip(stripe, { ...TIP_INPUT, oldTipPaymentIntentId: 'pi_tip_old' });
+    expect(stripe.cancelPaymentIntent).toHaveBeenCalledWith('pi_tip_old', 'tip:release:pi_tip_old');
+    expect(stripe.createBookingPaymentIntent).toHaveBeenCalled();
+  });
+
+  it('clears on tipCents 0: releases the hold, nulls the patch, no new PI', async () => {
+    const stripe = makeStripe();
+    const res = await setBookingTip(stripe, { ...TIP_INPUT, tipCents: 0, oldTipPaymentIntentId: 'pi_tip_old' });
+    expect(stripe.cancelPaymentIntent).toHaveBeenCalledWith('pi_tip_old', 'tip:release:pi_tip_old');
+    expect(stripe.createBookingPaymentIntent).not.toHaveBeenCalled();
+    expect(res.patch).toEqual({
+      tip_cents: null,
+      tip_payment_intent_id: null,
+      tip_status: null,
+      tip_settle_at: null,
+    });
+    expect(res.clientSecret).toBeNull();
+  });
+
+  it('surfaces a 3DS requires_action result', async () => {
+    const stripe = makeStripe({
+      createBookingPaymentIntent: vi.fn(async () => ({
+        id: 'pi_3ds',
+        client_secret: 'pi_3ds_secret',
+        status: 'requires_action',
+      })),
+    });
+    const res = await setBookingTip(stripe, TIP_INPUT);
+    expect(res.patch.tip_status).toBe('requires_action');
+    expect(res.clientSecret).toBe('pi_3ds_secret');
+  });
+
+  it('throws on caller-bug amounts (the domain calculateTip guard)', async () => {
+    const stripe = makeStripe();
+    await expect(setBookingTip(stripe, { ...TIP_INPUT, tipCents: -5 })).rejects.toThrow(/non-negative integer/);
+    await expect(setBookingTip(stripe, { ...TIP_INPUT, tipCents: 10.5 })).rejects.toThrow(/non-negative integer/);
+    expect(stripe.cancelPaymentIntent).not.toHaveBeenCalled();
+  });
+});
+
+describe('captureTip', () => {
+  it('captures the full hold with a 0 application fee — the pass-through payout', async () => {
+    const stripe = makeStripe();
+    const res = await captureTip(stripe, { paymentIntentId: 'pi_tip_1', now: NOW });
+    expect(stripe.capturePaymentIntent).toHaveBeenCalledWith({
+      id: 'pi_tip_1',
+      applicationFeeCents: 0,
+      idempotencyKey: 'tip:capture:pi_tip_1',
+    });
+    expect(res.patch).toEqual({ tip_status: 'captured', tip_settle_at: null, tip_captured_at: NOW });
   });
 });
