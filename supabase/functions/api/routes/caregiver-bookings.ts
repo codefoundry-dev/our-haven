@@ -114,6 +114,11 @@ const CaregiverBookingSchema = z
     /** The Parent's supply-internal standing (aggregate stars + count, no text) —
      *  the asymmetric parent-rating projection a supply member sees (OH-214). */
     parentRating: RatingAggregateSchema,
+    /** The Parent's post-session tip — 100% pass-through, no Commission (OH-215;
+     *  ADR-0018). Surfaced once the tip hold is live; null when none. */
+    tipCents: z.number().int().nullable(),
+    /** true once the tip has captured (paid out with the zero-fee transfer). */
+    tipSettled: z.boolean(),
   })
   .openapi('CaregiverBooking');
 
@@ -189,6 +194,8 @@ interface BookingRow {
   pending_time_change_hours: string | number | null;
   pending_time_change_note: string | null;
   pending_time_change_requested_at: Date | string | null;
+  tip_cents: number | null;
+  tip_status: 'requires_action' | 'authorized' | 'captured' | 'failed' | null;
   confirmed_at: Date | string | null;
   auto_complete_at: Date | string | null;
   updated_at: Date | string | null;
@@ -228,6 +235,8 @@ const BOOKING_COLUMNS = [
   'pending_time_change_hours',
   'pending_time_change_note',
   'pending_time_change_requested_at',
+  'tip_cents',
+  'tip_status',
   'confirmed_at',
   'auto_complete_at',
   'updated_at',
@@ -364,6 +373,11 @@ function serialiseBooking(
         : null,
     rating,
     parentRating,
+    // A tip surfaces to the Caregiver only once its hold is live (authorized) or
+    // settled (captured) — never a failed / 3DS-pending attempt (OH-215).
+    tipCents:
+      row.tip_status === 'authorized' || row.tip_status === 'captured' ? row.tip_cents : null,
+    tipSettled: row.tip_status === 'captured',
   };
 }
 

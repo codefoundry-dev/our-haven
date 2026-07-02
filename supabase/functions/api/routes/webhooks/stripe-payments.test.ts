@@ -294,3 +294,78 @@ describe('POST /v1/webhooks/stripe-payments — booking lifecycle', () => {
     expect(captures.updates).toHaveLength(0);
   });
 });
+
+// ── Tip lifecycle webhook (OH-215; ADR-0018) ───────────────────────────────────
+function tipEvent(type: string, pi: Record<string, unknown>) {
+  return JSON.stringify({
+    id: 'evt_t',
+    type,
+    created: 1,
+    data: { object: { metadata: { purpose: 'tip' }, currency: 'usd', ...pi } },
+  });
+}
+
+const TIP_BOOKING = { id: 'bkg-1', parent_uid: 'uid-par', tip_status: 'requires_action' };
+
+describe('POST /v1/webhooks/stripe-payments — tip lifecycle', () => {
+  it('amount_capturable_updated → authorized (a completed 3DS challenge)', async () => {
+    const { db, captures } = makeDb({ booking: TIP_BOOKING });
+    const app = buildApp(makeDeps(db));
+    const raw = tipEvent('payment_intent.amount_capturable_updated', { id: 'pi_tip_1', amount: 1000, amount_capturable: 1000 });
+    const res = await app.request(PATH, postWebhook(raw, sign(raw)));
+    expect(res.status).toBe(200);
+    expect(captures.updates[0]).toMatchObject({ table: 'bookings', set: { tip_status: 'authorized' } });
+  });
+
+  it('succeeded → captured + settle stamp (reconciles the sweep capture)', async () => {
+    const { db, captures } = makeDb({ booking: { ...TIP_BOOKING, tip_status: 'authorized' } });
+    const app = buildApp(makeDeps(db));
+    const raw = tipEvent('payment_intent.succeeded', { id: 'pi_tip_1', amount: 1000, amount_received: 1000 });
+    const res = await app.request(PATH, postWebhook(raw, sign(raw)));
+    expect(res.status).toBe(200);
+    expect(captures.updates[0]).toMatchObject({
+      table: 'bookings',
+      set: { tip_status: 'captured', tip_settle_at: null },
+    });
+    expect(captures.updates[0]!.set.tip_captured_at).toBeInstanceOf(Date);
+  });
+
+  it('canceled (e.g. hold expiry) → the tip clears entirely', async () => {
+    const { db, captures } = makeDb({ booking: { ...TIP_BOOKING, tip_status: 'authorized' } });
+    const app = buildApp(makeDeps(db));
+    const raw = tipEvent('payment_intent.canceled', { id: 'pi_tip_1', amount: 1000 });
+    const res = await app.request(PATH, postWebhook(raw, sign(raw)));
+    expect(res.status).toBe(200);
+    expect(captures.updates[0]).toMatchObject({
+      table: 'bookings',
+      set: { tip_cents: null, tip_payment_intent_id: null, tip_status: null, tip_settle_at: null },
+    });
+  });
+
+  it('payment_failed → failed (the Parent may retry)', async () => {
+    const { db, captures } = makeDb({ booking: { ...TIP_BOOKING, tip_status: 'authorized' } });
+    const app = buildApp(makeDeps(db));
+    const raw = tipEvent('payment_intent.payment_failed', { id: 'pi_tip_1', amount: 1000 });
+    const res = await app.request(PATH, postWebhook(raw, sign(raw)));
+    expect(res.status).toBe(200);
+    expect(captures.updates[0]).toMatchObject({ table: 'bookings', set: { tip_status: 'failed', tip_settle_at: null } });
+  });
+
+  it('never walks back a settled tip (out-of-order canceled after captured)', async () => {
+    const { db, captures } = makeDb({ booking: { ...TIP_BOOKING, tip_status: 'captured' } });
+    const app = buildApp(makeDeps(db));
+    const raw = tipEvent('payment_intent.canceled', { id: 'pi_tip_1', amount: 1000 });
+    const res = await app.request(PATH, postWebhook(raw, sign(raw)));
+    expect(res.status).toBe(200);
+    expect(captures.updates).toHaveLength(0);
+  });
+
+  it('acks 200 without writes for a superseded (edited-away) tip PI', async () => {
+    const { db, captures } = makeDb({ booking: null });
+    const app = buildApp(makeDeps(db));
+    const raw = tipEvent('payment_intent.canceled', { id: 'pi_tip_stale', amount: 1000 });
+    const res = await app.request(PATH, postWebhook(raw, sign(raw)));
+    expect(res.status).toBe(200);
+    expect(captures.updates).toHaveLength(0);
+  });
+});

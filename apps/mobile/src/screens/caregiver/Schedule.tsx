@@ -489,6 +489,13 @@ function PastCard({ booking, onRate }: { booking: CaregiverBooking; onRate: () =
         <Text style={styles.cardSub} numberOfLines={1}>
           {dateLabel(booking.scheduledDate)} · {subLine(booking)}
         </Text>
+        {/* Post-session tip (OH-215) — the additive payout line: 100% pass-through,
+            no Commission (ADR-0018). "settling" until the ~24h capture pays it out. */}
+        {booking.tipCents != null ? (
+          <Text style={styles.tipText} numberOfLines={1}>
+            + {formatMoney(booking.tipCents)} tip · {booking.tipSettled ? '100% yours, no fees' : 'settling — 100% yours'}
+          </Text>
+        ) : null}
         {rating.mine ? (
           <View style={styles.ratedRow}>
             <Text style={styles.ratedText}>You rated</Text>
@@ -608,6 +615,7 @@ const styles = StyleSheet.create({
   ratedRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, flexWrap: 'wrap' },
   ratedText: { fontFamily: fonts.semibold, fontSize: 12, color: colors.ink2 },
   ratedDot: { fontFamily: fonts.regular, fontSize: 12, color: colors.ink3 },
+  tipText: { fontFamily: fonts.semibold, fontSize: 12.5, color: colors.success, marginTop: 6 },
 
   state: { alignItems: 'center', gap: 12, paddingVertical: 48 },
   stateText: { fontFamily: fonts.regular, fontSize: 14, color: colors.ink2, textAlign: 'center' },

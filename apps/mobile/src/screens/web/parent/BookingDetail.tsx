@@ -23,6 +23,7 @@ import { CancelSheet } from '@/components/parent/CancelSheet';
 import { DisputeSheet } from '@/components/parent/DisputeSheet';
 import { NoShowSheet } from '@/components/parent/NoShowSheet';
 import { AdjustTimeSheet } from '@/components/parent/AdjustTimeSheet';
+import { TipSheet } from '@/components/parent/TipSheet';
 import { RatingSheet } from '@/components/RatingSheet';
 import { RatingValue } from '@/components/ui/StarRating';
 import { ApiError, confirmBookingHours, rescindReduceRequest } from '@/api/client';
@@ -50,6 +51,7 @@ export function ParentBookingDetailWeb() {
   const [noShowOpen, setNoShowOpen] = useState(false);
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [ratingOpen, setRatingOpen] = useState(false);
+  const [tipOpen, setTipOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -170,8 +172,14 @@ export function ParentBookingDetailWeb() {
                     ...(surcharge > 0
                       ? [{ label: 'Per-child surcharge', value: formatMoney(surcharge), muted: true }]
                       : []),
+                    ...(booking.tip
+                      ? [{ label: 'Tip (100% to the caregiver)', value: formatMoney(booking.tip.amountCents), muted: true }]
+                      : []),
                   ]}
-                  total={{ label: 'Total', value: formatMoney(totalCents) }}
+                  total={{
+                    label: booking.tip ? 'Total incl. tip' : 'Total',
+                    value: formatMoney(totalCents + (booking.tip?.amountCents ?? 0)),
+                  }}
                 />
               </View>
 
@@ -340,6 +348,39 @@ export function ParentBookingDetailWeb() {
               </Card>
             ) : null}
 
+            {/* Post-session tip (OH-215) — add / edit while mutable; final once settled. */}
+            {booking.canTip || booking.tip ? (
+              <Card radius={radii.xl} padding={6} style={styles.sideCard}>
+                <Pressable
+                  onPress={() => booking.canTip && setTipOpen(true)}
+                  disabled={!booking.canTip}
+                  accessibilityRole="button"
+                  style={({ pressed }) => [styles.manageRow, { opacity: pressed ? 0.85 : 1 }]}
+                >
+                  <View style={styles.manageIcon}>
+                    <Icon name="dollar" size={17} color={colors.ink} />
+                  </View>
+                  <View style={styles.manageText}>
+                    <Text style={styles.manageLabel}>
+                      {booking.tip ? `Tip · ${formatMoney(booking.tip.amountCents)}` : 'Add a tip'}
+                    </Text>
+                    <Text style={styles.manageSub}>
+                      {!booking.tip
+                        ? '100% goes to the caregiver — no fees'
+                        : booking.tip.settled
+                          ? 'Paid in full to the caregiver'
+                          : booking.tip.status === 'requires_action'
+                            ? 'Card confirmation needed — click to finish'
+                            : booking.tip.status === 'failed'
+                              ? 'Payment failed — click to retry'
+                              : 'Click to edit or remove — settles in about 24h'}
+                    </Text>
+                  </View>
+                  {booking.canTip ? <Icon name="chevron-right" size={16} color={colors.ink3} /> : null}
+                </Pressable>
+              </Card>
+            ) : null}
+
             <View style={styles.note}>
               <Icon name="info" size={18} color={colors.brand} />
               <Text style={styles.noteText}>
@@ -399,6 +440,18 @@ export function ParentBookingDetailWeb() {
         onClose={() => setRatingOpen(false)}
         onRated={() => {
           setRatingOpen(false);
+          void reload();
+          // The natural "how did it go?" moment (ADR-0018): offer a tip right
+          // after the rating lands — Caregiver Bookings only, never required.
+          if (booking.canTip) setTipOpen(true);
+        }}
+      />
+      <TipSheet
+        visible={tipOpen}
+        booking={booking}
+        onClose={() => setTipOpen(false)}
+        onSaved={() => {
+          setTipOpen(false);
           void reload();
         }}
       />

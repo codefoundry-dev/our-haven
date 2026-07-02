@@ -39,6 +39,7 @@ import {
   loadRatingsByBooking,
 } from '../services/ratings.ts';
 import { RatingStatusSchema } from './ratings.ts';
+import { canTipOf, tipViewOf, TipViewSchema } from './booking-tips.ts';
 
 /**
  * Parent-facing Caregiver Booking management (OH-211 + OH-212) — the
@@ -150,6 +151,11 @@ const BookingDetailSchema = z
     pendingTimeChange: PendingTimeChangeSchema.nullable(),
     /** Two-way rating status from the Parent's perspective (OH-214). */
     rating: RatingStatusSchema,
+    /** The live post-session tip, or null when none is set (OH-215; ADR-0018). */
+    tip: TipViewSchema.nullable(),
+    /** Whether the Parent may set/edit the tip now (completed Caregiver Booking,
+     *  tip not yet settled). */
+    canTip: z.boolean(),
   })
   .openapi('BookingDetail');
 
@@ -281,6 +287,8 @@ interface BookingRow {
   pending_time_change_note: string | null;
   pending_time_change_requested_at: Date | string | null;
   per_child_surcharge_cents: number | null;
+  tip_cents: number | null;
+  tip_status: 'requires_action' | 'authorized' | 'captured' | 'failed' | null;
   confirmed_at: Date | string | null;
   auto_complete_at: Date | string | null;
   updated_at: Date | string | null;
@@ -321,6 +329,8 @@ const BOOKING_COLUMNS = [
   'pending_time_change_note',
   'pending_time_change_requested_at',
   'per_child_surcharge_cents',
+  'tip_cents',
+  'tip_status',
   'confirmed_at',
   'auto_complete_at',
   'updated_at',
@@ -656,6 +666,9 @@ export function registerBookingRoutes(app: OpenAPIHono<AppEnv>): void {
           return p ? pendingToWire(p, row.start_min) : null;
         })(),
         rating,
+        // Post-session tip (OH-215) — the live tip + whether it is editable now.
+        tip: tipViewOf(row),
+        canTip: canTipOf(row),
       },
       200,
     );

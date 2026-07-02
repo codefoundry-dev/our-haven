@@ -421,6 +421,25 @@ export function submitBookingRating(bookingId: string, body: SubmitRatingBody): 
 }
 
 /**
+ * Post-session tipping (OH-215; ADR-0018) — an optional Parent gratuity on a
+ * completed Caregiver Booking, 100% pass-through (no Commission), offered after
+ * rating and editable later from the Booking detail. `setBookingTip` sets /
+ * edits / clears (`amountCents: 0`) the tip; it stays a mutable card hold until
+ * the ~24h settlement cut-off, then becomes immutable (`tip.settled`). The
+ * result carries a `clientSecret` for opportunistic 3DS when
+ * `tip.status === 'requires_action'`. Provider consultations can't be tipped.
+ */
+export type BookingTip = NonNullable<BookingDetail['tip']>;
+export type SetBookingTipBody =
+  paths['/v1/bookings/{bookingId}/tip']['put']['requestBody']['content']['application/json'];
+export type SetBookingTipResult =
+  paths['/v1/bookings/{bookingId}/tip']['put']['responses'][200]['content']['application/json'];
+
+export function setBookingTip(bookingId: string, body: SetBookingTipBody): Promise<SetBookingTipResult> {
+  return putJson<SetBookingTipResult>(`/v1/bookings/${bookingId}/tip`, body);
+}
+
+/**
  * Adjust booked time (OH-212, ADR-0014 §A3) — Parent-side. `extendBooking` buys
  * more time on an `accepted` Booking: it applies immediately + re-authorizes the
  * larger total (the result carries a `clientSecret` for opportunistic 3DS when

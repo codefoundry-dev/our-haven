@@ -4196,6 +4196,105 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/bookings/{bookingId}/tip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set, edit, or clear the post-session tip — OH-215
+         * @description Sets the Parent's optional gratuity on a completed Caregiver Booking (ADR-0018): a separate zero-fee destination charge — 100% to the Caregiver, no Commission. `amountCents: 0` clears a prior tip. The tip is a mutable card hold until it settles (~24h after the last edit), then immutable. When the hold needs 3DS the response carries a `clientSecret`. 409 when the Booking isn't a completed Caregiver Booking (`not_tippable`) or the tip has settled (`tip_settled`); 404 when it isn't the caller's.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    bookingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SetBookingTipRequest"];
+                };
+            };
+            responses: {
+                /** @description Tip set / updated / cleared */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingTipResult"];
+                    };
+                };
+                /** @description Invalid tip amount */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingTipError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingTipError"];
+                    };
+                };
+                /** @description Card declined on the tip hold */
+                402: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingTipError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingTipError"];
+                    };
+                };
+                /** @description Booking not found (or not the caller's) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingTipError"];
+                    };
+                };
+                /** @description Not tippable (kind/state) or the tip already settled */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingTipError"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/caregiver/bookings": {
         parameters: {
             query?: never;
@@ -8794,6 +8893,13 @@ export interface components {
             disputeReason: "overcharged" | "no-show" | "safety" | "quality" | "other" | null;
             pendingTimeChange: components["schemas"]["BookingPendingTimeChange"];
             rating: components["schemas"]["RatingStatus"];
+            tip: {
+                amountCents: number;
+                /** @enum {string} */
+                status: "requires_action" | "authorized" | "captured" | "failed";
+                settled: boolean;
+            } | null;
+            canTip: boolean;
         };
         BookingServiceAddress: {
             line1: string | null;
@@ -8870,6 +8976,24 @@ export interface components {
             newDurationHours: number;
             note?: string;
         };
+        BookingTipResult: {
+            id: string;
+            tip: {
+                amountCents: number;
+                /** @enum {string} */
+                status: "requires_action" | "authorized" | "captured" | "failed";
+                settled: boolean;
+            } | null;
+            canTip: boolean;
+            clientSecret: string | null;
+        };
+        BookingTipError: {
+            error: string;
+            reason?: string;
+        };
+        SetBookingTipRequest: {
+            amountCents: number;
+        };
         CaregiverBookingList: {
             bookings: components["schemas"]["CaregiverBooking"][];
         };
@@ -8903,6 +9027,8 @@ export interface components {
                 averageStars: number | null;
                 count: number;
             };
+            tipCents: number | null;
+            tipSettled: boolean;
         };
         CaregiverBookingAddress: {
             line1: string | null;
