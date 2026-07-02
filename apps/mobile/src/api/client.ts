@@ -91,6 +91,16 @@ export type ProviderSubscriptionStatus = ProviderSubscription['status'];
 export type ProviderCheckoutLink = paths['/v1/providers/me/subscription/checkout-link']['post']['responses'][200]['content']['application/json'];
 export type ProviderPortalLink = paths['/v1/providers/me/subscription/portal-link']['post']['responses'][200]['content']['application/json'];
 
+// Caregiver Account tab (OH-221). Read-only settled payouts (captured/refunded
+// Bookings + a net glance total); per-channel notification preferences; and the
+// single-use mobile→web session handoff for payout-management actions that live
+// on the web portal (bank-detail changes / withdrawals — PRD story 80).
+export type CaregiverPayoutList = paths['/v1/caregiver/payouts']['get']['responses'][200]['content']['application/json'];
+export type CaregiverPayoutItem = CaregiverPayoutList['payouts'][number];
+export type NotificationPreferences = paths['/v1/me/notification-preferences']['get']['responses'][200]['content']['application/json'];
+export type NotificationPreferencesPatch = paths['/v1/me/notification-preferences']['patch']['requestBody']['content']['application/json'];
+export type WebHandoff = paths['/v1/auth/web-handoff']['post']['responses'][200]['content']['application/json'];
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -204,6 +214,34 @@ export function getConnectSummary(): Promise<CaregiverConnectSummary> {
 
 export function createConnectOnboardingLink(): Promise<CaregiverConnectOnboardingLink> {
   return post<CaregiverConnectOnboardingLink>('/v1/caregiver/connect/onboarding-link', undefined);
+}
+
+/**
+ * Caregiver Account tab (OH-221).
+ *   - `getCaregiverPayouts` — read-only settled payouts (captured/refunded
+ *     Bookings) + a net take-home glance total.
+ *   - `createWebHandoff` — mint a single-use URL that logs the caller into the
+ *     web app; the Account tab opens it in an in-app browser to reach the
+ *     step-up-MFA'd bank/withdrawal management that lives on the web portal.
+ *   - `get/patchNotificationPreferences` — per-channel push/email/SMS opt-outs.
+ */
+
+export function getCaregiverPayouts(): Promise<CaregiverPayoutList> {
+  return get<CaregiverPayoutList>('/v1/caregiver/payouts');
+}
+
+export function createWebHandoff(next?: string): Promise<WebHandoff> {
+  return post<WebHandoff>('/v1/auth/web-handoff', next ? { next } : {});
+}
+
+export function getNotificationPreferences(): Promise<NotificationPreferences> {
+  return get<NotificationPreferences>('/v1/me/notification-preferences');
+}
+
+export function patchNotificationPreferences(
+  patch: NotificationPreferencesPatch,
+): Promise<NotificationPreferences> {
+  return patchJson<NotificationPreferences>('/v1/me/notification-preferences', patch);
 }
 
 /**

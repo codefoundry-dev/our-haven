@@ -6,13 +6,19 @@ import { useAuth } from '@/auth/AuthProvider';
 import { Icon } from '@/components/Icon';
 import { Screen } from '@/components/Screen';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
+import CaregiverAccount from '@/screens/caregiver/Account';
 import { ROLE_CARDS } from '@/lib/roles';
 import { colors, fonts, radii, shadow } from '@/theme/tokens';
 
 export default function AccountScreen() {
   const router = useRouter();
   const { session, role, signOut } = useAuth();
-  const isSupply = role === 'caregiver' || role === 'provider';
+  // The Caregiver Account tab is a richer, data-loading surface (Bank & payouts
+  // + notification preferences) — OH-221 owns it in its own screen.
+  if (role === 'caregiver') return <CaregiverAccount />;
+  // Caregiver returned above; among the roles that still render here, only the
+  // Provider is supply (gets the Verification card).
+  const isSupply = role === 'provider';
   const meta = (session?.user?.user_metadata ?? {}) as { first_name?: string; last_name?: string };
   const first = meta.first_name ?? '';
   const last = meta.last_name ?? '';
@@ -55,23 +61,6 @@ export default function AccountScreen() {
           <View style={styles.linkText}>
             <Text style={styles.linkTitle}>Verification</Text>
             <Text style={styles.linkSub}>Complete your steps to go live.</Text>
-          </View>
-          <Icon name="chevron-right" size={20} color={colors.ink3} />
-        </Pressable>
-      ) : null}
-
-      {role === 'caregiver' ? (
-        <Pressable
-          onPress={() => router.push('/profile-builder')}
-          accessibilityRole="button"
-          style={({ pressed }) => [styles.linkCard, { opacity: pressed ? 0.85 : 1 }]}
-        >
-          <View style={styles.linkIcon}>
-            <Icon name="person" size={18} color={colors.brand} />
-          </View>
-          <View style={styles.linkText}>
-            <Text style={styles.linkTitle}>Profile</Text>
-            <Text style={styles.linkSub}>Rates, availability, credentials — what Parents see.</Text>
           </View>
           <Icon name="chevron-right" size={20} color={colors.ink3} />
         </Pressable>

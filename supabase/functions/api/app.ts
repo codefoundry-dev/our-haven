@@ -11,6 +11,7 @@ import { registerBookingRoutes } from './routes/bookings.ts';
 import { registerCaregiverBadgeRoutes } from './routes/caregiver-badges.ts';
 import { registerCaregiverBookingRoutes } from './routes/caregiver-bookings.ts';
 import { registerCaregiverConnectRoutes } from './routes/caregiver-connect.ts';
+import { registerCaregiverPayoutRoutes } from './routes/caregiver-payouts.ts';
 import { registerCaregiverProfileRoutes } from './routes/caregiver-profile.ts';
 import { registerConsultationBookingRoutes } from './routes/consultation-bookings.ts';
 import { registerContactUsRoutes } from './routes/contact-us.ts';
@@ -18,6 +19,7 @@ import { registerApplicationRoutes } from './routes/applications.ts';
 import { registerHealthRoutes } from './routes/health.ts';
 import { registerJobRoutes } from './routes/jobs.ts';
 import { registerMessagingRoutes } from './routes/messaging.ts';
+import { registerNotificationPreferenceRoutes } from './routes/notification-preferences.ts';
 import { registerOfferRoutes } from './routes/offers.ts';
 import { registerOpportunityRoutes } from './routes/opportunities.ts';
 import { registerVideoCallRoutes } from './routes/video-calls.ts';
@@ -64,7 +66,16 @@ export const openApiInfo = {
   tags: [
     { name: 'health', description: 'Liveness and readiness probes' },
     { name: 'auth', description: 'Authentication — role-claim, email-OTP, step-up MFA' },
-    { name: 'caregiver', description: 'Caregiver Stripe Connect Express — onboarding, summary, dashboard (OH-190)' },
+    {
+      name: 'caregiver',
+      description:
+        'Caregiver payment rail — Stripe Connect Express onboarding / summary / dashboard (OH-190) + the read-only Payouts list (OH-221).',
+    },
+    {
+      name: 'notifications',
+      description:
+        'Per-recipient notification channel preferences (OH-221) — the Account tab reads/writes push / web_push / email opt-outs; the worker-tick dispatcher honours them (mandatory safety SMS always sends).',
+    },
     {
       name: 'badges',
       description:
@@ -180,6 +191,7 @@ export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerHealthRoutes(v1);
   registerAuthRoutes(v1);
   registerCaregiverConnectRoutes(v1);
+  registerCaregiverPayoutRoutes(v1);
   registerVerificationRoutes(v1);
   registerProviderCredentialsRoutes(v1);
   registerCaregiverBadgeRoutes(v1);
@@ -194,6 +206,7 @@ export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerBookingRoutes(v1);
   registerCaregiverBookingRoutes(v1);
   registerMessagingRoutes(v1);
+  registerNotificationPreferenceRoutes(v1);
   registerOfferRoutes(v1);
   registerVideoCallRoutes(v1);
   registerJobRoutes(v1);
