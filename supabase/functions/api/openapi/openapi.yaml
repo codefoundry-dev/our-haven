@@ -17,7 +17,12 @@ tags:
   - name: auth
     description: Authentication — role-claim, email-OTP, step-up MFA
   - name: caregiver
-    description: Caregiver Stripe Connect Express — onboarding, summary, dashboard (OH-190)
+    description: Caregiver payment rail — Stripe Connect Express onboarding /
+      summary / dashboard (OH-190) + the read-only Payouts list (OH-221).
+  - name: notifications
+    description: Per-recipient notification channel preferences (OH-221) — the
+      Account tab reads/writes push / web_push / email opt-outs; the worker-tick
+      dispatcher honours them (mandatory safety SMS always sends).
   - name: badges
     description: Optional Caregiver badges (OH-187) — W-10 "Tax-credit-friendly"
       self-attest + per-state home-childcare (FCCH) registration; neither gates
@@ -275,6 +280,14 @@ components:
         - secondFactor
         - grantedAt
         - expiresAt
+    WebHandoffResponse:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+      required:
+        - url
     CaregiverConnectSummary:
       type: object
       properties:
@@ -363,6 +376,72 @@ components:
       required:
         - url
         - createdAt
+    CaregiverPayoutList:
+      type: object
+      properties:
+        payouts:
+          type: array
+          items:
+            $ref: "#/components/schemas/CaregiverPayoutItem"
+        totalNetCents:
+          type: integer
+        count:
+          type: integer
+      required:
+        - payouts
+        - totalNetCents
+        - count
+    CaregiverPayoutItem:
+      type: object
+      properties:
+        bookingId:
+          type: string
+        category:
+          type: string
+          nullable: true
+          enum:
+            - babysitter
+            - tutor
+            - nanny
+            - null
+        scheduledDate:
+          type: string
+        paidAt:
+          type: string
+          nullable: true
+          format: date-time
+        status:
+          type: string
+          enum:
+            - captured
+            - refunded
+        grossCents:
+          type: integer
+        commissionCents:
+          type: integer
+        refundedCents:
+          type: integer
+        netCents:
+          type: integer
+      required:
+        - bookingId
+        - category
+        - scheduledDate
+        - paidAt
+        - status
+        - grossCents
+        - commissionCents
+        - refundedCents
+        - netCents
+    CaregiverPayoutError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
     SupplyVerification:
       type: object
       properties:
@@ -3570,6 +3649,42 @@ components:
           maxLength: 4000
       required:
         - body
+    NotificationPreferences:
+      type: object
+      properties:
+        push:
+          type: boolean
+        webPush:
+          type: boolean
+        email:
+          type: boolean
+        sms:
+          type: boolean
+      required:
+        - push
+        - webPush
+        - email
+        - sms
+    NotificationPreferencesError:
+      type: object
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+      required:
+        - error
+    NotificationPreferencesPatch:
+      type: object
+      properties:
+        push:
+          type: boolean
+        webPush:
+          type: boolean
+        email:
+          type: boolean
+        sms:
+          type: boolean
     Offer:
       type: object
       properties:
@@ -5520,6 +5635,51 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthErrorResponse"
+  /v1/auth/web-handoff:
+    post:
+      tags:
+        - auth
+      summary: Mint a single-use handoff URL that logs the caller into the web app
+        (OH-221)
+      description: Returns a `${WEB_APP_URL}/handoff?token_hash=…&next=…` link. The
+        mobile Caregiver Account tab opens it in an in-app browser to reach a
+        payout-management action that lives on the web portal (bank-detail
+        changes / withdrawals — PRD story 80); the web `/handoff` route
+        exchanges the token for a Supabase session and routes to `next`. The
+        token is a single-use Supabase magic-link OTP minted for the caller's
+        own email via the admin API (no email is sent), so it grants no more
+        than the caller already has. Requires an email on the account.
+      security:
+        - supabaseAccessToken: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                next:
+                  type: string
+                  maxLength: 512
+      responses:
+        "200":
+          description: Handoff URL issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebHandoffResponse"
+        "400":
+          description: No email on account, or handoff mint failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorResponse"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorResponse"
   /v1/caregiver/connect/summary:
     get:
       tags:
@@ -5656,6 +5816,39 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CaregiverConnectError"
+  /v1/caregiver/payouts:
+    get:
+      tags:
+        - caregiver
+      summary: The Caregiver's read-only payouts list — OH-221
+      description: Returns the authenticated Caregiver's settled payouts — their `kind
+        = 'caregiver'` Bookings whose payment has reached `captured` or
+        `refunded` — newest first, with a glance total of net take-home. A
+        payout is a captured destination charge (OH-211); withdrawal + bank
+        changes happen in the Stripe Express dashboard (reached via the web
+        handoff), not here. `netCents` is a display estimate (gross − Commission
+        − refund); Stripe holds the authoritative balance.
+      security:
+        - supabaseAccessToken: []
+      responses:
+        "200":
+          description: The payouts list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverPayoutList"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverPayoutError"
+        "403":
+          description: Wrong role (Providers have no payouts)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaregiverPayoutError"
   /v1/providers/me/verification:
     get:
       tags:
@@ -8699,6 +8892,66 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MessagingError"
+  /v1/me/notification-preferences:
+    get:
+      tags:
+        - notifications
+      summary: Read the authenticated user's notification channel preferences
+      description: Returns the caller's per-channel notification preferences (`push` /
+        `webPush` / `email` / `sms`). A user who has never changed a preference
+        has no row; the endpoint synthesises the all-on default. `sms` reflects
+        the stored flag but mandatory safety SMS always sends regardless
+        (CONTEXT § Notifications).
+      security:
+        - supabaseAccessToken: []
+      responses:
+        "200":
+          description: Effective preferences
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationPreferences"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationPreferencesError"
+    patch:
+      tags:
+        - notifications
+      summary: Update the authenticated user's notification channel preferences
+      description: Partial update — only the channels named in the body change; the
+        rest keep their current value (or the all-on default if no row exists
+        yet). Upserts, so the first change materialises the row. Returns the
+        full effective preferences after the change.
+      security:
+        - supabaseAccessToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationPreferencesPatch"
+      responses:
+        "200":
+          description: Updated preferences
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationPreferences"
+        "400":
+          description: Empty patch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationPreferencesError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationPreferencesError"
   /v1/threads/{threadId}/offers:
     post:
       tags:

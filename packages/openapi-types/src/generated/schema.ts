@@ -343,6 +343,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/auth/web-handoff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint a single-use handoff URL that logs the caller into the web app (OH-221)
+         * @description Returns a `${WEB_APP_URL}/handoff?token_hash=…&next=…` link. The mobile Caregiver Account tab opens it in an in-app browser to reach a payout-management action that lives on the web portal (bank-detail changes / withdrawals — PRD story 80); the web `/handoff` route exchanges the token for a Supabase session and routes to `next`. The token is a single-use Supabase magic-link OTP minted for the caller's own email via the admin API (no email is sent), so it grants no more than the caller already has. Requires an email on the account.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        next?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Handoff URL issued */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["WebHandoffResponse"];
+                    };
+                };
+                /** @description No email on account, or handoff mint failed */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AuthErrorResponse"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AuthErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/caregiver/connect/summary": {
         parameters: {
             query?: never;
@@ -562,6 +625,63 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/caregiver/payouts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The Caregiver's read-only payouts list — OH-221
+         * @description Returns the authenticated Caregiver's settled payouts — their `kind = 'caregiver'` Bookings whose payment has reached `captured` or `refunded` — newest first, with a glance total of net take-home. A payout is a captured destination charge (OH-211); withdrawal + bank changes happen in the Stripe Express dashboard (reached via the web handoff), not here. `netCents` is a display estimate (gross − Commission − refund); Stripe holds the authoritative balance.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The payouts list */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverPayoutList"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverPayoutError"];
+                    };
+                };
+                /** @description Wrong role (Providers have no payouts) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CaregiverPayoutError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4953,6 +5073,99 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/me/notification-preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the authenticated user's notification channel preferences
+         * @description Returns the caller's per-channel notification preferences (`push` / `webPush` / `email` / `sms`). A user who has never changed a preference has no row; the endpoint synthesises the all-on default. `sms` reflects the stored flag but mandatory safety SMS always sends regardless (CONTEXT § Notifications).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Effective preferences */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationPreferences"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationPreferencesError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update the authenticated user's notification channel preferences
+         * @description Partial update — only the channels named in the body change; the rest keep their current value (or the all-on default if no row exists yet). Upserts, so the first change materialises the row. Returns the full effective preferences after the change.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["NotificationPreferencesPatch"];
+                };
+            };
+            responses: {
+                /** @description Updated preferences */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationPreferences"];
+                    };
+                };
+                /** @description Empty patch */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationPreferencesError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationPreferencesError"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
     "/v1/threads/{threadId}/offers": {
         parameters: {
             query?: never;
@@ -7725,6 +7938,10 @@ export interface components {
             /** Format: date-time */
             expiresAt: string;
         };
+        WebHandoffResponse: {
+            /** Format: uri */
+            url: string;
+        };
         CaregiverConnectSummary: {
             hasAccount: boolean;
             stripeAccountId: string | null;
@@ -7757,6 +7974,29 @@ export interface components {
             url: string;
             /** Format: date-time */
             createdAt: string;
+        };
+        CaregiverPayoutList: {
+            payouts: components["schemas"]["CaregiverPayoutItem"][];
+            totalNetCents: number;
+            count: number;
+        };
+        CaregiverPayoutItem: {
+            bookingId: string;
+            /** @enum {string|null} */
+            category: "babysitter" | "tutor" | "nanny" | null;
+            scheduledDate: string;
+            /** Format: date-time */
+            paidAt: string | null;
+            /** @enum {string} */
+            status: "captured" | "refunded";
+            grossCents: number;
+            commissionCents: number;
+            refundedCents: number;
+            netCents: number;
+        };
+        CaregiverPayoutError: {
+            error: string;
+            reason?: string;
         };
         SupplyVerification: {
             /** @enum {string} */
@@ -8578,6 +8818,22 @@ export interface components {
         };
         SendMessageRequest: {
             body: string;
+        };
+        NotificationPreferences: {
+            push: boolean;
+            webPush: boolean;
+            email: boolean;
+            sms: boolean;
+        };
+        NotificationPreferencesError: {
+            error: string;
+            reason?: string;
+        };
+        NotificationPreferencesPatch: {
+            push?: boolean;
+            webPush?: boolean;
+            email?: boolean;
+            sms?: boolean;
         };
         Offer: {
             id: string;

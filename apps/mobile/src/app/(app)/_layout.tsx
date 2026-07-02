@@ -55,11 +55,13 @@ export default function AppLayout() {
       <Tabs.Screen name="messages" />
       <Tabs.Screen name="account" />
 
-      {/* ── account-reached editors (OH-184 / OH-188 / OH-189 / OH-222) ─ */}
+      {/* ── account-reached editors (OH-184 / OH-188 / OH-189 / OH-222 / OH-221) ─ */}
       <Tabs.Screen name="verification" options={{ href: null }} />
       <Tabs.Screen name="profile-builder" options={{ href: null }} />
       <Tabs.Screen name="provider-profile" options={{ href: null }} />
       <Tabs.Screen name="subscription" options={{ href: null }} />
+      <Tabs.Screen name="payouts" options={{ href: null }} />
+      <Tabs.Screen name="notification-preferences" options={{ href: null }} />
 
       {/* Supply onboarding hub — landed on after role-claim (web), reached from
           the dashboard "Finish your setup" banner; never a tab. */}

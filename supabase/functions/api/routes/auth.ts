@@ -15,6 +15,7 @@ import { ConsoleEmailOtpNotifier, EmailOtpService } from '../services/email-otp.
  *   - POST /auth/email-otp/issue   — pre-paywall Parent email-OTP fallback
  *   - POST /auth/email-otp/verify  — verify the email-OTP, open a step-up window
  *   - POST /auth/step-up/refresh   — mint a step-up grant from an aal2 token
+ *   - POST /auth/web-handoff       — mint a single-use web session handoff URL (OH-221)
  *
  * The real step-up-gated payout endpoints (Stripe Connect bank/withdrawal) live
  * in routes/caregiver-connect.ts (OH-190); this module no longer carries a
@@ -71,6 +72,23 @@ const StepUpRefreshResponse = z
 const ErrorResponse = z
   .object({ error: z.string(), reason: z.string().optional() })
   .openapi('AuthErrorResponse');
+
+// The mobile→web handoff (OH-221). `next` is an app-relative destination path
+// (defaults to the Account screen); it must begin with a single `/` so it can
+// never redirect the in-app browser off our own web origin.
+const WebHandoffRequest = z.object({
+  next: z
+    .string()
+    .max(512)
+    .refine((v) => v.startsWith('/') && !v.startsWith('//'), {
+      message: 'next must be an app-relative path beginning with a single /',
+    })
+    .optional(),
+});
+
+const WebHandoffResponse = z
+  .object({ url: z.string().url() })
+  .openapi('WebHandoffResponse');
 
 const json = <T extends z.ZodTypeAny>(schema: T) => ({ 'application/json': { schema } });
 
@@ -135,6 +153,23 @@ const stepUpRefreshRoute = createRoute({
   responses: {
     200: { description: 'Step-up window opened', content: json(StepUpRefreshResponse) },
     400: { description: 'Access token is not aal2', content: json(ErrorResponse) },
+    401: { description: 'Unauthenticated', content: json(ErrorResponse) },
+  },
+});
+
+const webHandoffRoute = createRoute({
+  method: 'post',
+  path: '/auth/web-handoff',
+  tags: ['auth'],
+  summary: 'Mint a single-use handoff URL that logs the caller into the web app (OH-221)',
+  description:
+    "Returns a `${WEB_APP_URL}/handoff?token_hash=…&next=…` link. The mobile Caregiver Account tab opens it in an in-app browser to reach a payout-management action that lives on the web portal (bank-detail changes / withdrawals — PRD story 80); the web `/handoff` route exchanges the token for a Supabase session and routes to `next`. The token is a single-use Supabase magic-link OTP minted for the caller's own email via the admin API (no email is sent), so it grants no more than the caller already has. Requires an email on the account.",
+  security: [{ supabaseAccessToken: [] }],
+  middleware: [requireAuth()] as const,
+  request: { body: { content: json(WebHandoffRequest), required: false } },
+  responses: {
+    200: { description: 'Handoff URL issued', content: json(WebHandoffResponse) },
+    400: { description: 'No email on account, or handoff mint failed', content: json(ErrorResponse) },
     401: { description: 'Unauthenticated', content: json(ErrorResponse) },
   },
 });
@@ -314,4 +349,54 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>): void {
     );
   });
 
+  app.openapi(webHandoffRoute, async (c) => {
+    const { env, supabase } = c.var.deps;
+    const principal = c.get('principal')!;
+    const next = (c.req.valid('json') ?? {}).next ?? '/account';
+
+    const email = principal.email ?? (await fetchSupabaseEmail(supabase, principal.uid));
+    if (!email) {
+      return c.json({ error: 'email_required', reason: 'the account has no email to hand off with' }, 400);
+    }
+
+    // A single-use Supabase magic-link OTP minted for the caller's OWN email via
+    // the admin API. generateLink does NOT send an email — it just returns the
+    // token, which the web `/auth/handoff` route exchanges for a session
+    // (supabase.auth.verifyOtp). No privilege beyond what the caller already has.
+    const { data, error } = await supabase.admin.auth.admin.generateLink({
+      type: 'magiclink',
+      email,
+    });
+    const tokenHash = data?.properties?.hashed_token;
+    if (error || !tokenHash) {
+      console.error('[auth] web-handoff generateLink failed', error);
+      return c.json({ error: 'handoff_failed', reason: 'could not mint a web session handoff' }, 400);
+    }
+
+    const url = new URL('/handoff', env.WEB_APP_URL);
+    url.searchParams.set('token_hash', tokenHash);
+    url.searchParams.set('type', 'magiclink');
+    url.searchParams.set('next', next);
+
+    return c.json({ url: url.toString() }, 200);
+  });
+}
+
+/**
+ * Fall back to the Supabase admin API for the user's email when the access
+ * token carries none (the JWT `email` claim is the happy path). Tolerant: a
+ * lookup failure surfaces as the 400 `email_required` upstream, not a 500.
+ */
+async function fetchSupabaseEmail(
+  supabase: { admin: { auth: { admin: { getUserById: (uid: string) => Promise<unknown> } } } },
+  uid: string,
+): Promise<string | null> {
+  try {
+    const result = (await supabase.admin.auth.admin.getUserById(uid)) as {
+      data?: { user?: { email?: string | null } | null } | null;
+    };
+    return result?.data?.user?.email ?? null;
+  } catch {
+    return null;
+  }
 }

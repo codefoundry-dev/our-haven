@@ -694,6 +694,26 @@ export interface NotificationWebPushSubscriptionsTable {
 }
 
 /**
+ * Per-recipient notification channel preferences (OH-221). One row per `uid`
+ * (the Supabase auth user); a missing row means "all channels on" — the
+ * dispatcher never blocks a channel it has no explicit `false` for. Each column
+ * is a best-effort opt-out the worker-tick notifications dispatcher honours for
+ * `push` / `web_push` / `email`. SMS is deliberately included but is NEVER
+ * suppressed for the mandatory-SMS event set (safety-critical, CONTEXT §
+ * Notifications) — the flag only forward-declares an opt-out for any future
+ * non-mandatory SMS. Service-role-only (read/written through the Edge).
+ */
+export interface NotificationPreferencesTable {
+  uid: string;
+  push: ColumnType<boolean, boolean | undefined, boolean>;
+  web_push: ColumnType<boolean, boolean | undefined, boolean>;
+  email: ColumnType<boolean, boolean | undefined, boolean>;
+  sms: ColumnType<boolean, boolean | undefined, boolean>;
+  created_at: Generated<Date>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
+/**
  * Jobs (OH-207; CONTEXT § Job) — the canonical anchor for every Caregiver
  * Booking (ADR-0006, narrowed by ADR-0011). A **Direct-Message** Job is
  * materialised at Book-request accept, born `awarded` (skips draft/open); a
@@ -874,6 +894,7 @@ export interface Database {
   notification_outbox: NotificationOutboxTable;
   notification_push_tokens: NotificationPushTokensTable;
   notification_web_push_subscriptions: NotificationWebPushSubscriptionsTable;
+  notification_preferences: NotificationPreferencesTable;
   disputes: DisputesTable;
   supply_flags: SupplyFlagsTable;
   ratings: RatingsTable;

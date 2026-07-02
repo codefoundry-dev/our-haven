@@ -304,6 +304,22 @@ const EnvSchema = z.object({
     .url()
     .default('https://api.daily.co/v1')
     .describe('Daily.co REST API base URL. Overridable for staging; tests inject a fetch stub instead.'),
+
+  // ── Mobile → web handoff (OH-221) ────────────────────────────────────────
+  // Base URL of the deployed Expo-web app (our-haven-web on Vercel). The
+  // Caregiver Account tab's payout-management actions (bank-detail changes /
+  // withdraw funds) live on the web portal — the system of record (PRD story
+  // 80). POST /v1/auth/web-handoff mints a single-use Supabase magic-link token
+  // and returns `${WEB_APP_URL}/handoff?token_hash=…&next=…`; the mobile
+  // app opens it in an in-app browser and the web `/handoff` route
+  // establishes the session. Default is the local Expo-web dev server.
+  WEB_APP_URL: z
+    .string()
+    .url()
+    .default('http://localhost:8081')
+    .describe(
+      'Base URL of the deployed Expo-web app (our-haven-web). The origin the mobile→web payout-management handoff links out to (OH-221). Default = local Expo-web dev server.',
+    ),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
