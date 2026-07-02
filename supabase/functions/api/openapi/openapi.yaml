@@ -4665,6 +4665,22 @@ components:
         - cap
         - remaining
         - periodYearMonth
+    ApplyToJobRequest:
+      type: object
+      properties:
+        proposal:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        proposedRateCents:
+          type: integer
+          minimum: 0
+          maximum: 100000000
+        scopeNote:
+          type: string
+          maxLength: 280
+      required:
+        - proposal
     ContactUsResponse:
       type: object
       properties:
@@ -9850,6 +9866,123 @@ paths:
                 $ref: "#/components/schemas/OpportunityError"
         "404":
           description: Supply (caregiver) row not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpportunityError"
+  /v1/opportunities/{jobId}/apply:
+    post:
+      tags:
+        - opportunities
+      summary: File an Application + first Offer on an open Job — OH-219
+      description: "The authenticated Caregiver files an Application on an open posted
+        Job in one of their categories: a free-text proposal + a first caregiver
+        Offer (rate defaults to the published per-category Rate; locked to it
+        when non-negotiable — ADR-0017). Atomically creates the Application
+        (`submitted`), a companion job-anchored thread, and the first Offer
+        (`pending`). Gated on Verification `cleared` (403), the per-Job 15-cap +
+        the 30/month cap (409), and one Application per Job (409 on a repeat).
+        The proposal + Offer note are redacted at write. Never
+        Subscription-gated (Caregiver-sent)."
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: jobId
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApplyToJobRequest"
+      responses:
+        "201":
+          description: The filed Application
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyApplicationItem"
+        "400":
+          description: Invalid body / the Job schedule has no billable time
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpportunityError"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpportunityError"
+        "403":
+          description: Wrong role, or Verification not cleared
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpportunityError"
+        "404":
+          description: Supply row / Job not found (or not in one of your categories)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpportunityError"
+        "409":
+          description: Job not open, already applied, a cap was reached, or no published
+            Rate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpportunityError"
+  /v1/opportunities/{jobId}/withdraw:
+    post:
+      tags:
+        - opportunities
+      summary: Withdraw my Application on a Job — OH-219
+      description: The Caregiver withdraws their own still-open Application (submitted
+        / countered → withdrawn) before the Parent awards or declines, sealing
+        the live pending Offer. Frees a per-Job 15-cap slot; does NOT refund the
+        monthly allowance (filing consumes one). 409 if the Application is
+        already terminal (awarded / declined / withdrawn / expired).
+      security:
+        - supabaseAccessToken: []
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: jobId
+          in: path
+      responses:
+        "200":
+          description: The withdrawn Application
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyApplicationItem"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpportunityError"
+        "403":
+          description: Wrong role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpportunityError"
+        "404":
+          description: Supply row / Application not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpportunityError"
+        "409":
+          description: Application is no longer withdrawable (terminal state)
           content:
             application/json:
               schema:

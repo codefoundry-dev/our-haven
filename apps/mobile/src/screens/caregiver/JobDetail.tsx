@@ -66,6 +66,8 @@ export default function JobDetailScreen() {
   const child = childSummary(job.childCount, job.childAges);
   const budget = budgetLabel(job.budgetHintCents);
   const applied = job.myApplicationState;
+  // Story 100: a Job at its 15-Application cap shows the Apply CTA disabled.
+  const jobFull = job.applicantCount >= 15 && !applied;
 
   return (
     <Screen edges={['top']}>
@@ -138,8 +140,9 @@ export default function JobDetailScreen() {
           <PrimaryButton
             icon={<Icon name="arrow-right" size={18} color={colors.inkInv} />}
             onPress={() => router.push({ pathname: '/job-apply', params: { jobId: job.id } })}
+            disabled={jobFull}
           >
-            {applied ? 'View my application' : 'Apply to this Job'}
+            {applied ? 'View my application' : jobFull ? 'Applications full' : 'Apply to this Job'}
           </PrimaryButton>
         </View>
       </View>

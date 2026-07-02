@@ -1,8 +1,14 @@
 import { createRoute, type OpenAPIHono, z } from '@hono/zod-openapi';
+import type { Insertable } from 'kysely';
 
 import { requireAuth } from '../auth/middleware.ts';
 import type { AppEnv } from '../context.ts';
 import type { Db } from '../db/kysely.ts';
+import type {
+  ApplicationsTable,
+  MessageThreadsTable,
+  OffersTable,
+} from '../../../../apps/backend/src/db/schema.ts';
 import { areaLabelForZip, resolveZipCentroid } from '../geo/zip-centroids.ts';
 // Cross-tree, Deno-clean domain/shared modules (ADR-0019; the explicit-`.ts`
 // pattern search.ts / caregiver-profile.ts use). Each carries NO runtime
@@ -25,8 +31,16 @@ import {
 } from '../../../../packages/domain/src/application-quota/index.ts';
 import {
   countsAgainstJobCap,
+  initialApplicationState,
+  transitionApplication,
   type ApplicationState,
 } from '../../../../packages/domain/src/application-lifecycle/index.ts';
+// The first Offer reuses the offers-route compose recipe (OH-206): the Deno-clean
+// Pricing leaf for `computed_total` + the OH-180 disintermediation detector for
+// the free-text `scope_note`/`proposal` + the 72h default validity helper.
+import { defaultValidUntil } from '../../../../packages/domain/src/offer-lifecycle/index.ts';
+import { scanScopeNote } from '../../../../packages/domain/src/disintermediation/index.ts';
+import { calculatePricing } from '../../../../packages/domain/src/pricing/index.ts';
 import {
   CAREGIVER_CATEGORIES,
   isCaregiverCategory,
@@ -38,9 +52,11 @@ import { SAFETY_BEHAVIORS } from '../../../../packages/shared/src/safety-behavio
  * v1.7 stories 95, 96, 122; ADR-0014 (concrete schedule), ADR-0015/ADR-0016
  * (disclose-or-none child bundle), ADR-0011 (Caregiver-only Applications).
  *
- *   GET /v1/opportunities            open posted Jobs across MY categories (feed)
- *   GET /v1/opportunities/{jobId}    one Job's detail (in-category or applied-to)
- *   GET /v1/applications             MY Applications (date-groupable) + N/30 quota
+ *   GET  /v1/opportunities                    open posted Jobs across MY categories (feed)
+ *   GET  /v1/opportunities/{jobId}            one Job's detail (in-category or applied-to)
+ *   POST /v1/opportunities/{jobId}/apply      file an Application + first Offer (OH-219)
+ *   POST /v1/opportunities/{jobId}/withdraw   withdraw my Application before award/decline (OH-219)
+ *   GET  /v1/applications                     MY Applications (date-groupable) + N/30 quota
  *
  * The Caregiver-facing READ side of the Posted-Job chain — the mirror of the
  * Parent's My Jobs hub (routes/jobs.ts). A verified in-category Caregiver browses
@@ -53,14 +69,23 @@ import { SAFETY_BEHAVIORS } from '../../../../packages/shared/src/safety-behavio
  * Caregiver never reaches an accepted state within this read surface, so `line1`/
  * `line2` are simply never projected here.
  *
- * BOUNDARY (OH-218 vs OH-219): this ticket is READ-ONLY. Filing an Application
- * (which creates the row + the first Offer), Counter, and Withdraw — and the
- * 15-cap / 30-per-month ENFORCEMENT — are the Application composer (OH-219). Until
- * that lands there are no live Applications, so `GET /v1/applications` returns an
- * empty list with a 0/30 quota, and the feed's `myApplicationState` is always
- * null. The quota `used` here is DERIVED (a COUNT of this-month Applications), not
- * a persisted counter; OH-219 owns the authoritative counter + admin override
- * (application-quota `checkQuota`/`applyFile`).
+ * APPLY / WITHDRAW (OH-219): filing an Application atomically creates the
+ * `applications` row (`submitted`) + a companion job-anchored `message_threads`
+ * row + the Caregiver's first `offers` row (`pending`, job-anchored) — the exact
+ * read shape routes/applications.ts (OH-210) awards against. Filing is gated on
+ * Verification cleared (`screening_passed_at`), the per-Job 15-cap, the 30/month
+ * cap, and one-Application-per-Job (unique index). The free-text `proposal` +
+ * Offer `scope_note` are redacted at write (T&S queue via `message_flags`). No
+ * 402 — an Application/Offer is Caregiver-sent (only Parent sends are gated).
+ * Withdraw runs the `caregiver-withdraw` transition (submitted/countered →
+ * withdrawn), sealing the live pending Offer; it frees a per-Job cap slot but does
+ * NOT refund the monthly allowance (CONTEXT: filing "consumes" one).
+ *
+ * The quota `used` is DERIVED (a COUNT of this-month Applications) rather than a
+ * persisted counter; an admin cap override (application-quota `applyAdminOverride`)
+ * has no storage yet, so `adminOverrideCap` is null. Cap enforcement is
+ * best-effort under concurrency (the reads precede the insert); the one-per-Job
+ * unique index is the only hard guarantee.
  *
  * RANKING: `0.6·proximity + 0.4·recency` over the survivors (a Job has no rating
  * term, so the OH-180 hybrid's third weight is dropped and the remaining two are
@@ -93,6 +118,14 @@ const ApplicationStateEnum = z.enum([
 /** Recency + distance ranking weights (renormalised OH-180 hybrid, no rating term). */
 const OPPORTUNITY_WEIGHTS = { proximity: 0.6, recency: 0.4 } as const;
 
+/**
+ * The per-Job Application cap (ADR-0006 §7; CONTEXT § Job) — a Job stops accepting
+ * Applications at 15 (Parent UX protection). `countsAgainstJobCap` selects which
+ * Application states count toward it (submitted + countered; a withdrawn one frees
+ * a slot). Mirrors the mobile feed's `JOB_APPLICATION_CAP`.
+ */
+const JOB_APPLICATION_CAP = 15;
+
 /* ── request/response schemas ─────────────────────────────────────────────────── */
 
 const OpportunityQuery = z.object({
@@ -118,6 +151,22 @@ const OpportunityQuery = z.object({
 const JobIdParam = z.object({
   jobId: z.string().uuid().openapi({ param: { name: 'jobId', in: 'path' } }),
 });
+
+/**
+ * The Application composer body (OH-219; PRD story 98). A free-text `proposal`
+ * (pitch) + the first Offer's terms. `proposedRateCents` is optional — it defaults
+ * to the Caregiver's published per-category Rate, and is IGNORED (locked to
+ * published) when the Caregiver is non-negotiable (ADR-0017). `scopeNote` is the
+ * Offer's optional ≤280-char note. The schedule + child bundle are the Job's (the
+ * Parent set them at compose) — the Caregiver only proposes a rate + prose.
+ */
+const ApplyRequest = z
+  .object({
+    proposal: z.string().min(1).max(2000),
+    proposedRateCents: z.number().int().min(0).max(100_000_000).optional(),
+    scopeNote: z.string().max(280).optional(),
+  })
+  .openapi('ApplyToJobRequest');
 
 /** A concrete session slot (minutes-from-midnight window on a calendar day). */
 const SlotSchema = z
@@ -427,6 +476,137 @@ function scoreOpportunity(
   return OPPORTUNITY_WEIGHTS.proximity * proximity + OPPORTUNITY_WEIGHTS.recency * recency;
 }
 
+/* ── apply/withdraw helpers (OH-219) ──────────────────────────────────────────── */
+
+/** The Job columns the apply handler reads — the read-surface projection plus the
+ *  owning Parent + origin (needed for the companion thread + posted-Job guard). */
+const APPLY_JOB_COLUMNS = [...OPPORTUNITY_COLUMNS, 'parent_uid', 'origin'] as const;
+
+type ApplyJobRow = OpportunityRow & { parent_uid: string; origin: 'posted' | 'direct-message' };
+
+interface RateSnapshot {
+  publishedRateCents: number;
+  perChildSurchargeCents: number;
+  negotiable: boolean;
+}
+
+/**
+ * The Caregiver's snapshot inputs for a category: published Rate + per-child
+ * surcharge (Tutor → 0) + the person-level `negotiable` flag. Null when the
+ * Caregiver has not published a Rate for the category (mirrors offers.ts
+ * `loadRateSnapshot` — the same compose input the first Offer needs).
+ */
+async function loadRateSnapshot(
+  db: Db,
+  providerId: string,
+  category: 'babysitter' | 'tutor' | 'nanny',
+): Promise<RateSnapshot | null> {
+  const [rate, profile] = await Promise.all([
+    db
+      .selectFrom('provider_category_rates')
+      .select(['published_rate_cents', 'per_child_surcharge_cents'])
+      .where('provider_id', '=', providerId)
+      .where('category', '=', category)
+      .executeTakeFirst() as Promise<
+      { published_rate_cents: number; per_child_surcharge_cents: number | null } | undefined
+    >,
+    db
+      .selectFrom('provider_profiles')
+      .select(['negotiable'])
+      .where('provider_id', '=', providerId)
+      .executeTakeFirst() as Promise<{ negotiable: boolean | null } | undefined>,
+  ]);
+  if (!rate) return null;
+  return {
+    publishedRateCents: rate.published_rate_cents,
+    perChildSurchargeCents: category === 'tutor' ? 0 : (rate.per_child_surcharge_cents ?? 0),
+    negotiable: profile?.negotiable ?? true,
+  };
+}
+
+/** computed_total via the Pricing leaf — the pre-commission parent charge (the same
+ *  six-line passthrough offers.ts `computeTotalCents` uses; commissionBp 0). */
+function computeTotalCents(args: {
+  proposedRateCents: number;
+  scopeMinutes: number;
+  childCount: number;
+  perChildSurchargeCents: number;
+  category: 'babysitter' | 'tutor' | 'nanny';
+}): number {
+  return calculatePricing({
+    agreedRateCents: args.proposedRateCents,
+    hours: args.scopeMinutes / 60,
+    childCount: args.childCount,
+    perChildSurchargeCents: args.perChildSurchargeCents,
+    commissionBp: 0,
+    category: args.category,
+  }).parentChargeCents;
+}
+
+/**
+ * The first Offer's schedule snapshot, mirrored from the Job (parent-authoritative:
+ * the OH-210 award materialises Bookings from the JOB schedule, not the Offer). A
+ * one-off Job's slot(s) → `scopeMinutes` = summed window; a recurring Job → one
+ * occurrence's window (the per-session snapshot the Offer bubble shows).
+ */
+function offerScheduleFromJob(job: ApplyJobRow): {
+  scheduleKind: 'one-off' | 'recurring';
+  slots: { date: string; startMin: number; endMin: number }[];
+  recurrence: z.infer<typeof RecurrenceSchema> | null;
+  scopeMinutes: number;
+} {
+  if (job.schedule_kind === 'recurring') {
+    const r = job.recurrence;
+    return {
+      scheduleKind: 'recurring',
+      slots: [],
+      recurrence: r,
+      scopeMinutes: r ? Math.max(0, r.endMin - r.startMin) : 0,
+    };
+  }
+  const slots = job.slots ?? [];
+  const scopeMinutes = slots.reduce((sum, s) => sum + Math.max(0, s.endMin - s.startMin), 0);
+  return { scheduleKind: 'one-off', slots, recurrence: null, scopeMinutes };
+}
+
+/**
+ * The Caregiver's Verification gate — filing an Application requires `cleared`
+ * (CONTEXT § Application). Cleared = Checkr screening passed AND not terminated,
+ * the same predicate caregiver-connect.ts gates payout onboarding on and
+ * applications.ts surfaces as `backgroundChecked`.
+ */
+async function loadCaregiverCleared(db: Db, providerId: string): Promise<boolean> {
+  const v = (await db
+    .selectFrom('provider_verifications')
+    .select(['screening_passed_at', 'rejected_at'])
+    .where('provider_id', '=', providerId)
+    .executeTakeFirst()) as
+    | { screening_passed_at: Date | string | null; rejected_at: Date | string | null }
+    | undefined;
+  return v?.screening_passed_at != null && v.rejected_at == null;
+}
+
+/** Project a persisted Application row + its Job into the My-Applications item DTO. */
+function toApplicationItem(
+  app: Pick<
+    ApplicationRow,
+    'id' | 'state' | 'origin' | 'proposal' | 'accepted_offer_id' | 'awarded_at' | 'created_at'
+  >,
+  job: OpportunityRow,
+  caregiverPoint: GeoPoint | null,
+): z.infer<typeof ApplicationListItem> {
+  return {
+    id: app.id,
+    state: app.state,
+    origin: app.origin,
+    proposal: app.proposal,
+    acceptedOfferId: app.accepted_offer_id,
+    awardedAt: app.awarded_at ? toIso(app.awarded_at) : null,
+    createdAt: toIso(app.created_at),
+    job: toJobSummaryDTO(job, caregiverPoint),
+  };
+}
+
 /* ── route definitions ────────────────────────────────────────────────────────── */
 
 const listOpportunitiesRoute = createRoute({
@@ -479,6 +659,48 @@ const listApplicationsRoute = createRoute({
     401: { description: 'Unauthenticated', content: json(ErrorResponse) },
     403: { description: 'Wrong role', content: json(ErrorResponse) },
     404: { description: 'Supply (caregiver) row not found', content: json(ErrorResponse) },
+  },
+});
+
+const applyRoute = createRoute({
+  method: 'post',
+  path: '/opportunities/{jobId}/apply',
+  tags: ['opportunities'],
+  summary: 'File an Application + first Offer on an open Job — OH-219',
+  description:
+    "The authenticated Caregiver files an Application on an open posted Job in one of their categories: a free-text proposal + a first caregiver Offer (rate defaults to the published per-category Rate; locked to it when non-negotiable — ADR-0017). Atomically creates the Application (`submitted`), a companion job-anchored thread, and the first Offer (`pending`). Gated on Verification `cleared` (403), the per-Job 15-cap + the 30/month cap (409), and one Application per Job (409 on a repeat). The proposal + Offer note are redacted at write. Never Subscription-gated (Caregiver-sent).",
+  security: [{ supabaseAccessToken: [] }],
+  middleware: [requireAuth({ roles: ['caregiver'] })] as const,
+  request: { params: JobIdParam, body: { content: json(ApplyRequest), required: true } },
+  responses: {
+    201: { description: 'The filed Application', content: json(ApplicationListItem) },
+    400: { description: 'Invalid body / the Job schedule has no billable time', content: json(ErrorResponse) },
+    401: { description: 'Unauthenticated', content: json(ErrorResponse) },
+    403: { description: 'Wrong role, or Verification not cleared', content: json(ErrorResponse) },
+    404: { description: 'Supply row / Job not found (or not in one of your categories)', content: json(ErrorResponse) },
+    409: {
+      description: 'Job not open, already applied, a cap was reached, or no published Rate',
+      content: json(ErrorResponse),
+    },
+  },
+});
+
+const withdrawApplicationRoute = createRoute({
+  method: 'post',
+  path: '/opportunities/{jobId}/withdraw',
+  tags: ['opportunities'],
+  summary: 'Withdraw my Application on a Job — OH-219',
+  description:
+    "The Caregiver withdraws their own still-open Application (submitted / countered → withdrawn) before the Parent awards or declines, sealing the live pending Offer. Frees a per-Job 15-cap slot; does NOT refund the monthly allowance (filing consumes one). 409 if the Application is already terminal (awarded / declined / withdrawn / expired).",
+  security: [{ supabaseAccessToken: [] }],
+  middleware: [requireAuth({ roles: ['caregiver'] })] as const,
+  request: { params: JobIdParam },
+  responses: {
+    200: { description: 'The withdrawn Application', content: json(ApplicationListItem) },
+    401: { description: 'Unauthenticated', content: json(ErrorResponse) },
+    403: { description: 'Wrong role', content: json(ErrorResponse) },
+    404: { description: 'Supply row / Application not found', content: json(ErrorResponse) },
+    409: { description: 'Application is no longer withdrawable (terminal state)', content: json(ErrorResponse) },
   },
 });
 
@@ -662,5 +884,331 @@ export function registerOpportunityRoutes(app: OpenAPIHono<AppEnv>): void {
     };
 
     return c.json({ applications, quota }, 200);
+  });
+
+  // ── POST /v1/opportunities/{jobId}/apply — file an Application + first Offer ──
+  app.openapi(applyRoute, async (c) => {
+    const { db } = c.var.deps;
+    const principal = c.get('principal')!;
+    const { jobId } = c.req.valid('param');
+    const input = c.req.valid('json');
+
+    const provider = await loadProviderByUid(db, principal.uid);
+    if (!provider) {
+      return c.json(
+        { error: 'provider_not_found', reason: 'claim a supply role first (POST /v1/auth/role-claim)' },
+        404,
+      );
+    }
+
+    // Filing requires Verification `cleared` (CONTEXT § Application).
+    if (!(await loadCaregiverCleared(db, provider.id))) {
+      return c.json(
+        { error: 'verification_not_cleared', reason: 'your background check must clear before you can apply' },
+        403,
+      );
+    }
+
+    // Only an OPEN posted Job in one of the Caregiver's categories is applicable.
+    const job = (await db
+      .selectFrom('jobs')
+      .select(APPLY_JOB_COLUMNS)
+      .where('id', '=', jobId)
+      .executeTakeFirst()) as unknown as ApplyJobRow | undefined;
+    if (!job || job.origin !== 'posted') return c.json({ error: 'job_not_found' }, 404);
+    const myCategories = (provider.categories ?? []).filter(isCaregiverCategory);
+    if (!myCategories.includes(job.category)) return c.json({ error: 'job_not_found' }, 404);
+    if (job.state !== 'open') {
+      return c.json({ error: 'job_not_open', reason: `this job is ${job.state}, not open` }, 409);
+    }
+
+    // The Offer's child bundle mirrors the Job's (the Offer CHECK requires
+    // cardinality(child_ages) = child_count ≥ 1; OH-209 guarantees it — guard
+    // defensively so a malformed Job is a clean 409, not a CHECK-violation 500).
+    const childAges = job.child_ages ?? [];
+    const childCount = job.child_count ?? childAges.length;
+    if (childCount < 1 || childAges.length !== childCount) {
+      return c.json({ error: 'job_incomplete', reason: 'the job is missing its child detail' }, 409);
+    }
+
+    // Snapshot the Caregiver's Rate + surcharge + negotiable for the Job's category.
+    const snap = await loadRateSnapshot(db, provider.id, job.category);
+    if (!snap) {
+      return c.json(
+        { error: 'rate_not_published', reason: `publish your ${job.category} rate before applying` },
+        409,
+      );
+    }
+    // ADR-0017: a non-negotiable Caregiver's Offers lock to the published Rate.
+    const proposedRateCents = snap.negotiable
+      ? (input.proposedRateCents ?? snap.publishedRateCents)
+      : snap.publishedRateCents;
+
+    const { scheduleKind, slots, recurrence, scopeMinutes } = offerScheduleFromJob(job);
+    if (scopeMinutes <= 0) {
+      return c.json({ error: 'invalid_schedule', reason: 'the job schedule has no billable time' }, 400);
+    }
+    const computedTotalCents = computeTotalCents({
+      proposedRateCents,
+      scopeMinutes,
+      childCount,
+      perChildSurchargeCents: snap.perChildSurchargeCents,
+      category: job.category,
+    });
+
+    // Redact BOTH free-texts (CONTEXT § Message) — the proposal + the Offer note.
+    const rawProposal = input.proposal.trim();
+    const proposalScan = scanScopeNote(rawProposal);
+    const rawNote = (input.scopeNote ?? '').trim();
+    const noteScan = scanScopeNote(rawNote);
+
+    // Cap pre-checks (best-effort; the unique index is the hard one-per-Job guard).
+    // Both sets are small (bounded by the 15/30 caps), so count in memory reusing
+    // the domain `countsAgainstJobCap` predicate.
+    const now = new Date();
+    const jobAppRows = (await db
+      .selectFrom('applications')
+      .select(['state'])
+      .where('job_id', '=', job.id)
+      .execute()) as { state: ApplicationState }[];
+    if (jobAppRows.filter((r) => countsAgainstJobCap(r.state)).length >= JOB_APPLICATION_CAP) {
+      return c.json(
+        { error: 'job_application_cap_reached', reason: `this job has reached its ${JOB_APPLICATION_CAP}-application cap` },
+        409,
+      );
+    }
+
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const monthlyRows = (await db
+      .selectFrom('applications')
+      .select(['id'])
+      .where('provider_id', '=', provider.id)
+      .where('origin', '=', 'posted')
+      .where('created_at', '>=', monthStart)
+      .execute()) as { id: string }[];
+    const counter: CaregiverApplicationCounter = {
+      count: monthlyRows.length,
+      periodYearMonth: periodKey(now),
+      adminOverrideCap: null,
+    };
+    const cap = effectiveCap(counter);
+    if (monthlyRows.length >= cap) {
+      return c.json(
+        { error: 'monthly_cap_reached', reason: `you have used all ${cap} applications for ${counter.periodYearMonth}` },
+        409,
+      );
+    }
+
+    // Friendly duplicate check (the unique index is the race-safe backstop below).
+    const existing = await db
+      .selectFrom('applications')
+      .select(['id'])
+      .where('job_id', '=', job.id)
+      .where('provider_id', '=', provider.id)
+      .executeTakeFirst();
+    if (existing) return c.json({ error: 'already_applied' }, 409);
+
+    // Atomic: companion job-anchored thread → first Offer (pending) → Application
+    // (submitted) + any T&S flags. Exactly the OH-210 read contract.
+    try {
+      const created = await db.transaction().execute(async (trx) => {
+        const thread = (await trx
+          .insertInto('message_threads')
+          .values({
+            parent_uid: job.parent_uid,
+            supply_uid: principal.uid,
+            provider_id: provider.id,
+            supply_role: 'caregiver',
+            job_id: job.id,
+            last_message_at: now,
+            last_message_preview: 'New application',
+            last_message_redacted: false,
+          })
+          .returning(['id'])
+          .executeTakeFirstOrThrow()) as { id: string };
+
+        const offer = (await trx
+          .insertInto('offers')
+          .values({
+            thread_id: thread.id,
+            sender_uid: principal.uid,
+            sender: 'caregiver',
+            status: 'pending',
+            category: job.category,
+            proposed_rate_cents: proposedRateCents,
+            scope_minutes: scopeMinutes,
+            per_child_surcharge_cents: snap.perChildSurchargeCents,
+            computed_total_cents: computedTotalCents,
+            scope_note: noteScan.redacted,
+            scope_note_redacted: noteScan.flagged,
+            negotiable: snap.negotiable,
+            valid_until: defaultValidUntil(now),
+            child_count: childCount,
+            child_ages: childAges,
+            safety_behaviors: job.safety_behaviors ?? [],
+            service_address_line1: null,
+            service_address_line2: null,
+            service_city: null,
+            service_state: null,
+            service_postal_code: null,
+            schedule_kind: scheduleKind,
+            slots,
+            recurrence,
+            // Job-anchored (OH-210 contract) — the award reads the JOB schedule.
+            job_id: job.id,
+            updated_at: now,
+          })
+          .returning(['id'])
+          .executeTakeFirstOrThrow()) as { id: string };
+
+        const application = (await trx
+          .insertInto('applications')
+          .values({
+            job_id: job.id,
+            provider_id: provider.id,
+            origin: 'posted',
+            state: initialApplicationState({ origin: 'posted' }),
+            proposal: proposalScan.redacted,
+            proposal_redacted: proposalScan.flagged,
+            updated_at: now,
+          })
+          .returning([
+            'id',
+            'job_id',
+            'provider_id',
+            'origin',
+            'state',
+            'accepted_offer_id',
+            'proposal',
+            'awarded_at',
+            'created_at',
+          ])
+          .executeTakeFirstOrThrow()) as unknown as ApplicationRow;
+
+        // Queue any tripped original to the T&S flag queue — the Offer note by
+        // offer_id (OH-206), the proposal by application_id (OH-219).
+        if (noteScan.flagged) {
+          await trx
+            .insertInto('message_flags')
+            .values({
+              offer_id: offer.id,
+              thread_id: thread.id,
+              sender_uid: principal.uid,
+              categories: [...noteScan.categories],
+              original_body: rawNote,
+              matches: noteScan.matches.map((m) => ({ category: m.category, value: m.value, start: m.start, end: m.end })),
+            })
+            .execute();
+        }
+        if (proposalScan.flagged) {
+          await trx
+            .insertInto('message_flags')
+            .values({
+              application_id: application.id,
+              thread_id: thread.id,
+              sender_uid: principal.uid,
+              categories: [...proposalScan.categories],
+              original_body: rawProposal,
+              matches: proposalScan.matches.map((m) => ({ category: m.category, value: m.value, start: m.start, end: m.end })),
+            })
+            .execute();
+        }
+
+        return application;
+      });
+
+      const caregiverPoint = await loadCaregiverPoint(db, provider.id);
+      return c.json(toApplicationItem(created, job, caregiverPoint), 201);
+    } catch (e) {
+      // A concurrent double-file that slipped past the pre-check trips the unique
+      // (job_id, provider_id) index — surface it as a clean 409.
+      if (String((e as { message?: string }).message ?? '').includes('applications_job_provider_uidx')) {
+        return c.json({ error: 'already_applied' }, 409);
+      }
+      throw e;
+    }
+  });
+
+  // ── POST /v1/opportunities/{jobId}/withdraw — withdraw my Application ─────────
+  app.openapi(withdrawApplicationRoute, async (c) => {
+    const { db } = c.var.deps;
+    const principal = c.get('principal')!;
+    const { jobId } = c.req.valid('param');
+
+    const provider = await loadProviderByUid(db, principal.uid);
+    if (!provider) return c.json({ error: 'provider_not_found' }, 404);
+
+    const appRow = (await db
+      .selectFrom('applications')
+      .select([
+        'id',
+        'job_id',
+        'provider_id',
+        'origin',
+        'state',
+        'accepted_offer_id',
+        'proposal',
+        'awarded_at',
+        'created_at',
+      ])
+      .where('job_id', '=', jobId)
+      .where('provider_id', '=', provider.id)
+      .executeTakeFirst()) as unknown as ApplicationRow | undefined;
+    if (!appRow) return c.json({ error: 'application_not_found' }, 404);
+
+    // Domain legality — caregiver-withdraw is valid only from submitted / countered.
+    const res = transitionApplication(
+      { origin: appRow.origin, state: appRow.state },
+      { type: 'caregiver-withdraw' },
+    );
+    if (!res.ok) return c.json({ error: 'not_withdrawable', reason: res.reason }, 409);
+
+    const now = new Date();
+    await db.transaction().execute(async (trx) => {
+      await trx
+        .updateTable('applications')
+        .set({ state: res.next, updated_at: now })
+        .where('id', '=', appRow.id)
+        .execute();
+
+      // Seal the live pending Offer on the companion (job-anchored) thread.
+      const thread = (await trx
+        .selectFrom('message_threads')
+        .select(['id'])
+        .where('job_id', '=', jobId)
+        .where('provider_id', '=', provider.id)
+        .executeTakeFirst()) as { id: string } | undefined;
+      if (thread) {
+        const liveOffer = (await trx
+          .selectFrom('offers')
+          .select(['id', 'status'])
+          .where('thread_id', '=', thread.id)
+          .orderBy('created_at', 'desc')
+          .executeTakeFirst()) as { id: string; status: string } | undefined;
+        if (liveOffer && liveOffer.status === 'pending') {
+          await trx
+            .updateTable('offers')
+            .set({ status: 'withdrawn', updated_at: now })
+            .where('id', '=', liveOffer.id)
+            .execute();
+        }
+        await trx
+          .updateTable('message_threads')
+          .set({ last_message_at: now, last_message_preview: 'Application withdrawn', last_message_redacted: false })
+          .where('id', '=', thread.id)
+          .execute();
+      }
+    });
+
+    const [job, caregiverPoint] = await Promise.all([
+      db
+        .selectFrom('jobs')
+        .select(OPPORTUNITY_COLUMNS)
+        .where('id', '=', jobId)
+        .executeTakeFirst() as Promise<OpportunityRow | undefined>,
+      loadCaregiverPoint(db, provider.id),
+    ]);
+    if (!job) return c.json({ error: 'application_not_found' }, 404);
+    return c.json(toApplicationItem({ ...appRow, state: res.next }, job, caregiverPoint), 200);
   });
 }

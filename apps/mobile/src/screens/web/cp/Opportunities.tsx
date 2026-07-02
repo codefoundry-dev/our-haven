@@ -13,10 +13,10 @@
  * address is never shown (reveal-at-accept).
  */
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
-import type { MyApplication, Opportunity, OpportunityCategory } from '@/api/client';
+import { withdrawApplication, type MyApplication, type Opportunity, type OpportunityCategory } from '@/api/client';
 import { Icon } from '@/components/Icon';
 import { Avatar } from '@/components/ui/Avatar';
 import { Card } from '@/components/ui/Card';
@@ -25,6 +25,7 @@ import { Chip } from '@/components/ui/Chip';
 import { WebPageHeader } from '@/components/web/WebShell';
 import { applicationStatusStyle, categoryChip, jobScheduleLabel, jobStatusStyle } from '@/lib/jobsHub';
 import {
+  applyErrorMessage,
   budgetLabel,
   childSummary,
   distanceLabel,
@@ -71,6 +72,7 @@ export function CaregiverOpportunitiesWeb() {
   const [tab, setTab] = useState<Tab>('Open Jobs');
   const [scheduleFilter, setScheduleFilter] = useState<'any' | 'one-off' | 'recurring'>('any');
   const [categoryFilter, setCategoryFilter] = useState<'all' | OpportunityCategory>('all');
+  const [withdrawingId, setWithdrawingId] = useState<string | null>(null);
 
   const offered = useOfferedCategories();
   const feed = useOpportunities({
@@ -80,6 +82,29 @@ export function CaregiverOpportunitiesWeb() {
   const apps = useMyApplications();
   const showCategoryFilter = offered.length >= 2;
   const sections = groupApplications(apps.applications);
+
+  // Withdraw my Application (submitted / countered), then refetch (OH-219). Frees
+  // the Job's cap slot but not the monthly allowance (consumed at filing).
+  const handleWithdraw = (app: MyApplication) => {
+    Alert.alert(
+      'Withdraw application?',
+      'This removes your application from the Parent’s list. It won’t give back this month’s application allowance.',
+      [
+        { text: 'Keep it', style: 'cancel' },
+        {
+          text: 'Withdraw',
+          style: 'destructive',
+          onPress: () => {
+            setWithdrawingId(app.id);
+            withdrawApplication(app.job.id)
+              .then(() => apps.refetch())
+              .catch((e: unknown) => Alert.alert('Couldn’t withdraw', applyErrorMessage(e)))
+              .finally(() => setWithdrawingId(null));
+          },
+        },
+      ],
+    );
+  };
 
   return (
     <View>
@@ -195,7 +220,13 @@ export function CaregiverOpportunitiesWeb() {
                 <Text style={[styles.secHead, si > 0 ? { marginTop: 26 } : null]}>{sec.title}</Text>
                 <View style={styles.appsList}>
                   {sec.items.map((a) => (
-                    <ApplicationRow key={a.id} app={a} onPress={() => openDetail(a.job.id)} />
+                    <ApplicationRow
+                      key={a.id}
+                      app={a}
+                      onPress={() => openDetail(a.job.id)}
+                      onWithdraw={() => handleWithdraw(a)}
+                      withdrawing={withdrawingId === a.id}
+                    />
                   ))}
                 </View>
               </View>
@@ -271,9 +302,21 @@ function JobCardWeb({ job, onOpen, onApply }: { job: Opportunity; onOpen: () => 
   );
 }
 
-function ApplicationRow({ app, onPress }: { app: MyApplication; onPress: () => void }) {
+function ApplicationRow({
+  app,
+  onPress,
+  onWithdraw,
+  withdrawing,
+}: {
+  app: MyApplication;
+  onPress: () => void;
+  onWithdraw: () => void;
+  withdrawing: boolean;
+}) {
   const jobStyle = jobStatusStyle(app.job.state);
   const youStyle = applicationStatusStyle(app.state);
+  // Withdraw only while the Application is still open (story 101).
+  const canWithdraw = app.state === 'submitted' || app.state === 'countered';
   return (
     <Card radius={20} padding={18} onPress={onPress} style={styles.appRow}>
       <Avatar label={categoryChip(app.job.category)} size="md" tone={CATEGORY_TONE[categoryChip(app.job.category)]} />
@@ -291,9 +334,19 @@ function ApplicationRow({ app, onPress }: { app: MyApplication; onPress: () => v
           <Text style={[styles.tagText, { color: youStyle.fg }]}>You · {youStyle.label}</Text>
         </View>
       </View>
-      <View style={styles.appChevron}>
-        <Icon name="chevron-right" size={18} color={colors.ink2} />
-      </View>
+      {canWithdraw ? (
+        <Pressable onPress={onWithdraw} disabled={withdrawing} style={styles.withdrawBtn}>
+          {withdrawing ? (
+            <ActivityIndicator size="small" color={colors.danger} />
+          ) : (
+            <Text style={styles.withdrawText}>Withdraw</Text>
+          )}
+        </Pressable>
+      ) : (
+        <View style={styles.appChevron}>
+          <Icon name="chevron-right" size={18} color={colors.ink2} />
+        </View>
+      )}
     </Card>
   );
 }
@@ -358,4 +411,6 @@ const styles = StyleSheet.create({
   tag: { height: 26, paddingHorizontal: 12, borderRadius: radii.pill, alignItems: 'center', justifyContent: 'center' },
   tagText: { fontFamily: fonts.semibold, fontSize: 12 },
   appChevron: { width: 40, height: 40, borderRadius: radii.pill, borderWidth: 1.5, borderColor: colors.hairline, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
+  withdrawBtn: { minWidth: 84, height: 36, paddingHorizontal: 14, borderRadius: radii.pill, borderWidth: 1.5, borderColor: colors.hairline, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
+  withdrawText: { fontFamily: fonts.semibold, fontSize: 12.5, color: colors.danger },
 });
