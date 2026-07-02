@@ -41,6 +41,8 @@ function makeDb(
           return c;
         },
         returning: () => c,
+        onConflict: () => c,
+        execute: async () => [],
         executeTakeFirstOrThrow: async () => ({ id: opts.insertedBookingId ?? 'booking-1' }),
       };
       return c;
@@ -199,6 +201,13 @@ describe('POST /v1/supply/{id}/consultation-bookings', () => {
     // The slot was held by the new booking.
     const hold = captures.updates.find((u) => u.table === 'provider_slots');
     expect(hold?.set).toMatchObject({ state: 'held', held_by_booking_id: BID });
+    // The Provider is notified the slot was filled (consultation_booked, SMS-mandatory).
+    const notif = captures.inserts.find((i) => i.table === 'notification_outbox');
+    expect(notif?.values).toMatchObject({
+      recipient_uid: 'uid-prov',
+      event_type: 'consultation_booked',
+      payload: { bookingId: BID },
+    });
   });
 
   it('409 when the slot is taken concurrently (the conditional hold finds no open row)', async () => {
@@ -303,5 +312,32 @@ describe('POST /v1/bookings/{id}/cancel', () => {
     const res = await app.request(CANCEL_PATH, post(await parentToken()));
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ error: 'cannot_cancel' });
+  });
+
+  it('notifies BOTH sides (cancellation_within_24h) when cancelled inside the 24h window', async () => {
+    // A start already in the past is unambiguously inside the 24h window.
+    const { db, captures } = makeDb({
+      bookings: [bookingRow({ scheduled_date: '2020-01-01', auto_complete_at: '2020-01-01T10:00:00.000Z' })],
+      providers: [providerRow()],
+    });
+    const app = buildApp(makeDeps(db));
+    const res = await app.request(CANCEL_PATH, post(await parentToken()));
+    expect(res.status).toBe(200);
+    const recipients = captures.inserts
+      .filter((i) => i.table === 'notification_outbox' && i.values.event_type === 'cancellation_within_24h')
+      .map((i) => i.values.recipient_uid)
+      .sort();
+    expect(recipients).toEqual(['uid-par', 'uid-prov']);
+  });
+
+  it('does NOT enqueue cancellation_within_24h when cancelled ≥24h out', async () => {
+    const { db, captures } = makeDb({
+      bookings: [bookingRow({ scheduled_date: '2099-01-01', auto_complete_at: '2099-01-01T10:00:00.000Z' })],
+      providers: [providerRow()],
+    });
+    const app = buildApp(makeDeps(db));
+    const res = await app.request(CANCEL_PATH, post(await parentToken()));
+    expect(res.status).toBe(200);
+    expect(captures.inserts.some((i) => i.table === 'notification_outbox')).toBe(false);
   });
 });

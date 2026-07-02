@@ -28,7 +28,7 @@ The route template is encoded in `CHANNEL_MATRIX` (`packages/domain/src/notifica
 
 | Event kind | Route template | Param source |
 |---|---|---|
-| `booking_request_received` | `schedule/booking/{bookingId}` | `event.bookingId` |
+| `booking_request_received` | `thread/{threadId}` | `event.threadId` |
 | `job_awarded` | `schedule/booking/{bookingId}` | `event.bookingId` |
 | `consultation_booked` | `schedule/booking/{bookingId}` | `event.bookingId` |
 | `cancellation_within_24h` | `booking/{bookingId}` | `event.bookingId` |
@@ -39,6 +39,10 @@ The route template is encoded in `CHANNEL_MATRIX` (`packages/domain/src/notifica
 | `job_expiring_48h` | `job/{jobId}` | `event.jobId` |
 | `job_expired_no_award` | `job/{jobId}` | `event.jobId` |
 | `booking_accepted` / `booking_declined` / `booking_expired` | `booking/{bookingId}` | `event.bookingId` |
+| `booking_session_started` / `booking_hours_proposed` / `booking_time_change_approved` / `booking_time_change_declined` / `booking_disputed` / `booking_payment_failed` / `booking_authorization_action_required` (Parent-facing) | `booking/{bookingId}` | `event.bookingId` |
+| `booking_time_extended` / `booking_time_reduce_requested` / `booking_time_reduce_rescinded` / `booking_no_show` (Caregiver-facing) | `schedule/booking/{bookingId}` | `event.bookingId` |
+
+**`booking_request_received` (OH-223):** fires when a Parent *sends* a direct Book-request Offer to a Caregiver, so it deep-links into the chat **thread** (the Booking does not exist until accept). The posted-Job "you were awarded" path is the separate SMS-mandatory `job_awarded`, which deep-links to the Caregiver's Schedule tab.
 
 A booking-request notification therefore expands to:
 

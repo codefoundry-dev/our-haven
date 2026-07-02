@@ -116,14 +116,14 @@ describe('createNotificationsDispatcher', () => {
     const dispatcher = createNotificationsDispatcher({ resolver: makeResolver(), bases: BASES, ...a });
 
     await dispatcher.dispatch(
-      row({ event_type: 'booking_request_received', payload: { bookingId: 'b-1', actorName: 'Alex' } }),
+      row({ event_type: 'booking_request_received', payload: { threadId: 't-1', actorName: 'Alex' } }),
     );
 
     expect(a.twilio.sendSms).toHaveBeenCalledTimes(1);
     const smsArg = firstCallArgs(a.twilio.sendSms)[0] as { to: string; body: string };
     expect(smsArg.to).toBe('+15551230000');
     expect(smsArg.body).toContain('Our Haven:');
-    expect(smsArg.body).toContain('ourhaven://schedule/booking/b-1');
+    expect(smsArg.body).toContain('ourhaven://thread/t-1');
   });
 
   it('throws when an SMS-mandatory event has no Twilio configured (row retries, no other channel touched)', async () => {

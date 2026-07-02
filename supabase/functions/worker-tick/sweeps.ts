@@ -297,6 +297,7 @@ export const bookingAuthorizeDueSweep: Sweep = {
 interface RequestExpiryRow {
   id: string;
   state: BookingState;
+  parent_uid: string;
   origin: 'posted-job' | 'direct-message' | null;
   payment_intent_id: string | null;
   payment_status:
@@ -313,7 +314,7 @@ interface RequestExpiryRow {
 export function dueRequestExpiryQuery(db: Db, now: Date, limit: number) {
   return db
     .selectFrom('bookings')
-    .select(['id', 'state', 'origin', 'payment_intent_id', 'payment_status'])
+    .select(['id', 'state', 'parent_uid', 'origin', 'payment_intent_id', 'payment_status'])
     .where('state', '=', 'requested')
     .where('request_expires_at', 'is not', null)
     .where('request_expires_at', '<=', now)
@@ -351,6 +352,17 @@ export const bookingRequestExpirySweep: Sweep = {
             .updateTable('bookings')
             .set({ state: 'expired', ...patch, updated_at: now })
             .where('id', '=', row.id)
+            .execute();
+          // Notify the Parent their booking request expired with no response.
+          await trx
+            .insertInto('notification_outbox')
+            .values({
+              recipient_uid: row.parent_uid,
+              event_type: 'booking_expired',
+              payload: { bookingId: row.id },
+              dedupe_key: `booking_expired:${row.id}`,
+            })
+            .onConflict((oc) => oc.column('dedupe_key').doNothing())
             .execute();
           processed++;
         } catch (e) {
@@ -443,6 +455,224 @@ export const sessionAutoConfirmSweep: Sweep = {
   },
 };
 
+/* ── Notification-producing sweeps (OH-223) ────────────────────────────────────
+ * These enqueue `notification_outbox` rows the OH-194 dispatcher then fans out.
+ * Each is idempotent via the outbox `dedupe_key` unique index, so a re-scan on the
+ * next tick (the reminder / warn sweeps do not mutate their scanned table) is a
+ * harmless no-op — exactly one notification is ever delivered per logical event.
+ * The booking start instant is derived the same way OH-203 derives it: the
+ * scheduled_date + start_min wall-clock interpreted as UTC.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** Bookings whose session starts within the next hour and have not yet been reminded. */
+export function dueRemindersQuery(db: Db, now: Date, windowEnd: Date, limit: number) {
+  return db
+    .selectFrom('bookings as b')
+    .innerJoin('providers as p', 'p.id', 'b.provider_id')
+    .select(['b.id as id', 'b.parent_uid as parent_uid', 'p.uid as provider_uid'])
+    // Only an upcoming, committed session gets a reminder (covers both a provider
+    // consultation and an accepted caregiver Booking — both sit in `accepted`).
+    .where('b.state', '=', 'accepted')
+    .where(sql<SqlBool>`(b.scheduled_date + make_interval(mins => b.start_min)) at time zone 'UTC' > ${now}`)
+    .where(sql<SqlBool>`(b.scheduled_date + make_interval(mins => b.start_min)) at time zone 'UTC' <= ${windowEnd}`)
+    .orderBy('b.scheduled_date', 'asc')
+    .orderBy('b.start_min', 'asc')
+    .limit(limit);
+}
+
+/**
+ * Session-start reminder (OH-223; CONTEXT § Notifications — "Session start reminder
+ * (1h before)"). Enqueues `session_start_reminder` to BOTH sides ~1h before start.
+ * No booking mutation, so no row lock — the outbox dedupe makes the re-scan across
+ * the ~60 ticks in the window idempotent (one reminder per side, ever).
+ */
+export const sessionStartReminderSweep: Sweep = {
+  name: 'session_start_reminder',
+  async run(db, { now, limit }) {
+    const windowEnd = new Date(now.getTime() + 60 * 60 * 1000);
+    const due = (await dueRemindersQuery(db, now, windowEnd, limit).execute()) as {
+      id: string;
+      parent_uid: string;
+      provider_uid: string;
+    }[];
+    let processed = 0;
+    for (const row of due) {
+      for (const [uid, who] of [
+        [row.parent_uid, 'parent'],
+        [row.provider_uid, 'supply'],
+      ] as const) {
+        await db
+          .insertInto('notification_outbox')
+          .values({
+            recipient_uid: uid,
+            event_type: 'session_start_reminder',
+            payload: { bookingId: row.id },
+            dedupe_key: `session_reminder:${row.id}:${who}`,
+          })
+          .onConflict((oc) => oc.column('dedupe_key').doNothing())
+          .execute();
+      }
+      processed++;
+    }
+    return { name: 'session_start_reminder', processed };
+  },
+};
+
+/** `pending` Offers whose `valid_until` has elapsed. */
+export function dueOffersQuery(db: Db, now: Date, limit: number) {
+  return db
+    .selectFrom('offers')
+    .select(['id', 'thread_id', 'sender_uid'])
+    .where('status', '=', 'pending')
+    .where('valid_until', '<=', now)
+    .orderBy('valid_until', 'asc')
+    .limit(limit)
+    .forUpdate()
+    .skipLocked();
+}
+
+/**
+ * Offer expiry (OH-223). A `pending` Book-request Offer past its `valid_until`
+ * expires (`pending → expired`) and its sender is notified (`offer_expired`,
+ * deep-linking back to the thread). Claimed FOR UPDATE SKIP LOCKED (it mutates).
+ */
+export const offerExpirySweep: Sweep = {
+  name: 'offer_expiry',
+  run(db, { now, limit }) {
+    return db.transaction().execute(async (trx) => {
+      const due = (await dueOffersQuery(trx, now, limit).execute()) as {
+        id: string;
+        thread_id: string;
+        sender_uid: string;
+      }[];
+      if (due.length === 0) return { name: 'offer_expiry', processed: 0 };
+
+      await trx
+        .updateTable('offers')
+        .set({ status: 'expired', updated_at: now })
+        .where(
+          'id',
+          'in',
+          due.map((o) => o.id),
+        )
+        .execute();
+
+      for (const o of due) {
+        await trx
+          .insertInto('notification_outbox')
+          .values({
+            recipient_uid: o.sender_uid,
+            event_type: 'offer_expired',
+            payload: { threadId: o.thread_id },
+            dedupe_key: `offer_expired:${o.id}`,
+          })
+          .onConflict((oc) => oc.column('dedupe_key').doNothing())
+          .execute();
+      }
+      return { name: 'offer_expiry', processed: due.length };
+    });
+  },
+};
+
+/** Open posted Jobs expiring within 48h that still have zero Applications. */
+export function dueJobWarningsQuery(db: Db, now: Date, windowEnd: Date, limit: number) {
+  return db
+    .selectFrom('jobs')
+    .select(['id', 'parent_uid'])
+    .where('state', '=', 'open')
+    .where('expires_at', 'is not', null)
+    .where('expires_at', '>', now)
+    .where('expires_at', '<=', windowEnd)
+    .where(sql<SqlBool>`not exists (select 1 from applications a where a.job_id = jobs.id)`)
+    .orderBy('expires_at', 'asc')
+    .limit(limit);
+}
+
+/**
+ * Job-expiring-soon warning (OH-223). Warns the Parent (`job_expiring_48h`) when an
+ * open posted Job is ~48h from its scheduled service and still has no Applications.
+ * No mutation — the outbox dedupe makes the re-scan idempotent (one warn per Job).
+ */
+export const jobExpiryWarnSweep: Sweep = {
+  name: 'job_expiry_warn',
+  async run(db, { now, limit }) {
+    const windowEnd = new Date(now.getTime() + 48 * 60 * 60 * 1000);
+    const due = (await dueJobWarningsQuery(db, now, windowEnd, limit).execute()) as {
+      id: string;
+      parent_uid: string;
+    }[];
+    for (const j of due) {
+      await db
+        .insertInto('notification_outbox')
+        .values({
+          recipient_uid: j.parent_uid,
+          event_type: 'job_expiring_48h',
+          payload: { jobId: j.id },
+          dedupe_key: `job_expiring_48h:${j.id}`,
+        })
+        .onConflict((oc) => oc.column('dedupe_key').doNothing())
+        .execute();
+    }
+    return { name: 'job_expiry_warn', processed: due.length };
+  },
+};
+
+/** Open posted Jobs whose `expires_at` has elapsed (never awarded). */
+export function dueExpiredJobsQuery(db: Db, now: Date, limit: number) {
+  return db
+    .selectFrom('jobs')
+    .select(['id', 'parent_uid'])
+    .where('state', '=', 'open')
+    .where('expires_at', 'is not', null)
+    .where('expires_at', '<=', now)
+    .orderBy('expires_at', 'asc')
+    .limit(limit)
+    .forUpdate()
+    .skipLocked();
+}
+
+/**
+ * Job expiry (OH-223). An open posted Job whose scheduled service passed with no
+ * award expires (`open → expired`) and the Parent is notified (`job_expired_no_award`).
+ * Claimed FOR UPDATE SKIP LOCKED (it mutates).
+ */
+export const jobExpirySweep: Sweep = {
+  name: 'job_expiry',
+  run(db, { now, limit }) {
+    return db.transaction().execute(async (trx) => {
+      const due = (await dueExpiredJobsQuery(trx, now, limit).execute()) as {
+        id: string;
+        parent_uid: string;
+      }[];
+      if (due.length === 0) return { name: 'job_expiry', processed: 0 };
+
+      await trx
+        .updateTable('jobs')
+        .set({ state: 'expired', updated_at: now })
+        .where(
+          'id',
+          'in',
+          due.map((j) => j.id),
+        )
+        .execute();
+
+      for (const j of due) {
+        await trx
+          .insertInto('notification_outbox')
+          .values({
+            recipient_uid: j.parent_uid,
+            event_type: 'job_expired_no_award',
+            payload: { jobId: j.id },
+            dedupe_key: `job_expired_no_award:${j.id}`,
+          })
+          .onConflict((oc) => oc.column('dedupe_key').doNothing())
+          .execute();
+      }
+      return { name: 'job_expiry', processed: due.length };
+    });
+  },
+};
+
 /** Every sweep the minute tick runs. Append future deadline sweeps here. */
 export const SWEEPS: readonly Sweep[] = [
   screeningDisposalSweep,
@@ -450,4 +680,8 @@ export const SWEEPS: readonly Sweep[] = [
   bookingAuthorizeDueSweep,
   bookingRequestExpirySweep,
   sessionAutoConfirmSweep,
+  sessionStartReminderSweep,
+  offerExpirySweep,
+  jobExpiryWarnSweep,
+  jobExpirySweep,
 ];

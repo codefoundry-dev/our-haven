@@ -51,9 +51,12 @@ describe('channel matrix', () => {
   });
 
   it('route templates match the deep-link doc', () => {
+    // booking_request_received fires on a direct Book-request SEND, so it deep-links
+    // into the chat thread (not a not-yet-created booking) — OH-223.
     expect(getChannelMatrixEntry('booking_request_received').routeTemplate).toBe(
-      'schedule/booking/{bookingId}',
+      'thread/{threadId}',
     );
+    expect(getChannelMatrixEntry('job_awarded').routeTemplate).toBe('schedule/booking/{bookingId}');
     expect(getChannelMatrixEntry('cancellation_within_24h').routeTemplate).toBe(
       'booking/{bookingId}',
     );
@@ -105,10 +108,10 @@ describe('buildRoutePath / buildDeepLinks', () => {
 
 describe('renderNotification', () => {
   it('builds push data.route from the MOBILE link and carries the kind', () => {
-    const r = renderNotification('booking_request_received', { bookingId: 'b-1', actorName: 'Alex' }, BASES);
+    const r = renderNotification('booking_request_received', { threadId: 't-1', actorName: 'Alex' }, BASES);
     expect(r.push.data).toEqual({
       kind: 'booking_request_received',
-      route: 'ourhaven://schedule/booking/b-1',
+      route: 'ourhaven://thread/t-1',
     });
     expect(r.push.title).toBe('New booking request');
     expect(r.push.body).toContain('Alex');
@@ -129,7 +132,7 @@ describe('renderNotification', () => {
   });
 
   it('falls back to generic copy when optional payload fields are absent', () => {
-    const r = renderNotification('booking_request_received', { bookingId: 'b-1' }, BASES);
+    const r = renderNotification('booking_request_received', { threadId: 't-1' }, BASES);
     expect(r.push.body).toBe('A family sent a booking request.');
   });
 

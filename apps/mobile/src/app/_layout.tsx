@@ -17,6 +17,9 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AuthProvider, useAuth } from '@/auth/AuthProvider';
 import { PreviewProvider } from '@/preview/PreviewProvider';
+// Platform-resolved seam: notifications.ts (native expo-notifications) or
+// notifications.web.ts (VAPID web-push) — same shape, callers platform-blind.
+import { registerForPush, useNotificationObserver } from '@/lib/notifications';
 import { landingTab, type Role } from '@/lib/roles';
 import { colors } from '@/theme/tokens';
 
@@ -51,8 +54,9 @@ export default function RootLayout() {
 }
 
 function RootNavigator() {
-  const { status, role } = useAuth();
+  const { status, role, session } = useAuth();
   useAuthRedirect(status, role);
+  usePushNotifications(session?.user?.id ?? null, role);
 
   return (
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.canvas } }}>
@@ -62,6 +66,20 @@ function RootNavigator() {
       <Stack.Screen name="(app)" />
     </Stack>
   );
+}
+
+/**
+ * Push wiring (OH-223): register this device for push once per signed-in user
+ * (all three roles — the endpoint upserts, so repeats are harmless) and route
+ * notification taps to the right screen. Sign-out token deletion lives in
+ * AuthProvider.signOut (it must run while the session is still live).
+ */
+function usePushNotifications(uid: string | null, role: Role | null) {
+  useEffect(() => {
+    if (!uid) return;
+    registerForPush().catch((e) => console.warn('[notifications] push registration failed', e));
+  }, [uid]);
+  useNotificationObserver(role);
 }
 
 /**

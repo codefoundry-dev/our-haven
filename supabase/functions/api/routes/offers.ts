@@ -752,6 +752,23 @@ export function registerOfferRoutes(app: OpenAPIHono<AppEnv>): void {
         .where('id', '=', threadId)
         .execute();
 
+      // Notify the Caregiver a direct Book-request arrived (`booking_request_received`,
+      // SMS-mandatory — the single most critical notification). Only a Parent-sent
+      // opening Offer; a Caregiver-sent Offer has no matrix kind (in-app Realtime
+      // carries it). Deduped per Offer id so a re-sent request fires exactly once.
+      if (side === 'parent') {
+        await trx
+          .insertInto('notification_outbox')
+          .values({
+            recipient_uid: thread.supply_uid,
+            event_type: 'booking_request_received',
+            payload: { threadId },
+            dedupe_key: `booking_request_received:${offer.id}`,
+          })
+          .onConflict((oc) => oc.column('dedupe_key').doNothing())
+          .execute();
+      }
+
       return offer;
     });
 
@@ -1233,6 +1250,19 @@ export function registerOfferRoutes(app: OpenAPIHono<AppEnv>): void {
           last_message_redacted: false,
         })
         .where('id', '=', offer.thread_id)
+        .execute();
+
+      // Notify the counter recipient — the OTHER party (`counter_offer_received`).
+      const counterRecipient = side === 'parent' ? thread.supply_uid : thread.parent_uid;
+      await trx
+        .insertInto('notification_outbox')
+        .values({
+          recipient_uid: counterRecipient,
+          event_type: 'counter_offer_received',
+          payload: { threadId: offer.thread_id },
+          dedupe_key: `counter_offer_received:${next.id}`,
+        })
+        .onConflict((oc) => oc.column('dedupe_key').doNothing())
         .execute();
 
       return next;

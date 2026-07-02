@@ -4863,6 +4863,284 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/notifications/push-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Register or refresh this device's Expo push token
+         * @description Upserts the caller's Expo push token (unique per device). Re-registering a token already on file re-points it to the current user + refreshes the platform — a shared device that switches account rebinds cleanly. Idempotent.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["NotificationPushTokenRequest"];
+                };
+            };
+            responses: {
+                /** @description Token registered */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationOk"];
+                    };
+                };
+                /** @description Invalid token / platform */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationError"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /**
+         * Drop this device's Expo push token on sign-out
+         * @description Deletes the caller's push token (scoped to token AND uid, so a caller only ever removes their own row). Idempotent — deleting an unknown token is a no-op.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["NotificationPushTokenDeleteRequest"];
+                };
+            };
+            responses: {
+                /** @description Token removed (or already absent) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationOk"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationError"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/notifications/web-push": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Register or refresh a VAPID web-push subscription
+         * @description Upserts a browser web-push subscription (unique per endpoint). Re-points the endpoint to the current user on conflict. v1 delivery is a best-effort empty 'tickle'.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["NotificationWebPushRequest"];
+                };
+            };
+            responses: {
+                /** @description Subscription registered */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationOk"];
+                    };
+                };
+                /** @description Invalid subscription */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationError"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /**
+         * Drop a VAPID web-push subscription
+         * @description Deletes a web-push subscription (scoped to endpoint AND uid). Idempotent.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["NotificationWebPushDeleteRequest"];
+                };
+            };
+            responses: {
+                /** @description Subscription removed (or already absent) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationOk"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationError"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/notifications/preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the marketing opt-in preference
+         * @description Returns the caller's marketing opt-in (default false when never set). Transactional notifications are unaffected by this — they always send per the channel matrix.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The preferences */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationPreferences"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationError"];
+                    };
+                };
+            };
+        };
+        /**
+         * Set the marketing opt-in preference
+         * @description Sets the caller's marketing opt-in (separate from transactional notifications; CONTEXT § Notifications). Stamps the moment the value was set for the consent audit trail. Idempotent.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["NotificationPreferencesRequest"];
+                };
+            };
+            responses: {
+                /** @description The updated preferences */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationPreferences"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationError"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/threads/{threadId}/offers": {
         parameters: {
             query?: never;
@@ -8456,6 +8734,38 @@ export interface components {
         };
         SendMessageRequest: {
             body: string;
+        };
+        NotificationOk: {
+            /** @enum {boolean} */
+            ok: true;
+        };
+        NotificationError: {
+            error: string;
+            reason?: string;
+        };
+        NotificationPushTokenRequest: {
+            expoPushToken: string;
+            /** @enum {string} */
+            platform: "ios" | "android" | "web";
+        };
+        NotificationPushTokenDeleteRequest: {
+            expoPushToken: string;
+        };
+        NotificationWebPushRequest: {
+            /** Format: uri */
+            endpoint: string;
+            p256dh: string;
+            auth: string;
+        };
+        NotificationWebPushDeleteRequest: {
+            /** Format: uri */
+            endpoint: string;
+        };
+        NotificationPreferences: {
+            marketingOptIn: boolean;
+        };
+        NotificationPreferencesRequest: {
+            marketingOptIn: boolean;
         };
         Offer: {
             id: string;

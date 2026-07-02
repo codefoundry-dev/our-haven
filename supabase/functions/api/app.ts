@@ -18,6 +18,7 @@ import { registerApplicationRoutes } from './routes/applications.ts';
 import { registerHealthRoutes } from './routes/health.ts';
 import { registerJobRoutes } from './routes/jobs.ts';
 import { registerMessagingRoutes } from './routes/messaging.ts';
+import { registerNotificationRoutes } from './routes/notifications.ts';
 import { registerOfferRoutes } from './routes/offers.ts';
 import { registerOpportunityRoutes } from './routes/opportunities.ts';
 import { registerVideoCallRoutes } from './routes/video-calls.ts';
@@ -110,6 +111,11 @@ export const openApiInfo = {
       description:
         'Caregiver Opportunities (OH-218) — the Caregiver-facing READ side of the Posted-Job chain: the open-Jobs feed across the categories a Caregiver offers (ranked recency + distance, one-off/recurring + category filters), one Job\'s detail (disclosed child bundle + approximate distance, exact street reveal-at-accept), and My Applications with the derived monthly quota. Filing/Counter/Withdraw + cap enforcement are the Application composer (OH-219).',
     },
+    {
+      name: 'notifications',
+      description:
+        'Notification registration + preferences (OH-223) — the client WRITE side of the OH-194 channel matrix: register/refresh a device Expo push token or VAPID web-push subscription (all roles), and the marketing opt-in (kept separate from transactional notifications; the four SMS-mandatory events are no-opt-out).',
+    },
     { name: 'verification', description: 'Supply verification — state + email/phone/ID-doc facts (OH-184)' },
     {
       name: 'screening',
@@ -194,6 +200,7 @@ export function buildApp(deps: AppDeps): OpenAPIHono<AppEnv> {
   registerBookingRoutes(v1);
   registerCaregiverBookingRoutes(v1);
   registerMessagingRoutes(v1);
+  registerNotificationRoutes(v1);
   registerOfferRoutes(v1);
   registerVideoCallRoutes(v1);
   registerJobRoutes(v1);

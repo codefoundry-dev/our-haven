@@ -8,6 +8,8 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { Platform } from 'react-native';
 
 import { isSupabaseConfigured, supabase } from '@/auth/supabase';
+// Platform-resolved (notifications.ts native / notifications.web.ts web).
+import { unregisterForPush } from '@/lib/notifications';
 import { isRole, type Role } from '@/lib/roles';
 
 const isWeb = Platform.OS === 'web' && typeof window !== 'undefined';
@@ -117,6 +119,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { needsConfirmation: !data.session };
       },
       async signOut() {
+        // Drop this device's push destination FIRST — the authenticated DELETE
+        // needs the still-live session (OH-223). Best-effort: a stale row is
+        // also pruned server-side when the push service reports it dead.
+        await unregisterForPush().catch(() => {});
         await supabase.auth.signOut();
       },
       async resetPassword(email) {

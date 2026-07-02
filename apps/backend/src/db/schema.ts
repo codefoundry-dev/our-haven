@@ -694,6 +694,29 @@ export interface NotificationWebPushSubscriptionsTable {
 }
 
 /**
+ * Notification preferences — one row per auth user (`uid` PK). Two tickets share
+ * the table (their migrations are order-proof — see 20260716000001):
+ *   - OH-221: best-effort CHANNEL opt-outs (`push`/`web_push`/`email`; `sms`
+ *     stored but never suppressing the mandatory-SMS event set). Missing row =
+ *     all channels on.
+ *   - OH-223: the MARKETING opt-in (`marketing_opt_in`, default false — opt-IN),
+ *     a separate consent from transactional; the transactional dispatcher's
+ *     matrix routing never reads it. `marketing_opt_in_at` stamps the consent.
+ * Service-role-only (RLS enabled); the Edge scopes reads/writes by `principal.uid`.
+ */
+export interface NotificationPreferencesTable {
+  uid: string;
+  push: ColumnType<boolean, boolean | undefined, boolean>;
+  web_push: ColumnType<boolean, boolean | undefined, boolean>;
+  email: ColumnType<boolean, boolean | undefined, boolean>;
+  sms: ColumnType<boolean, boolean | undefined, boolean>;
+  marketing_opt_in: ColumnType<boolean, boolean | undefined, boolean>;
+  marketing_opt_in_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
+  created_at: Generated<Date>;
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+}
+
+/**
  * Jobs (OH-207; CONTEXT § Job) — the canonical anchor for every Caregiver
  * Booking (ADR-0006, narrowed by ADR-0011). A **Direct-Message** Job is
  * materialised at Book-request accept, born `awarded` (skips draft/open); a
@@ -733,6 +756,10 @@ export interface JobsTable {
   service_state: string | null;
   service_postal_code: string | null;
   budget_hint_cents: number | null;
+  // The instant a posted Job stops being awardable (earliest scheduled slot start,
+  // stamped at publish; NULL for Direct-Message Jobs). Drives the OH-223 job-expiry
+  // sweeps (job_expiring_48h / job_expired_no_award).
+  expires_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
   created_at: Generated<Date>;
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
 }
@@ -849,6 +876,7 @@ export interface Database {
   notification_outbox: NotificationOutboxTable;
   notification_push_tokens: NotificationPushTokensTable;
   notification_web_push_subscriptions: NotificationWebPushSubscriptionsTable;
+  notification_preferences: NotificationPreferencesTable;
   disputes: DisputesTable;
   supply_flags: SupplyFlagsTable;
 }

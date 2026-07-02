@@ -1,17 +1,23 @@
 /** Account — identity + sign out (satisfies OH-176 "auth client logs in/out"). */
 import { useRouter, type Href } from 'expo-router';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useAuth } from '@/auth/AuthProvider';
 import { Icon } from '@/components/Icon';
 import { Screen } from '@/components/Screen';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
+import { Toggle } from '@/components/ui/Toggle';
+import { registerForPush } from '@/lib/notifications';
+import { useNotificationPrefs } from '@/lib/notificationPrefs';
 import { ROLE_CARDS } from '@/lib/roles';
 import { colors, fonts, radii, shadow } from '@/theme/tokens';
 
 export default function AccountScreen() {
   const router = useRouter();
   const { session, role, signOut } = useAuth();
+  // Marketing opt-in (OH-223) — a SEPARATE consent from transactional alerts
+  // (CONTEXT § Notifications); booking/job alerts are unaffected by this toggle.
+  const prefs = useNotificationPrefs();
   const isSupply = role === 'caregiver' || role === 'provider';
   const meta = (session?.user?.user_metadata ?? {}) as { first_name?: string; last_name?: string };
   const first = meta.first_name ?? '';
@@ -128,6 +134,46 @@ export default function AccountScreen() {
         </Pressable>
       ) : null}
 
+      {/* ── Notifications (OH-223) ─────────────────────────────────────── */}
+      <View style={styles.linkCard}>
+        <View style={styles.linkIcon}>
+          <Icon name="bell" size={18} color={colors.brand} />
+        </View>
+        <View style={styles.linkText}>
+          <Text style={styles.linkTitle}>Marketing emails</Text>
+          <Text style={styles.linkSub}>News, tips and offers — separate from booking alerts.</Text>
+        </View>
+        <Toggle
+          on={prefs.marketingOptIn}
+          onPress={
+            prefs.loading || prefs.saving
+              ? undefined
+              : () => prefs.setMarketingOptIn(!prefs.marketingOptIn)
+          }
+        />
+      </View>
+      {prefs.error ? <Text style={styles.prefsError}>{prefs.error}</Text> : null}
+
+      {Platform.OS === 'web' ? (
+        <Pressable
+          onPress={() => {
+            // User gesture — the browser allows the permission prompt here.
+            registerForPush({ interactive: true }).catch(() => {});
+          }}
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.linkCard, { opacity: pressed ? 0.85 : 1 }]}
+        >
+          <View style={styles.linkIcon}>
+            <Icon name="bell" size={18} color={colors.brand} />
+          </View>
+          <View style={styles.linkText}>
+            <Text style={styles.linkTitle}>Enable browser notifications</Text>
+            <Text style={styles.linkSub}>Get booking and job alerts in this browser.</Text>
+          </View>
+          <Icon name="chevron-right" size={20} color={colors.ink3} />
+        </Pressable>
+      ) : null}
+
       <View style={styles.spacer} />
 
       <PrimaryButton onPress={signOut}>Sign out</PrimaryButton>
@@ -181,4 +227,5 @@ const styles = StyleSheet.create({
   linkSub: { fontFamily: fonts.regular, fontSize: 13, color: colors.ink2, marginTop: 2 },
   spacer: { flex: 1 },
   note: { fontFamily: fonts.regular, fontSize: 12, color: colors.ink3, textAlign: 'center', marginTop: 12 },
+  prefsError: { fontFamily: fonts.regular, fontSize: 12, color: colors.danger, marginTop: 6, marginLeft: 4 },
 });
