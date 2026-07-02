@@ -535,10 +535,13 @@ export interface MessagesTable {
  */
 export interface MessageFlagsTable {
   id: Generated<string>;
-  // Exactly one of message_id / offer_id is set (DB-checked). offer_id covers a
-  // flagged Offer `scope_note` (OH-206; PRD story 109) in the same T&S queue.
+  // Exactly one of message_id / offer_id / application_id is set (DB-checked).
+  // offer_id covers a flagged Offer `scope_note` (OH-206; PRD story 109);
+  // application_id covers a flagged Application `proposal` (OH-219; story 98) —
+  // both share the same T&S queue.
   message_id: string | null;
   offer_id: ColumnType<string | null, string | null | undefined, string | null>;
+  application_id: ColumnType<string | null, string | null | undefined, string | null>;
   thread_id: string;
   sender_uid: string;
   categories: ColumnType<string[], string[], string[]>;
@@ -771,6 +774,9 @@ export interface ApplicationsTable {
   state: 'submitted' | 'countered' | 'awarded' | 'declined' | 'withdrawn' | 'expired';
   accepted_offer_id: string | null;
   proposal: string | null;
+  // The `proposal` free-text is stored REDACTED (disintermediation runs at write
+  // time — CONTEXT § Message); true when contact info was stripped (OH-219).
+  proposal_redacted: ColumnType<boolean, boolean | undefined, boolean>;
   awarded_at: ColumnType<Date | null, Date | string | null, Date | string | null>;
   created_at: Generated<Date>;
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>;

@@ -61,6 +61,39 @@ export function budgetLabel(budgetHintCents: number | null): string | null {
   return `$${Math.round(budgetHintCents / 100)} / hr`;
 }
 
+/**
+ * Billable hours for ONE session of a Job — the summed slot windows for a one-off,
+ * or a single occurrence's window for a recurring Job. Drives the apply composer's
+ * live "estimated per-session total" (mirrors the Edge's `offerScheduleFromJob`).
+ */
+export function opportunityHours(job: Opportunity): number {
+  if (job.scheduleKind === 'recurring' && job.recurrence) {
+    return Math.max(0, job.recurrence.endMin - job.recurrence.startMin) / 60;
+  }
+  return job.slots.reduce((sum, s) => sum + Math.max(0, s.endMin - s.startMin), 0) / 60;
+}
+
+/** Friendly copy for the apply/withdraw gate the Edge returned (ApiError.code). */
+const APPLY_ERROR_COPY: Record<string, string> = {
+  verification_not_cleared: 'Your background check must clear before you can apply.',
+  job_not_open: 'This Job is no longer open.',
+  job_not_found: 'This Job is no longer available.',
+  already_applied: 'You’ve already applied to this Job.',
+  job_application_cap_reached: 'This Job has reached its 15-application limit.',
+  monthly_cap_reached: 'You’ve used all 30 of your applications this month.',
+  rate_not_published: 'Publish your rate for this category before applying.',
+  job_incomplete: 'This Job is missing details and can’t be applied to yet.',
+  invalid_schedule: 'This Job’s schedule looks invalid.',
+  not_withdrawable: 'This application can no longer be withdrawn.',
+};
+
+export function applyErrorMessage(e: unknown): string {
+  if (e instanceof ApiError) {
+    return (e.code && APPLY_ERROR_COPY[e.code]) || e.message;
+  }
+  return 'Something went wrong. Please try again.';
+}
+
 /* ── date grouping (My Applications) ──────────────────────────────────────────── */
 
 export interface ApplicationSection {

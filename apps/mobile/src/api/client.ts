@@ -811,3 +811,24 @@ export function getOpportunity(jobId: string): Promise<Opportunity> {
 export function getMyApplications(): Promise<MyApplications> {
   return get<MyApplications>('/v1/applications');
 }
+
+// ── Caregiver apply + withdraw (OH-219) ───────────────────────────────────────
+/**
+ * File an Application (a free-text proposal + a first Offer) on an open Job, or
+ * withdraw it. The apply body's `proposedRateCents` defaults to the Caregiver's
+ * published per-category Rate and is ignored (locked to published) when they are
+ * non-negotiable (ADR-0017). Both responses echo the affected Application (the same
+ * shape as a My-Applications item). `ApiError.code` surfaces the gate that fired —
+ * verification_not_cleared / job_not_open / job_application_cap_reached /
+ * monthly_cap_reached / already_applied / rate_not_published / not_withdrawable.
+ */
+export type ApplyToJobBody = paths['/v1/opportunities/{jobId}/apply']['post']['requestBody']['content']['application/json'];
+
+export function applyToJob(jobId: string, body: ApplyToJobBody): Promise<MyApplication> {
+  return post<MyApplication>(`/v1/opportunities/${jobId}/apply`, body);
+}
+
+/** Withdraw my Application on a Job (submitted / countered → withdrawn). */
+export function withdrawApplication(jobId: string): Promise<MyApplication> {
+  return post<MyApplication>(`/v1/opportunities/${jobId}/withdraw`, undefined);
+}

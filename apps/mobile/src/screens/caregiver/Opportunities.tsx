@@ -13,9 +13,9 @@
  */
 import { useState } from 'react';
 import { useRouter } from 'expo-router';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import type { MyApplication, Opportunity, OpportunityCategory } from '@/api/client';
+import { withdrawApplication, type MyApplication, type Opportunity, type OpportunityCategory } from '@/api/client';
 import { AppBar } from '@/components/AppBar';
 import { Icon } from '@/components/Icon';
 import { Screen } from '@/components/Screen';
@@ -25,6 +25,7 @@ import { SearchBar } from '@/components/ui/SearchBar';
 import { TabStrip } from '@/components/ui/TabStrip';
 import { applicationStatusStyle, categoryChip, jobScheduleLabel, jobStatusStyle } from '@/lib/jobsHub';
 import {
+  applyErrorMessage,
   budgetLabel,
   childSummary,
   distanceLabel,
@@ -62,6 +63,7 @@ export function CaregiverOpportunities() {
   const [query, setQuery] = useState('');
   const [scheduleFilter, setScheduleFilter] = useState<'any' | 'one-off' | 'recurring'>('any');
   const [categoryFilter, setCategoryFilter] = useState<'all' | OpportunityCategory>('all');
+  const [withdrawingId, setWithdrawingId] = useState<string | null>(null);
   const { loading: activationLoading, activated, verification, blockingStep } = useSupplyActivation();
 
   // Hooks run unconditionally (Rules of Hooks); `activated` gates the fetch so an
@@ -75,6 +77,30 @@ export function CaregiverOpportunities() {
     activated,
   );
   const apps = useMyApplications(activated);
+
+  // Withdraw my Application (submitted / countered) — confirm, then refetch so the
+  // list + N/30 quota reflect it. Withdrawing frees the Job's slot but not the
+  // monthly allowance (it was consumed at filing — OH-219).
+  const handleWithdraw = (app: MyApplication) => {
+    Alert.alert(
+      'Withdraw application?',
+      'This removes your application from the Parent’s list. It won’t give back this month’s application allowance.',
+      [
+        { text: 'Keep it', style: 'cancel' },
+        {
+          text: 'Withdraw',
+          style: 'destructive',
+          onPress: () => {
+            setWithdrawingId(app.id);
+            withdrawApplication(app.job.id)
+              .then(() => apps.refetch())
+              .catch((e: unknown) => Alert.alert('Couldn’t withdraw', applyErrorMessage(e)))
+              .finally(() => setWithdrawingId(null));
+          },
+        },
+      ],
+    );
+  };
 
   // Pre-activation (PRD story 83): until verification clears, a Caregiver can't
   // browse Jobs — swap the feed for the empty state naming the blocking step.
@@ -224,6 +250,8 @@ export function CaregiverOpportunities() {
                     key={a.id}
                     app={a}
                     onPress={() => router.push({ pathname: '/job-detail', params: { jobId: a.job.id } })}
+                    onWithdraw={() => handleWithdraw(a)}
+                    withdrawing={withdrawingId === a.id}
                   />
                 ))}
               </View>
@@ -294,7 +322,19 @@ function OpportunityCard({ job, onPress }: { job: Opportunity; onPress: () => vo
   );
 }
 
-function ApplicationRow({ app, onPress }: { app: MyApplication; onPress: () => void }) {
+function ApplicationRow({
+  app,
+  onPress,
+  onWithdraw,
+  withdrawing,
+}: {
+  app: MyApplication;
+  onPress: () => void;
+  onWithdraw: () => void;
+  withdrawing: boolean;
+}) {
+  // Withdraw is only offered while the Application is still open (story 101).
+  const canWithdraw = app.state === 'submitted' || app.state === 'countered';
   return (
     <Pressable onPress={onPress} style={styles.appRow}>
       <View style={styles.appAvatar}>
@@ -305,9 +345,20 @@ function ApplicationRow({ app, onPress }: { app: MyApplication; onPress: () => v
           {app.job.description}
         </Text>
         <Text style={styles.appSub}>{jobScheduleLabel(app.job)}</Text>
-        <View style={styles.chipWrap}>
-          <Chip label={`Job · ${jobStatusStyle(app.job.state).label}`} tone="neutral" />
-          <StatusPill label={`You · ${applicationStatusStyle(app.state).label}`} state={app.state} />
+        <View style={styles.appFoot}>
+          <View style={styles.chipWrap}>
+            <Chip label={`Job · ${jobStatusStyle(app.job.state).label}`} tone="neutral" />
+            <StatusPill label={`You · ${applicationStatusStyle(app.state).label}`} state={app.state} />
+          </View>
+          {canWithdraw ? (
+            <Pressable onPress={onWithdraw} disabled={withdrawing} hitSlop={8} style={styles.withdrawBtn}>
+              {withdrawing ? (
+                <ActivityIndicator size="small" color={colors.danger} />
+              ) : (
+                <Text style={styles.withdrawText}>Withdraw</Text>
+              )}
+            </Pressable>
+          ) : null}
         </View>
       </View>
     </Pressable>
@@ -371,4 +422,7 @@ const styles = StyleSheet.create({
   appAvatar: { width: 40, height: 40, borderRadius: radii.pill, backgroundColor: colors.monoGray, alignItems: 'center', justifyContent: 'center' },
   appTitle: { fontFamily: fonts.semibold, fontSize: 14, color: colors.ink },
   appSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.ink2, marginTop: 2, marginBottom: 8 },
+  appFoot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  withdrawBtn: { paddingHorizontal: 10, paddingVertical: 4 },
+  withdrawText: { fontFamily: fonts.semibold, fontSize: 12, color: colors.danger },
 });

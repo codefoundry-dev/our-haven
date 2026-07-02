@@ -7073,6 +7073,173 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/opportunities/{jobId}/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * File an Application + first Offer on an open Job — OH-219
+         * @description The authenticated Caregiver files an Application on an open posted Job in one of their categories: a free-text proposal + a first caregiver Offer (rate defaults to the published per-category Rate; locked to it when non-negotiable — ADR-0017). Atomically creates the Application (`submitted`), a companion job-anchored thread, and the first Offer (`pending`). Gated on Verification `cleared` (403), the per-Job 15-cap + the 30/month cap (409), and one Application per Job (409 on a repeat). The proposal + Offer note are redacted at write. Never Subscription-gated (Caregiver-sent).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ApplyToJobRequest"];
+                };
+            };
+            responses: {
+                /** @description The filed Application */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MyApplicationItem"];
+                    };
+                };
+                /** @description Invalid body / the Job schedule has no billable time */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityError"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityError"];
+                    };
+                };
+                /** @description Wrong role, or Verification not cleared */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityError"];
+                    };
+                };
+                /** @description Supply row / Job not found (or not in one of your categories) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityError"];
+                    };
+                };
+                /** @description Job not open, already applied, a cap was reached, or no published Rate */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/opportunities/{jobId}/withdraw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Withdraw my Application on a Job — OH-219
+         * @description The Caregiver withdraws their own still-open Application (submitted / countered → withdrawn) before the Parent awards or declines, sealing the live pending Offer. Frees a per-Job 15-cap slot; does NOT refund the monthly allowance (filing consumes one). 409 if the Application is already terminal (awarded / declined / withdrawn / expired).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The withdrawn Application */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MyApplicationItem"];
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityError"];
+                    };
+                };
+                /** @description Wrong role */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityError"];
+                    };
+                };
+                /** @description Supply row / Application not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityError"];
+                    };
+                };
+                /** @description Application is no longer withdrawable (terminal state) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OpportunityError"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/providers/contact-us": {
         parameters: {
             query?: never;
@@ -9194,6 +9361,11 @@ export interface components {
             cap: number;
             remaining: number;
             periodYearMonth: string;
+        };
+        ApplyToJobRequest: {
+            proposal: string;
+            proposedRateCents?: number;
+            scopeNote?: string;
         };
         ContactUsResponse: {
             id: string;
